@@ -1,0 +1,812 @@
+{
+  "source_tarball": "unpacked/package/etc/rules/emerging.rules.tar.gz",
+  "source_version_txt": "9840",
+  "tarball_mtime": "2021-09-09",
+  "custom_rule_file": "unpacked/package/etc/rules/syno-custom-events.rules",
+  "catalog_csv": "docs/data/bundled-alerts.csv",
+  "extracted_dir": "extracted/emerging-rules/rules",
+  "parse_errors": [],
+  "totals": {
+    "parsed_rules": 33723,
+    "active": 23029,
+    "commented_out": 10694,
+    "unique_sids_active": 23029,
+    "unique_sids_all": 33723,
+    "duplicate_sids_across_files": 0,
+    "noalert": 1,
+    "with_cve_ref": 4234,
+    "unique_cves": 983
+  },
+  "by_action_active": {
+    "alert": 23028,
+    "pass": 1
+  },
+  "by_proto_active": {
+    "http": 14794,
+    "tcp": 3338,
+    "dns": 2639,
+    "tls": 1346,
+    "udp": 371,
+    "ip": 267,
+    "smtp": 101,
+    "ftp": 59,
+    "icmp": 47,
+    "smb": 37,
+    "tcp-pkt": 27,
+    "ssh": 3
+  },
+  "by_severity_active": {
+    "high": 17791,
+    "medium": 4444,
+    "low": 794
+  },
+  "by_classtype_active": {
+    "web-application-attack": 5307,
+    "trojan-activity": 3822,
+    "command-and-control": 2860,
+    "misc-attack": 1335,
+    "bad-unknown": 1099,
+    "credential-theft": 1027,
+    "attempted-admin": 1014,
+    "targeted-activity": 945,
+    "domain-c2": 912,
+    "attempted-user": 850,
+    "social-engineering": 800,
+    "pup-activity": 558,
+    "policy-violation": 542,
+    "exploit-kit": 402,
+    "protocol-command-decode": 317,
+    "misc-activity": 267,
+    "attempted-recon": 259,
+    "unknown": 119,
+    "attempted-dos": 91,
+    "external-ip-check": 74,
+    "web-application-activity": 69,
+    "shellcode-detect": 67,
+    "not-suspicious": 63,
+    "rpc-portmap-decode": 60,
+    "coin-mining": 44,
+    "successful-admin": 25,
+    "network-scan": 18,
+    "suspicious-login": 13,
+    "denial-of-service": 12,
+    "successful-recon-limited": 11,
+    "unsuccessful-user": 11,
+    "string-detect": 10,
+    "suspicious-filename-detect": 10,
+    "successful-user": 7,
+    "default-login-attempt": 5,
+    "non-standard-protocol": 2,
+    "system-call-detect": 1,
+    "successful-recon-largescale": 1
+  },
+  "by_license_active": {
+    "BSD (Emerging Threats)": 23028,
+    "Synology custom": 1
+  },
+  "by_sid_family_active": {
+    "et-legacy": 20824,
+    "et-other": 1120,
+    "et-gpl-converted": 916,
+    "et-open": 168,
+    "synology-custom": 1
+  },
+  "synology_policy_on_active": {
+    "default_drop": 11103,
+    "default_alert": 11054,
+    "disabled_class": 872
+  },
+  "synology_drop_by_classtype": {
+    "web-application-attack": 5307,
+    "trojan-activity": 3822,
+    "attempted-admin": 1014,
+    "attempted-user": 850,
+    "shellcode-detect": 67,
+    "successful-admin": 25,
+    "unsuccessful-user": 11,
+    "successful-user": 7
+  },
+  "synology_disabled_by_classtype": {
+    "policy-violation": 542,
+    "misc-activity": 267,
+    "not-suspicious": 63
+  },
+  "by_file": [
+    {
+      "file": "emerging-malware.rules",
+      "active": 7168,
+      "commented": 2468,
+      "drop": 0,
+      "pass": 0,
+      "alert": 7168,
+      "total": 9636
+    },
+    {
+      "file": "emerging-web_specific_apps.rules",
+      "active": 4848,
+      "commented": 748,
+      "drop": 0,
+      "pass": 0,
+      "alert": 4848,
+      "total": 5596
+    },
+    {
+      "file": "emerging-deleted.rules",
+      "active": 0,
+      "commented": 3267,
+      "drop": 0,
+      "pass": 0,
+      "alert": 0,
+      "total": 3267
+    },
+    {
+      "file": "emerging-phishing.rules",
+      "active": 1807,
+      "commented": 101,
+      "drop": 0,
+      "pass": 0,
+      "alert": 1807,
+      "total": 1908
+    },
+    {
+      "file": "emerging-exploit.rules",
+      "active": 1114,
+      "commented": 298,
+      "drop": 0,
+      "pass": 0,
+      "alert": 1114,
+      "total": 1412
+    },
+    {
+      "file": "emerging-exploit_kit.rules",
+      "active": 403,
+      "commented": 800,
+      "drop": 0,
+      "pass": 0,
+      "alert": 403,
+      "total": 1203
+    },
+    {
+      "file": "emerging-adware_pup.rules",
+      "active": 555,
+      "commented": 585,
+      "drop": 0,
+      "pass": 0,
+      "alert": 555,
+      "total": 1140
+    },
+    {
+      "file": "emerging-policy.rules",
+      "active": 806,
+      "commented": 327,
+      "drop": 0,
+      "pass": 0,
+      "alert": 806,
+      "total": 1133
+    },
+    {
+      "file": "tor.rules",
+      "active": 1044,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 1044,
+      "total": 1044
+    },
+    {
+      "file": "emerging-web_client.rules",
+      "active": 516,
+      "commented": 286,
+      "drop": 0,
+      "pass": 0,
+      "alert": 516,
+      "total": 802
+    },
+    {
+      "file": "emerging-mobile_malware.rules",
+      "active": 685,
+      "commented": 76,
+      "drop": 0,
+      "pass": 0,
+      "alert": 685,
+      "total": 761
+    },
+    {
+      "file": "emerging-web_server.rules",
+      "active": 631,
+      "commented": 106,
+      "drop": 0,
+      "pass": 0,
+      "alert": 631,
+      "total": 737
+    },
+    {
+      "file": "emerging-info.rules",
+      "active": 622,
+      "commented": 46,
+      "drop": 0,
+      "pass": 0,
+      "alert": 622,
+      "total": 668
+    },
+    {
+      "file": "emerging-activex.rules",
+      "active": 185,
+      "commented": 348,
+      "drop": 0,
+      "pass": 0,
+      "alert": 185,
+      "total": 533
+    },
+    {
+      "file": "emerging-netbios.rules",
+      "active": 392,
+      "commented": 82,
+      "drop": 0,
+      "pass": 0,
+      "alert": 392,
+      "total": 474
+    },
+    {
+      "file": "emerging-hunting.rules",
+      "active": 355,
+      "commented": 31,
+      "drop": 0,
+      "pass": 0,
+      "alert": 355,
+      "total": 386
+    },
+    {
+      "file": "emerging-scan.rules",
+      "active": 281,
+      "commented": 74,
+      "drop": 0,
+      "pass": 0,
+      "alert": 281,
+      "total": 355
+    },
+    {
+      "file": "emerging-sql.rules",
+      "active": 191,
+      "commented": 120,
+      "drop": 0,
+      "pass": 0,
+      "alert": 191,
+      "total": 311
+    },
+    {
+      "file": "emerging-user_agents.rules",
+      "active": 242,
+      "commented": 50,
+      "drop": 0,
+      "pass": 0,
+      "alert": 242,
+      "total": 292
+    },
+    {
+      "file": "emerging-attack_response.rules",
+      "active": 120,
+      "commented": 98,
+      "drop": 0,
+      "pass": 0,
+      "alert": 120,
+      "total": 218
+    },
+    {
+      "file": "emerging-current_events.rules",
+      "active": 42,
+      "commented": 147,
+      "drop": 0,
+      "pass": 0,
+      "alert": 42,
+      "total": 189
+    },
+    {
+      "file": "emerging-shellcode.rules",
+      "active": 62,
+      "commented": 124,
+      "drop": 0,
+      "pass": 0,
+      "alert": 62,
+      "total": 186
+    },
+    {
+      "file": "emerging-ja3.rules",
+      "active": 128,
+      "commented": 5,
+      "drop": 0,
+      "pass": 0,
+      "alert": 128,
+      "total": 133
+    },
+    {
+      "file": "emerging-p2p.rules",
+      "active": 88,
+      "commented": 31,
+      "drop": 0,
+      "pass": 0,
+      "alert": 88,
+      "total": 119
+    },
+    {
+      "file": "emerging-rpc.rules",
+      "active": 83,
+      "commented": 34,
+      "drop": 0,
+      "pass": 0,
+      "alert": 83,
+      "total": 117
+    },
+    {
+      "file": "emerging-ftp.rules",
+      "active": 57,
+      "commented": 58,
+      "drop": 0,
+      "pass": 0,
+      "alert": 57,
+      "total": 115
+    },
+    {
+      "file": "emerging-dos.rules",
+      "active": 66,
+      "commented": 45,
+      "drop": 0,
+      "pass": 0,
+      "alert": 66,
+      "total": 111
+    },
+    {
+      "file": "ciarmy.rules",
+      "active": 100,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 100,
+      "total": 100
+    },
+    {
+      "file": "emerging-chat.rules",
+      "active": 70,
+      "commented": 20,
+      "drop": 0,
+      "pass": 0,
+      "alert": 70,
+      "total": 90
+    },
+    {
+      "file": "emerging-games.rules",
+      "active": 13,
+      "commented": 66,
+      "drop": 0,
+      "pass": 0,
+      "alert": 13,
+      "total": 79
+    },
+    {
+      "file": "emerging-icmp_info.rules",
+      "active": 14,
+      "commented": 52,
+      "drop": 0,
+      "pass": 0,
+      "alert": 14,
+      "total": 66
+    },
+    {
+      "file": "emerging-misc.rules",
+      "active": 21,
+      "commented": 41,
+      "drop": 0,
+      "pass": 0,
+      "alert": 21,
+      "total": 62
+    },
+    {
+      "file": "compromised.rules",
+      "active": 56,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 56,
+      "total": 56
+    },
+    {
+      "file": "emerging-dns.rules",
+      "active": 32,
+      "commented": 17,
+      "drop": 0,
+      "pass": 0,
+      "alert": 32,
+      "total": 49
+    },
+    {
+      "file": "drop.rules",
+      "active": 42,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 42,
+      "total": 42
+    },
+    {
+      "file": "emerging-icmp.rules",
+      "active": 0,
+      "commented": 39,
+      "drop": 0,
+      "pass": 0,
+      "alert": 0,
+      "total": 39
+    },
+    {
+      "file": "emerging-imap.rules",
+      "active": 17,
+      "commented": 16,
+      "drop": 0,
+      "pass": 0,
+      "alert": 17,
+      "total": 33
+    },
+    {
+      "file": "emerging-snmp.rules",
+      "active": 16,
+      "commented": 17,
+      "drop": 0,
+      "pass": 0,
+      "alert": 16,
+      "total": 33
+    },
+    {
+      "file": "botcc.rules",
+      "active": 25,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 25,
+      "total": 25
+    },
+    {
+      "file": "emerging-coinminer.rules",
+      "active": 22,
+      "commented": 3,
+      "drop": 0,
+      "pass": 0,
+      "alert": 22,
+      "total": 25
+    },
+    {
+      "file": "emerging-inappropriate.rules",
+      "active": 1,
+      "commented": 24,
+      "drop": 0,
+      "pass": 0,
+      "alert": 1,
+      "total": 25
+    },
+    {
+      "file": "emerging-smtp.rules",
+      "active": 14,
+      "commented": 9,
+      "drop": 0,
+      "pass": 0,
+      "alert": 14,
+      "total": 23
+    },
+    {
+      "file": "emerging-voip.rules",
+      "active": 16,
+      "commented": 5,
+      "drop": 0,
+      "pass": 0,
+      "alert": 16,
+      "total": 21
+    },
+    {
+      "file": "3coresec.rules",
+      "active": 20,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 20,
+      "total": 20
+    },
+    {
+      "file": "emerging-pop3.rules",
+      "active": 9,
+      "commented": 11,
+      "drop": 0,
+      "pass": 0,
+      "alert": 9,
+      "total": 20
+    },
+    {
+      "file": "emerging-tftp.rules",
+      "active": 13,
+      "commented": 7,
+      "drop": 0,
+      "pass": 0,
+      "alert": 13,
+      "total": 20
+    },
+    {
+      "file": "emerging-worm.rules",
+      "active": 9,
+      "commented": 10,
+      "drop": 0,
+      "pass": 0,
+      "alert": 9,
+      "total": 19
+    },
+    {
+      "file": "emerging-scada.rules",
+      "active": 18,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 18,
+      "total": 18
+    },
+    {
+      "file": "emerging-telnet.rules",
+      "active": 8,
+      "commented": 2,
+      "drop": 0,
+      "pass": 0,
+      "alert": 8,
+      "total": 10
+    },
+    {
+      "file": "dshield.rules",
+      "active": 1,
+      "commented": 0,
+      "drop": 0,
+      "pass": 0,
+      "alert": 1,
+      "total": 1
+    },
+    {
+      "file": "syno-custom-events.rules",
+      "active": 1,
+      "commented": 0,
+      "drop": 0,
+      "pass": 1,
+      "alert": 0,
+      "total": 1
+    }
+  ],
+  "top_msg_prefixes": {
+    "ET MALWARE": 7168,
+    "ET WEB_SPECIFIC_APPS": 4847,
+    "ET PHISHING": 1807,
+    "ET EXPLOIT": 1076,
+    "ET TOR": 1044,
+    "ET POLICY": 800,
+    "ET MOBILE_MALWARE": 685,
+    "ET INFO": 622,
+    "ET WEB_SERVER": 605,
+    "ET ADWARE_PUP": 555,
+    "ET WEB_CLIENT": 516,
+    "ET EXPLOIT_KIT": 403,
+    "GPL NETBIOS": 356,
+    "ET HUNTING": 355,
+    "ET SCAN": 269,
+    "ET USER_AGENTS": 242,
+    "GPL SQL": 190,
+    "ET ACTIVEX": 185,
+    "ET JA3": 128,
+    "ET ATTACK_RESPONSE": 109,
+    "ET CINS": 100,
+    "ET P2P": 83,
+    "GPL RPC": 82,
+    "ET DOS": 66,
+    "ET COMPROMISED": 56,
+    "GPL FTP": 49,
+    "ET SHELLCODE": 48,
+    "ET DROP": 43,
+    "ET CHAT": 42,
+    "ET CURRENT_EVENTS": 42,
+    "GPL EXPLOIT": 38,
+    "ET NETBIOS": 36,
+    "GPL CHAT": 28,
+    "ET DNS": 26,
+    "GPL WEB_SERVER": 26,
+    "ET CNC": 25,
+    "ET COINMINER": 22,
+    "GPL MISC": 21,
+    "ET 3CORESec": 20,
+    "ET SCADA": 18
+  },
+  "sid_range_active": {
+    "min": 1,
+    "max": 2525019
+  },
+  "commented_by_file": [
+    {
+      "file": "emerging-deleted.rules",
+      "commented": 3267
+    },
+    {
+      "file": "emerging-malware.rules",
+      "commented": 2468
+    },
+    {
+      "file": "emerging-exploit_kit.rules",
+      "commented": 800
+    },
+    {
+      "file": "emerging-web_specific_apps.rules",
+      "commented": 748
+    },
+    {
+      "file": "emerging-adware_pup.rules",
+      "commented": 585
+    },
+    {
+      "file": "emerging-activex.rules",
+      "commented": 348
+    },
+    {
+      "file": "emerging-policy.rules",
+      "commented": 327
+    },
+    {
+      "file": "emerging-exploit.rules",
+      "commented": 298
+    },
+    {
+      "file": "emerging-web_client.rules",
+      "commented": 286
+    },
+    {
+      "file": "emerging-current_events.rules",
+      "commented": 147
+    },
+    {
+      "file": "emerging-shellcode.rules",
+      "commented": 124
+    },
+    {
+      "file": "emerging-sql.rules",
+      "commented": 120
+    },
+    {
+      "file": "emerging-web_server.rules",
+      "commented": 106
+    },
+    {
+      "file": "emerging-phishing.rules",
+      "commented": 101
+    },
+    {
+      "file": "emerging-attack_response.rules",
+      "commented": 98
+    },
+    {
+      "file": "emerging-netbios.rules",
+      "commented": 82
+    },
+    {
+      "file": "emerging-mobile_malware.rules",
+      "commented": 76
+    },
+    {
+      "file": "emerging-scan.rules",
+      "commented": 74
+    },
+    {
+      "file": "emerging-games.rules",
+      "commented": 66
+    },
+    {
+      "file": "emerging-ftp.rules",
+      "commented": 58
+    },
+    {
+      "file": "emerging-icmp_info.rules",
+      "commented": 52
+    },
+    {
+      "file": "emerging-user_agents.rules",
+      "commented": 50
+    },
+    {
+      "file": "emerging-info.rules",
+      "commented": 46
+    },
+    {
+      "file": "emerging-dos.rules",
+      "commented": 45
+    },
+    {
+      "file": "emerging-misc.rules",
+      "commented": 41
+    },
+    {
+      "file": "emerging-icmp.rules",
+      "commented": 39
+    },
+    {
+      "file": "emerging-rpc.rules",
+      "commented": 34
+    },
+    {
+      "file": "emerging-hunting.rules",
+      "commented": 31
+    },
+    {
+      "file": "emerging-p2p.rules",
+      "commented": 31
+    },
+    {
+      "file": "emerging-inappropriate.rules",
+      "commented": 24
+    },
+    {
+      "file": "emerging-chat.rules",
+      "commented": 20
+    },
+    {
+      "file": "emerging-dns.rules",
+      "commented": 17
+    },
+    {
+      "file": "emerging-snmp.rules",
+      "commented": 17
+    },
+    {
+      "file": "emerging-imap.rules",
+      "commented": 16
+    },
+    {
+      "file": "emerging-pop3.rules",
+      "commented": 11
+    },
+    {
+      "file": "emerging-worm.rules",
+      "commented": 10
+    },
+    {
+      "file": "emerging-smtp.rules",
+      "commented": 9
+    },
+    {
+      "file": "emerging-tftp.rules",
+      "commented": 7
+    },
+    {
+      "file": "emerging-ja3.rules",
+      "commented": 5
+    },
+    {
+      "file": "emerging-voip.rules",
+      "commented": 5
+    },
+    {
+      "file": "emerging-coinminer.rules",
+      "commented": 3
+    },
+    {
+      "file": "emerging-telnet.rules",
+      "commented": 2
+    }
+  ],
+  "custom_rules": [
+    {
+      "sid": 1,
+      "action": "pass",
+      "msg": "pass traffic to Google Voice server for rule sid:2033078",
+      "classtype": "attempted-user",
+      "file": "syno-custom-events.rules"
+    }
+  ],
+  "threshold_overrides": [
+    {
+      "sid": 2101411,
+      "reason": "GPL SNMP public access udp flood",
+      "limit": "1 / 60s by_dst"
+    },
+    {
+      "sid": 2013504,
+      "reason": "ET POLICY GNU/Linux APT User-Agent",
+      "limit": "1 / 60s by_src"
+    }
+  ]
+}

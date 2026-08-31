@@ -1,0 +1,660 @@
+{
+  "source_tarball": "unpacked/package/etc/rules/emerging.rules.tar.gz",
+  "et_open_version": "9840",
+  "ruleset_tree": "suricata-5.0",
+  "parsed_rule_lines": 33715,
+  "unique_sids": 33715,
+  "duplicate_sid_rows": 0,
+  "active_in_file": 23027,
+  "commented_or_deleted": 10688,
+  "action_in_file": {
+    "alert": 23026,
+    "pass": 1
+  },
+  "protocol": {
+    "http": 14792,
+    "tcp": 3338,
+    "dns": 2639,
+    "tls": 1346,
+    "udp": 371,
+    "ip": 267,
+    "smtp": 101,
+    "ftp": 59,
+    "icmp": 47,
+    "smb": 37,
+    "tcp-pkt": 27,
+    "ssh": 3
+  },
+  "family": {
+    "et-open": 20822,
+    "et-iplist": 1288,
+    "gpl": 916,
+    "synology": 1
+  },
+  "license": {
+    "BSD (Emerging Threats)": 22110,
+    "GPLv2 (ET-GPL)": 916,
+    "Synology custom": 1
+  },
+  "classtype": {
+    "web-application-attack": 5307,
+    "trojan-activity": 3821,
+    "command-and-control": 2860,
+    "misc-attack": 1335,
+    "bad-unknown": 1099,
+    "credential-theft": 1027,
+    "attempted-admin": 1014,
+    "targeted-activity": 945,
+    "domain-c2": 912,
+    "attempted-user": 850,
+    "social-engineering": 799,
+    "pup-activity": 558,
+    "policy-violation": 542,
+    "exploit-kit": 402,
+    "protocol-command-decode": 317,
+    "misc-activity": 267,
+    "attempted-recon": 259,
+    "unknown": 119,
+    "attempted-dos": 91,
+    "external-ip-check": 74,
+    "web-application-activity": 69,
+    "shellcode-detect": 67,
+    "not-suspicious": 63,
+    "rpc-portmap-decode": 60,
+    "coin-mining": 44,
+    "successful-admin": 25,
+    "network-scan": 18,
+    "suspicious-login": 13,
+    "denial-of-service": 12,
+    "successful-recon-limited": 11,
+    "unsuccessful-user": 11,
+    "string-detect": 10,
+    "suspicious-filename-detect": 10,
+    "successful-user": 7,
+    "default-login-attempt": 5,
+    "non-standard-protocol": 2,
+    "system-call-detect": 1,
+    "successful-recon-largescale": 1
+  },
+  "severity": {
+    "high": 17790,
+    "medium": 4443,
+    "low": 794
+  },
+  "signature_severity_meta": {
+    "Major": 11492,
+    "(none)": 7362,
+    "Critical": 1632,
+    "Audit": 1044,
+    "Minor": 941,
+    "Informational": 556
+  },
+  "syno_runtime": {
+    "would_drop": 11101,
+    "would_alert": 11053,
+    "class_disabled": 872,
+    "noalert": 1
+  },
+  "cve": {
+    "active_rules_with_cve": 4233,
+    "unique_cve_ids": 982
+  },
+  "created_year": {
+    "2008": 1044,
+    "2010": 6379,
+    "2011": 1188,
+    "2012": 891,
+    "2013": 1160,
+    "2014": 1183,
+    "2015": 1410,
+    "2016": 1528,
+    "2017": 1141,
+    "2018": 1492,
+    "2019": 1887,
+    "2020": 2178,
+    "2021": 1542
+  },
+  "updated_year": {
+    "2010": 1005,
+    "2011": 94,
+    "2012": 101,
+    "2013": 320,
+    "2014": 260,
+    "2015": 219,
+    "2016": 648,
+    "2017": 377,
+    "2018": 398,
+    "2019": 1151,
+    "2020": 15480,
+    "2021": 2968
+  },
+  "by_file": [
+    {
+      "file": "emerging-malware.rules",
+      "active": 7168,
+      "syno_drop": 2889,
+      "syno_class_disabled": 12,
+      "with_cve": 19,
+      "high": 7106,
+      "medium": 53,
+      "low": 9
+    },
+    {
+      "file": "emerging-web_specific_apps.rules",
+      "active": 4847,
+      "syno_drop": 4827,
+      "syno_class_disabled": 0,
+      "with_cve": 3252,
+      "high": 4827,
+      "medium": 20,
+      "low": 0
+    },
+    {
+      "file": "emerging-phishing.rules",
+      "active": 1806,
+      "syno_drop": 32,
+      "syno_class_disabled": 17,
+      "with_cve": 0,
+      "high": 1074,
+      "medium": 730,
+      "low": 2
+    },
+    {
+      "file": "emerging-exploit.rules",
+      "active": 1114,
+      "syno_drop": 1025,
+      "syno_class_disabled": 11,
+      "with_cve": 452,
+      "high": 1029,
+      "medium": 74,
+      "low": 11
+    },
+    {
+      "file": "tor.rules",
+      "active": 1044,
+      "syno_drop": 0,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 0,
+      "medium": 1044,
+      "low": 0
+    },
+    {
+      "file": "emerging-policy.rules",
+      "active": 806,
+      "syno_drop": 79,
+      "syno_class_disabled": 388,
+      "with_cve": 10,
+      "high": 403,
+      "medium": 330,
+      "low": 73
+    },
+    {
+      "file": "emerging-mobile_malware.rules",
+      "active": 685,
+      "syno_drop": 243,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 685,
+      "medium": 0,
+      "low": 0
+    },
+    {
+      "file": "emerging-web_server.rules",
+      "active": 631,
+      "syno_drop": 494,
+      "syno_class_disabled": 3,
+      "with_cve": 69,
+      "high": 498,
+      "medium": 129,
+      "low": 4
+    },
+    {
+      "file": "emerging-info.rules",
+      "active": 622,
+      "syno_drop": 86,
+      "syno_class_disabled": 113,
+      "with_cve": 4,
+      "high": 112,
+      "medium": 380,
+      "low": 130
+    },
+    {
+      "file": "emerging-adware_pup.rules",
+      "active": 555,
+      "syno_drop": 2,
+      "syno_class_disabled": 2,
+      "with_cve": 0,
+      "high": 8,
+      "medium": 547,
+      "low": 0
+    },
+    {
+      "file": "emerging-web_client.rules",
+      "active": 516,
+      "syno_drop": 331,
+      "syno_class_disabled": 15,
+      "with_cve": 99,
+      "high": 360,
+      "medium": 139,
+      "low": 17
+    },
+    {
+      "file": "emerging-exploit_kit.rules",
+      "active": 403,
+      "syno_drop": 1,
+      "syno_class_disabled": 0,
+      "with_cve": 7,
+      "high": 398,
+      "medium": 5,
+      "low": 0
+    },
+    {
+      "file": "emerging-netbios.rules",
+      "active": 392,
+      "syno_drop": 113,
+      "syno_class_disabled": 0,
+      "with_cve": 184,
+      "high": 113,
+      "medium": 19,
+      "low": 260
+    },
+    {
+      "file": "emerging-hunting.rules",
+      "active": 355,
+      "syno_drop": 88,
+      "syno_class_disabled": 67,
+      "with_cve": 1,
+      "high": 101,
+      "medium": 192,
+      "low": 62
+    },
+    {
+      "file": "emerging-scan.rules",
+      "active": 281,
+      "syno_drop": 77,
+      "syno_class_disabled": 27,
+      "with_cve": 4,
+      "high": 77,
+      "medium": 160,
+      "low": 44
+    },
+    {
+      "file": "emerging-user_agents.rules",
+      "active": 242,
+      "syno_drop": 149,
+      "syno_class_disabled": 19,
+      "with_cve": 0,
+      "high": 157,
+      "medium": 69,
+      "low": 16
+    },
+    {
+      "file": "emerging-sql.rules",
+      "active": 191,
+      "syno_drop": 186,
+      "syno_class_disabled": 0,
+      "with_cve": 6,
+      "high": 186,
+      "medium": 2,
+      "low": 3
+    },
+    {
+      "file": "emerging-activex.rules",
+      "active": 185,
+      "syno_drop": 183,
+      "syno_class_disabled": 0,
+      "with_cve": 8,
+      "high": 185,
+      "medium": 0,
+      "low": 0
+    },
+    {
+      "file": "emerging-ja3.rules",
+      "active": 128,
+      "syno_drop": 1,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 6,
+      "medium": 9,
+      "low": 113
+    },
+    {
+      "file": "emerging-attack_response.rules",
+      "active": 120,
+      "syno_drop": 47,
+      "syno_class_disabled": 2,
+      "with_cve": 1,
+      "high": 48,
+      "medium": 59,
+      "low": 13
+    },
+    {
+      "file": "ciarmy.rules",
+      "active": 100,
+      "syno_drop": 0,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 0,
+      "medium": 100,
+      "low": 0
+    },
+    {
+      "file": "emerging-p2p.rules",
+      "active": 88,
+      "syno_drop": 8,
+      "syno_class_disabled": 80,
+      "with_cve": 0,
+      "high": 88,
+      "medium": 0,
+      "low": 0
+    },
+    {
+      "file": "emerging-rpc.rules",
+      "active": 83,
+      "syno_drop": 12,
+      "syno_class_disabled": 0,
+      "with_cve": 34,
+      "high": 12,
+      "medium": 71,
+      "low": 0
+    },
+    {
+      "file": "emerging-chat.rules",
+      "active": 70,
+      "syno_drop": 1,
+      "syno_class_disabled": 69,
+      "with_cve": 0,
+      "high": 60,
+      "medium": 0,
+      "low": 10
+    },
+    {
+      "file": "emerging-dos.rules",
+      "active": 66,
+      "syno_drop": 5,
+      "syno_class_disabled": 1,
+      "with_cve": 11,
+      "high": 5,
+      "medium": 60,
+      "low": 1
+    },
+    {
+      "file": "emerging-shellcode.rules",
+      "active": 62,
+      "syno_drop": 60,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 60,
+      "medium": 2,
+      "low": 0
+    },
+    {
+      "file": "emerging-ftp.rules",
+      "active": 57,
+      "syno_drop": 31,
+      "syno_class_disabled": 2,
+      "with_cve": 30,
+      "high": 31,
+      "medium": 20,
+      "low": 6
+    },
+    {
+      "file": "compromised.rules",
+      "active": 56,
+      "syno_drop": 0,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 0,
+      "medium": 56,
+      "low": 0
+    },
+    {
+      "file": "drop.rules",
+      "active": 42,
+      "syno_drop": 0,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 0,
+      "medium": 42,
+      "low": 0
+    },
+    {
+      "file": "emerging-current_events.rules",
+      "active": 42,
+      "syno_drop": 42,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 42,
+      "medium": 0,
+      "low": 0
+    },
+    {
+      "file": "emerging-dns.rules",
+      "active": 32,
+      "syno_drop": 9,
+      "syno_class_disabled": 4,
+      "with_cve": 2,
+      "high": 17,
+      "medium": 15,
+      "low": 0
+    },
+    {
+      "file": "botcc.rules",
+      "active": 25,
+      "syno_drop": 25,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 25,
+      "medium": 0,
+      "low": 0
+    },
+    {
+      "file": "emerging-coinminer.rules",
+      "active": 22,
+      "syno_drop": 1,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 1,
+      "medium": 21,
+      "low": 0
+    },
+    {
+      "file": "emerging-misc.rules",
+      "active": 21,
+      "syno_drop": 6,
+      "syno_class_disabled": 0,
+      "with_cve": 6,
+      "high": 6,
+      "medium": 15,
+      "low": 0
+    },
+    {
+      "file": "3coresec.rules",
+      "active": 20,
+      "syno_drop": 0,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 0,
+      "medium": 20,
+      "low": 0
+    },
+    {
+      "file": "emerging-scada.rules",
+      "active": 18,
+      "syno_drop": 14,
+      "syno_class_disabled": 0,
+      "with_cve": 4,
+      "high": 14,
+      "medium": 4,
+      "low": 0
+    },
+    {
+      "file": "emerging-imap.rules",
+      "active": 17,
+      "syno_drop": 2,
+      "syno_class_disabled": 0,
+      "with_cve": 6,
+      "high": 2,
+      "medium": 15,
+      "low": 0
+    },
+    {
+      "file": "emerging-snmp.rules",
+      "active": 16,
+      "syno_drop": 4,
+      "syno_class_disabled": 1,
+      "with_cve": 11,
+      "high": 5,
+      "medium": 11,
+      "low": 0
+    },
+    {
+      "file": "emerging-voip.rules",
+      "active": 16,
+      "syno_drop": 0,
+      "syno_class_disabled": 1,
+      "with_cve": 1,
+      "high": 0,
+      "medium": 15,
+      "low": 1
+    },
+    {
+      "file": "emerging-icmp_info.rules",
+      "active": 14,
+      "syno_drop": 0,
+      "syno_class_disabled": 14,
+      "with_cve": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 14
+    },
+    {
+      "file": "emerging-smtp.rules",
+      "active": 14,
+      "syno_drop": 3,
+      "syno_class_disabled": 4,
+      "with_cve": 5,
+      "high": 3,
+      "medium": 7,
+      "low": 4
+    },
+    {
+      "file": "emerging-games.rules",
+      "active": 13,
+      "syno_drop": 0,
+      "syno_class_disabled": 12,
+      "with_cve": 0,
+      "high": 11,
+      "medium": 1,
+      "low": 1
+    },
+    {
+      "file": "emerging-tftp.rules",
+      "active": 13,
+      "syno_drop": 5,
+      "syno_class_disabled": 7,
+      "with_cve": 1,
+      "high": 12,
+      "medium": 1,
+      "low": 0
+    },
+    {
+      "file": "emerging-pop3.rules",
+      "active": 9,
+      "syno_drop": 9,
+      "syno_class_disabled": 0,
+      "with_cve": 5,
+      "high": 9,
+      "medium": 0,
+      "low": 0
+    },
+    {
+      "file": "emerging-worm.rules",
+      "active": 9,
+      "syno_drop": 7,
+      "syno_class_disabled": 0,
+      "with_cve": 1,
+      "high": 8,
+      "medium": 1,
+      "low": 0
+    },
+    {
+      "file": "emerging-telnet.rules",
+      "active": 8,
+      "syno_drop": 4,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 4,
+      "medium": 4,
+      "low": 0
+    },
+    {
+      "file": "dshield.rules",
+      "active": 1,
+      "syno_drop": 0,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 0,
+      "medium": 1,
+      "low": 0
+    },
+    {
+      "file": "emerging-inappropriate.rules",
+      "active": 1,
+      "syno_drop": 0,
+      "syno_class_disabled": 1,
+      "with_cve": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    },
+    {
+      "file": "syno-custom-events.rules",
+      "active": 1,
+      "syno_drop": 1,
+      "syno_class_disabled": 0,
+      "with_cve": 0,
+      "high": 1,
+      "medium": 0,
+      "low": 0
+    }
+  ],
+  "synology_custom": [
+    {
+      "file": "syno-custom-events.rules",
+      "line": 3,
+      "enabled_in_file": "yes",
+      "action": "pass",
+      "protocol": "udp",
+      "src": "$HOME_NET",
+      "src_port": "any",
+      "direction": "->",
+      "dst": "74.125.39.90",
+      "dst_port": "[!3478,1023:]",
+      "msg": "pass traffic to Google Voice server for rule sid:2033078",
+      "classtype": "attempted-user",
+      "priority": 1,
+      "severity": "high",
+      "sid": 1,
+      "rev": "1",
+      "gid": "1",
+      "noalert": "no",
+      "cve": "",
+      "cve_count": 0,
+      "created_at": "",
+      "updated_at": "",
+      "signature_severity": "",
+      "former_category": "",
+      "license": "Synology custom",
+      "family": "synology",
+      "syno_class_enabled": "yes",
+      "syno_default_action": "drop",
+      "ip_list_members": 0
+    }
+  ],
+  "thresholded_sids": [
+    2101411,
+    2013504
+  ]
+}

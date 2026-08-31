@@ -176,6 +176,8 @@ Bundled feed: `etc/rules/emerging.rules.tar.gz` (2.9 MiB), ET Open **version 984
 
 Drops are applied later by Synology when compiling signatures from class defaults and policies into `.../suricata/signatures`. One Synology custom pass rule (`syno-custom-events.rules`) exempts Google Voice STUN traffic to `74.125.39.90`.
 
+Full inventory of every bundled signature (33,723 parsed, 23,029 active), class-policy mapping, and the CSV catalog: [ThreatPrevention-1.3.3-0926-bundled-rules.md](ThreatPrevention-1.3.3-0926-bundled-rules.md).
+
 Live updates (`libsynotps` / `RulesetUpdater`):
 
 - ET Open: `https://rules.emergingthreats.net/open/suricata-5.0/emerging.rules.tar.gz`
