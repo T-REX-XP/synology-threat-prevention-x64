@@ -20,6 +20,8 @@ from compat import (  # noqa: E402
     official_stat_bucket,
     official_storage,
     official_update_status,
+    official_weekday,
+    parse_weekday,
 )
 from compiler import parse_header, parse_refs  # noqa: E402
 from geoip import is_public_ipv4, lookup as geoip_lookup  # noqa: E402
@@ -64,6 +66,9 @@ check(any(x.get("enabled") for x in none["interface_list"]), "fallback enabled")
 
 src = official_source("et-pro", "abc")
 check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_code")
+check(official_weekday("daily") == "0,1,2,3,4,5,6", "weekday daily for schedulefield")
+check(parse_weekday("0,1,2,3,4,5,6") == "daily", "weekday csv full week")
+check(parse_weekday("0,6") == "0,6", "weekday weekend")
 
 stor = official_storage(1234, 1024, "idle")
 check(stor["db_size"] == "db_size_1gb" and stor["db_size_bytes"] == 1234, "storage db_size")
@@ -187,6 +192,13 @@ got = handle("SYNO.TPS.Settings.Storage", "get", {}, conn)
 check(got["success"] and got["data"]["db_size"] == "db_size_500mb", "storage get default")
 check(got["data"].get("logStorageMaxLimit"), "storage get has volume capacity")
 check(usb["data"]["devices"], "usb/volume list not empty")
+sched = handle("SYNO.TPS.Settings.Update.Schedule", "get", {}, conn)
+check(sched["success"] and sched["data"]["weekday"] == "0,1,2,3,4,5,6", "schedule get weekday csv")
+saved = handle("SYNO.TPS.Settings.Update.Schedule", "set", {"auto_update": True, "weekday": "0,6", "hour": 3, "minute": 15}, conn)
+check(saved["success"], "schedule set")
+sched2 = handle("SYNO.TPS.Settings.Update.Schedule", "get", {}, conn)
+check(sched2["data"]["auto_update"] is True and sched2["data"]["weekday"] == "0,6", "schedule weekend roundtrip")
+check(sched2["data"]["hour"] == 3 and sched2["data"]["minute"] == 15, "schedule time roundtrip")
 st = handle("SYNO.TPS.Settings.Storage", "set", {"db_size": "db_size_2gb"}, conn)
 check(st["success"] and st["data"]["db_size"] == "db_size_2gb", "storage set returns combo key")
 got2 = handle("SYNO.TPS.Settings.Storage", "get", {}, conn)

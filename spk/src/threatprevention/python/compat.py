@@ -660,6 +660,66 @@ def official_map(conn, date_range=None):
     return out
 
 
+def official_weekday(stored):
+    """syno_schedulefield.get/setValue is a CSV of Sunday=0..Saturday=6.
+
+    'daily' (and empty) must be '0,1,2,3,4,5,6'. Any other string leaves the
+    input blank, allowBlank:false fails, and Apply is blocked.
+    """
+    text = str(stored or "daily").strip()
+    if text in ("daily", "", "None", "none"):
+        return "0,1,2,3,4,5,6"
+    if text.isdigit() and 0 <= int(text) <= 6:
+        return text
+    return text
+
+
+def parse_weekday(raw):
+    """Persist schedule-field CSV; collapse a full week to daily."""
+    if raw is None or raw is False:
+        return "daily"
+    if isinstance(raw, (list, tuple)):
+        days = []
+        for item in raw:
+            try:
+                days.append(int(item))
+            except (TypeError, ValueError):
+                continue
+        days = sorted({d for d in days if 0 <= d <= 6})
+        if not days or len(days) >= 7:
+            return "daily"
+        return ",".join(str(d) for d in days)
+    if isinstance(raw, dict):
+        raw = raw.get("value") or raw.get("weekday") or "daily"
+    text = str(raw).strip()
+    if text in ("daily", "", "None", "none", "0,1,2,3,4,5,6"):
+        return "daily"
+    if text in ("weekend", "0,6"):
+        return "0,6"
+    if text in ("weekdays", "1,2,3,4,5"):
+        return "1,2,3,4,5"
+    days = []
+    for part in text.replace(" ", "").split(","):
+        if part.isdigit():
+            n = int(part)
+            if 0 <= n <= 6:
+                days.append(n)
+    days = sorted(set(days))
+    if not days or len(days) >= 7:
+        return "daily"
+    return ",".join(str(d) for d in days)
+
+
+def weekday_matches(stored, lt):
+    """Sunday=0 like the official field; Python tm_wday is Monday=0."""
+    text = parse_weekday(stored)
+    if text == "daily":
+        return True
+    sun0 = (lt.tm_wday + 1) % 7
+    days = [int(p) for p in text.split(",") if p.isdigit()]
+    return sun0 in days
+
+
 def official_source(source, code):
     src = (source or "et-open").lower().replace("_", "-")
     pro = src in ("et-pro", "etpro", "et_pro")

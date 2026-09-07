@@ -342,6 +342,26 @@ SYNO.SDS.TPS.Bridge = {
 			});
 		});
 	},
+	injectModuleListCss: function () {
+		/* Sprite frames: 0 gray, -24px blue, -48px white, -72px silver.
+		   SRM selected chrome is dark so official CSS uses the white frame.
+		   DSM 7 highlights with light blue, which hides that white icon. */
+		if (document.getElementById("tps-modulelist-css")) { return; }
+		var css = [
+			".syno-sds-ips .syno-ux-modulelist .x-tree-node-icon { background-position: 0 0; }",
+			".syno-sds-ips .syno-ux-modulelist .x-tree-node-over .x-tree-node-icon { background-position: 0 -24px !important; }",
+			".syno-sds-ips .syno-ux-modulelist .x-tree-selected .x-tree-node-icon,",
+			".syno-sds-ips .syno-ux-modulelist .x-tree-node-selected .x-tree-node-icon,",
+			".syno-sds-ips .syno-ux-modulelist .x-tree-node-leaf.x-tree-selected .x-tree-node-icon,",
+			".syno-sds-ips .syno-ux-modulelist .x-tree-node-leaf.x-tree-node-selected .x-tree-node-icon { background-position: 0 -24px !important; }"
+		].join("\n");
+		var el = document.createElement("style");
+		el.id = "tps-modulelist-css";
+		el.type = "text/css";
+		if (el.styleSheet) { el.styleSheet.cssText = css; }
+		else { el.appendChild(document.createTextNode(css)); }
+		(document.head || document.getElementsByTagName("head")[0] || document.body).appendChild(el);
+	},
 	hookManagerRequest: function () {
 		/* Settings Device loadForm → getForm().submit({compound})
 		   → SYNO.API.Form.Action.Submit.run
@@ -944,6 +964,12 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		coerceCombo(form.findField("hour"), 2);
 		coerceCombo(form.findField("minute"), 0);
+		var weekdayVal = weekday && weekday.getValue && weekday.getValue();
+		if (weekday && weekday.setValue && (weekdayVal === "daily" || weekdayVal === "" || weekdayVal == null)) {
+			weekday.setValue("0,1,2,3,4,5,6");
+			weekday.allowBlank = true;
+			if (weekday.clearInvalid) { weekday.clearInvalid(); }
+		}
 		var store = panel.interfaceStore;
 		if (!store) { return; }
 		if (store.getCount() === 0) {
@@ -1077,6 +1103,24 @@ SYNO.SDS.TPS.Bridge = {
 					return ret;
 				};
 			}
+			var origSchedDirty = P.prototype.CheckUpdateSettingsDirty;
+			P.prototype.CheckUpdateSettingsDirty = function (form, apis) {
+				/* Official only tests auto_update + the composite wrapper.
+				   syno_schedulefield / hour / minute live inside the composite
+				   and do not mark it dirty, so Schedule.set was skipped. */
+				var dirty = false;
+				Ext.each(["auto_update", "autoupdate_time_settings", "weekday", "hour", "minute"], function (name) {
+					var fld = form && form.findField && form.findField(name);
+					if (fld && fld.isDirty && fld.isDirty()) { dirty = true; }
+				});
+				if (!dirty && origSchedDirty) {
+					return origSchedDirty.apply(this, arguments);
+				}
+				if (!dirty) {
+					return this.skipSetAPI(apis, "SYNO.TPS.Settings.Update.Schedule");
+				}
+				return apis;
+			};
 			var origDirty = P.prototype.extendFormDirty;
 			P.prototype.extendFormDirty = function () {
 				if (origDirty) { origDirty.apply(this, arguments); }
@@ -1939,10 +1983,12 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		if (me._installed) {
 			me.injectInfo();
+			me.injectModuleListCss();
 			me.hookManagerRequest();
 			return;
 		}
 		me.injectInfo();
+		me.injectModuleListCss();
 		me.hookManagerRequest();
 		function hookProto(cls, name, extra) {
 			if (!cls || !cls.prototype || !cls.prototype[name] || cls.prototype[name]._tpsBridge) { return; }

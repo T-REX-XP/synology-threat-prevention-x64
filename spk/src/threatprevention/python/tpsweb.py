@@ -32,6 +32,9 @@ from compat import (
     official_trends,
     official_update_status,
     official_variables,
+    official_weekday,
+    parse_weekday,
+    weekday_matches,
     classify_update,
     parse_event_id,
     severity_name,
@@ -1154,7 +1157,7 @@ def settings_update(conn, api, method, p):
                 hour, minute = combined // 60, combined % 60
             return ok({
                 "auto_update": kv_get(conn, "auto_update") == "1",
-                "weekday": kv_get(conn, "update_weekday", "daily"),
+                "weekday": official_weekday(kv_get(conn, "update_weekday", "daily")),
                 "hour": int(hour or 2),
                 "minute": int(minute or 0),
                 "schedule_minute": int(stored or 120) if str(stored).isdigit() else stored,
@@ -1162,13 +1165,7 @@ def settings_update(conn, api, method, p):
         if method == "set":
             kv_set(conn, "auto_update", "1" if _truth(p.get("auto_update")) else "0")
             if "weekday" in p:
-                wd = p["weekday"]
-                if isinstance(wd, (list, tuple)):
-                    days = [str(x) for x in wd]
-                    wd = "daily" if len(days) >= 7 else ",".join(days)
-                elif isinstance(wd, dict):
-                    wd = wd.get("value") or wd.get("weekday") or "daily"
-                kv_set(conn, "update_weekday", str(wd))
+                kv_set(conn, "update_weekday", parse_weekday(p.get("weekday")))
             if "hour" in p or "minute" in p:
                 try:
                     hour = int(p.get("hour") if p.get("hour") not in (None, "") else kv_get(conn, "update_hour", "2") or 2)
@@ -1649,15 +1646,8 @@ def _schedule_due(conn, now):
     minute = kv_get(conn, "update_minute", "120")
     last = kv_get(conn, "last_auto_update_slot", "")
     lt = time.localtime(now)
-    if str(weekday) not in ("daily", "", "None"):
-        try:
-            want = int(weekday)
-        except ValueError:
-            want = None
-        # Official UI uses Sunday=0; Python tm_wday is Monday=0.
-        sun0 = (lt.tm_wday + 1) % 7
-        if want is not None and want not in (sun0, lt.tm_wday):
-            return False
+    if not weekday_matches(weekday, lt):
+        return False
     if str(minute) == "hourly":
         slot = time.strftime("%Y%m%d%H", lt)
     else:
