@@ -1259,7 +1259,11 @@ def settings_update(conn, api, method, p):
 
 
 def _storage_limit(p):
-    raw = p.get("limit") or p.get("db_size") or 500
+    raw = p.get("db_size") if p.get("db_size") not in (None, "") else p.get("limit")
+    if raw in (None, ""):
+        raw = 500
+    if isinstance(raw, str):
+        raw = raw.strip().strip('"')
     if raw in ("db_size_500mb", "500"):
         return 500
     if raw in ("db_size_1gb", "1024"):
@@ -1273,16 +1277,21 @@ def _storage_limit(p):
     return n if n in (500, 1024, 2048) else 500
 
 
+def _storage_limit_mb(raw):
+    return _storage_limit({"db_size": raw})
+
+
 def settings_storage(conn, method, p):
     db = os.path.join(PKGVAR, "tps.db")
     size = os.path.getsize(db) if os.path.isfile(db) else 0
-    limit = int(kv_get(conn, "storage_limit_mb", "500") or 500)
+    limit = _storage_limit_mb(kv_get(conn, "storage_limit_mb", "500"))
     if method == "get":
         return ok(official_storage(size, limit, kv_get(conn, "clear_status", "idle"), usb_max=usb_max_label()))
     if method == "set":
-        kv_set(conn, "storage_limit_mb", str(_storage_limit(p)))
+        limit = _storage_limit(p)
+        kv_set(conn, "storage_limit_mb", str(limit))
         conn.commit()
-        return ok({})
+        return ok(official_storage(size, limit, kv_get(conn, "clear_status", "idle"), usb_max=usb_max_label()))
     if method in ("clear_log", "start_clear_log"):
         tid = start_job({"status": "clearing", "clear_percentage": 0})
         kv_set(conn, "clear_status", "clearing")

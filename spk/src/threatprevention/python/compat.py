@@ -618,15 +618,18 @@ def official_source(source, code):
 
 def official_storage(size_bytes, limit_mb, status, percent=100, usb_max=""):
     key = {500: "db_size_500mb", 1024: "db_size_1gb", 2048: "db_size_2gb"}.get(int(limit_mb or 500), "db_size_500mb")
-    return {
+    out = {
         "db_size": key,
         "db_size_bytes": int(size_bytes or 0),
         "limit": int(limit_mb or 500),
         "clear_percentage": int(percent),
         "status_clear_log": status or "idle",
         "status": status or "idle",
-        "logStorageMaxLimit": usb_max or "",
     }
+    # Empty string would setValues() the USB-max display over its "--" placeholder.
+    if usb_max:
+        out["logStorageMaxLimit"] = usb_max
+    return out
 
 
 def usb_max_label():

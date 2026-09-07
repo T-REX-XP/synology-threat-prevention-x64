@@ -315,6 +315,7 @@ SYNO.SDS.TPS.Bridge = {
 				v.indexOf("syno-sds-ips-event-") !== -1 ||
 				v.indexOf('class="syno-sds-ips') !== -1 ||
 				v.indexOf("note-font") !== -1 ||
+				v.indexOf("syno-ux-note") !== -1 ||
 				v.indexOf("color-block") !== -1 ||
 				v.indexOf("font-percentage") !== -1 ||
 				v.indexOf("<span ") !== -1 ||
@@ -537,34 +538,56 @@ SYNO.SDS.TPS.Bridge = {
 	},
 	injectSettingsTabs: function () {
 		var me = this;
-		var tries = 0;
-		function attach() {
+		function tryPatch() {
 			var S = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Settings;
 			if (!S || !S.TabPanel || !S.TabPanel.prototype || !S.NotificationPanel || !S.NotificationPanel.prototype) {
-				if (tries++ < 40) { window.setTimeout(attach, 100); }
-				return;
+				return false;
 			}
-			if (S.TabPanel.prototype._tpsExtras) { return; }
-			S.TabPanel.prototype._tpsExtras = true;
 			me.patchNotificationTelegram(S.NotificationPanel);
-			var origInit = S.TabPanel.prototype.initComponent;
-			if (origInit) {
-				S.TabPanel.prototype.initComponent = function () {
-					this.enableTabScroll = true;
-					this.cls = ((this.cls || "") + " syno-sds-ips-userdefined-tab-panel").replace(/^\s+/, "");
-					var ret = origInit.apply(this, arguments);
-					if (!this._tpsExtraAdded && this.add) {
-						this._tpsExtraAdded = true;
-						try { this.add(me.buildFeedsTab()); }
-						catch (e) {
-							if (window.console && console.error) { console.error("TPS extra tabs", e); }
-						}
-					}
-					return ret;
-				};
-			}
+			me.patchSettingsTabPanel(S.TabPanel);
+			return true;
 		}
-		attach();
+		if (tryPatch()) { return; }
+		var tries = 0;
+		var id = window.setInterval(function () {
+			if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
+		}, 25);
+	},
+	hookExtDefine: function () {
+		var me = this;
+		if (!window.Ext || !Ext.define || Ext.define._tpsHook) { return; }
+		var orig = Ext.define;
+		Ext.define = function (name) {
+			var cls = orig.apply(this, arguments);
+			if (name === "SYNO.SDS.TPS.Settings.NotificationPanel") {
+				me.patchNotificationTelegram(cls);
+			}
+			if (name === "SYNO.SDS.TPS.Settings.TabPanel") {
+				me.patchSettingsTabPanel(cls);
+			}
+			return cls;
+		};
+		Ext.define._tpsHook = true;
+	},
+	patchSettingsTabPanel: function (Tab) {
+		var me = this;
+		if (!Tab || !Tab.prototype || Tab.prototype._tpsExtras) { return; }
+		Tab.prototype._tpsExtras = true;
+		var origInit = Tab.prototype.initComponent;
+		if (!origInit) { return; }
+		Tab.prototype.initComponent = function () {
+			this.enableTabScroll = true;
+			this.cls = ((this.cls || "") + " syno-sds-ips-userdefined-tab-panel").replace(/^\s+/, "");
+			var ret = origInit.apply(this, arguments);
+			if (!this._tpsExtraAdded && this.add) {
+				this._tpsExtraAdded = true;
+				try { this.add(me.buildFeedsTab()); }
+				catch (e) {
+					if (window.console && console.error) { console.error("TPS extra tabs", e); }
+				}
+			}
+			return ret;
+		};
 	},
 	telegramNames: ["enable_telegram", "tg_token", "tg_chat_id", "min_interval_telegram", "telegram_follow_mail"],
 	patchNotificationTelegram: function (NP) {
@@ -593,9 +616,21 @@ SYNO.SDS.TPS.Bridge = {
 					delete item.fieldLabel;
 					item.hideLabel = true;
 				}
+				if (item.value && String(item.value).indexOf("note-font") !== -1 &&
+						String(item.value).indexOf("syno-ux-note") === -1) {
+					item.value = String(item.value).replace('class="note-font"', 'class="syno-ux-note note-font"');
+				}
 			}
 			fixDisplay(cfg.items);
-			cfg.items = (cfg.items || []).concat([me.telegramFieldset(this)]);
+			cfg.items = [
+				{
+					xtype: "syno_fieldset",
+					collapsible: false,
+					defaults: {labelWidth: 180},
+					items: cfg.items || []
+				},
+				me.telegramFieldset(this)
+			];
 			return cfg;
 		};
 		var origActivate = NP.prototype.onActivate;
@@ -1010,7 +1045,47 @@ SYNO.SDS.TPS.Bridge = {
 		attach();
 	},
 	patchLogStorage: function () {
+		/* Official db_size combo is the only syno_combobox whose store is a raw
+		   [['db_size_500mb','500 MB'], …] array. Other combos use SimpleStore
+		   {fields:['value','display']}. DSM 7 ComboBox does not map that array
+		   onto display/value, so setValue() after get/set clears the field and
+		   Apply sends an empty db_size. */
 		var tries = 0;
+		function sizeKey(v) {
+			if (v === 500 || v === "500" || v === "db_size_500mb") { return "db_size_500mb"; }
+			if (v === 1024 || v === "1024" || v === "db_size_1gb") { return "db_size_1gb"; }
+			if (v === 2048 || v === "2048" || v === "db_size_2gb") { return "db_size_2gb"; }
+			return v;
+		}
+		function sizeStore(helper) {
+			function t(sec, key) {
+				return (helper && helper.T) ? helper.T(sec, key) : key;
+			}
+			return new Ext.data.SimpleStore({
+				fields: ["value", "display"],
+				data: [
+					["db_size_500mb", "500 " + t("common", "size_mb")],
+					["db_size_1gb", "1 " + t("common", "size_gb")],
+					["db_size_2gb", "2 " + t("common", "size_gb")]
+				]
+			});
+		}
+		function bindCombo(panel) {
+			if (!panel || !panel.getForm) { return; }
+			var field = panel.getForm().findField("db_size");
+			if (!field) { return; }
+			field.displayField = "display";
+			field.valueField = "value";
+			field.mode = "local";
+			field.triggerAction = "all";
+			field.forceSelection = true;
+			field.editable = false;
+			var store = sizeStore(panel.helper);
+			if (field.bindStore) { field.bindStore(store); }
+			else { field.store = store; }
+			var cur = sizeKey((field.getValue && field.getValue()) || field.value);
+			if (cur && field.setValue) { field.setValue(cur); }
+		}
 		function attach() {
 			var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Settings &&
 				SYNO.SDS.TPS.Settings.LogStoragePanel;
@@ -1019,13 +1094,91 @@ SYNO.SDS.TPS.Bridge = {
 				return;
 			}
 			if (P.prototype._tpsStorage) { return; }
+			var origFields = P.prototype.getFieldsetStorageUsage;
+			if (origFields) {
+				P.prototype.getFieldsetStorageUsage = function () {
+					var cfg = origFields.apply(this, arguments);
+					var self = this;
+					Ext.each((cfg && cfg.items) || [], function (item) {
+						if (!item || item.name !== "db_size") { return; }
+						item.store = sizeStore(self.helper);
+						item.mode = "local";
+						item.triggerAction = "all";
+						item.forceSelection = true;
+						item.editable = false;
+						item.displayField = "display";
+						item.valueField = "value";
+					});
+					return cfg;
+				};
+			}
+			var origParams = P.prototype.processParams;
+			P.prototype.processParams = function (b, a) {
+				if (origParams) { origParams.apply(this, arguments); }
+				Ext.each(a || [], function (c) {
+					if (!c || c.api !== "SYNO.TPS.Settings.Storage" || c.method !== "set") { return; }
+					var field = this.getForm() && this.getForm().findField("db_size");
+					var v = sizeKey((field && field.getValue && field.getValue()) || (field && field.value));
+					c.params = { db_size: v || "db_size_500mb" };
+				}, this);
+				return a;
+			};
 			var orig = P.prototype.processReturnData;
 			P.prototype.processReturnData = function (d, b) {
 				b = b || {};
+				var size;
 				Ext.each(b.result || [], function (e) {
 					if (e && !e.data) { e.data = {}; }
+					if (e && e.api === "SYNO.TPS.Settings.Storage" && e.data && e.data.db_size) {
+						size = sizeKey(e.data.db_size);
+						e.data.db_size = size;
+					}
+					if (e && e.data && e.data.logStorageMaxLimit === "") {
+						delete e.data.logStorageMaxLimit;
+					}
 				});
-				return orig.apply(this, arguments);
+				var ret = orig.apply(this, arguments);
+				var field = this.getForm() && this.getForm().findField("db_size");
+				if (field && size && field.setValue) { field.setValue(size); }
+				return ret;
+			};
+			P.prototype.getUsbDeviceMaxStorage = function () {
+				var panel = this;
+				this.sendWebAPI(Ext.apply({
+					compound: { stopwhenerror: false, params: this.getWebAPIGetData() },
+					callback: function (ok, g) {
+						try {
+							if (panel.findAppWindow) { panel.findAppWindow().clearStatusBusy(); }
+						} catch (e) { /* window already gone */ }
+						if (!ok || !g || !g.result) { return; }
+						var form = panel.getForm && panel.getForm();
+						if (!form) { return; }
+						var share = (g.result[0] && g.result[0].data && g.result[0].data.systemdb_shares) || "";
+						var devices = (g.result[1] && g.result[1].data && g.result[1].data.devices) || [];
+						var i, j, parts, mb, label;
+						for (i = 0; i < devices.length; i++) {
+							parts = (devices[i] && devices[i].partitions) || [];
+							for (j = 0; j < parts.length; j++) {
+								if (share && share !== parts[j].share_name) { continue; }
+								mb = Number(parts[j].total_size_mb) || 0;
+								if (!mb) { continue; }
+								label = (mb > 1024)
+									? ((mb / 1024).toFixed(2) + " " + panel.helper.T("common", "size_gb"))
+									: (mb.toFixed(2) + " " + panel.helper.T("common", "size_mb"));
+								form.setValues({ logStorageMaxLimit: label });
+								return;
+							}
+						}
+					},
+					scope: panel
+				}));
+			};
+			var origAct = P.prototype.onActivate;
+			P.prototype.onActivate = function () {
+				var ret;
+				if (origAct) { ret = origAct.apply(this, arguments); }
+				bindCombo(this);
+				return ret;
 			};
 			P.prototype._tpsStorage = true;
 		}
@@ -1315,6 +1468,7 @@ SYNO.SDS.TPS.Bridge = {
 			wrappedReq._tpsBridge = true;
 			SYNO.API.Request = wrappedReq;
 		}
+		me.hookExtDefine();
 		me.patchDisplayHtml();
 		me.patchPercentLabels();
 		me.patchMapSeverity();
