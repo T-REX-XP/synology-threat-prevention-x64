@@ -335,7 +335,7 @@ SYNO.SDS.TPS.Bridge = {
 		if (node) { node.innerHTML = markup; }
 	},
 	restoreOfficialValue: function (field) {
-		var v = field && field.value;
+		var v = field && (field.value !== undefined ? field.value : field.getValue && field.getValue());
 		if (!this.looksOfficialHtml(v)) { return; }
 		var el = field.el && field.el.dom;
 		if (!el && field.getEl) {
@@ -343,10 +343,6 @@ SYNO.SDS.TPS.Bridge = {
 			el = wrap && wrap.dom;
 		}
 		if (!el) { return; }
-		var text = el.textContent || el.innerText || "";
-		if (text.indexOf("<") === -1 && !(el.innerHTML && el.innerHTML.indexOf("&lt;") !== -1)) {
-			return;
-		}
 		el.innerHTML = v;
 	},
 	restoreOfficialMarkup: function (field) {
@@ -445,6 +441,15 @@ SYNO.SDS.TPS.Bridge = {
 					}, this);
 				}
 			};
+			var origRaw = proto.setRawValue;
+			if (origRaw) {
+				proto.setRawValue = function (v) {
+					if (me.looksOfficialHtml(v) || me.looksOfficialHtml(this.value)) {
+						this.htmlEncode = false;
+					}
+					return origRaw.apply(this, arguments);
+				};
+			}
 			var origSet = proto.setValue;
 			proto.setValue = function (v) {
 				if (me.looksOfficialHtml(v)) { this.htmlEncode = false; }
@@ -452,6 +457,20 @@ SYNO.SDS.TPS.Bridge = {
 				this.value = v;
 				if (this.rendered && this.el) { this.el.update(this.htmlEncode ? Ext.util.Format.htmlEncode(v) : v); }
 			};
+			var origRender = proto.onRender;
+			if (origRender) {
+				proto.onRender = function () {
+					if (me.looksOfficialHtml(this.value) ||
+							me.looksOfficialHtml(this.initialConfig && this.initialConfig.value)) {
+						this.htmlEncode = false;
+					}
+					var ret = origRender.apply(this, arguments);
+					if (me.looksOfficialHtml(this.value)) {
+						me.restoreOfficialValue(this);
+					}
+					return ret;
+				};
+			}
 			var origSetLabel = proto.setFieldLabel;
 			if (origSetLabel) {
 				proto.setFieldLabel = function (label) {
@@ -529,23 +548,17 @@ SYNO.SDS.TPS.Bridge = {
 			S.TabPanel.prototype._tpsExtras = true;
 			me.patchNotificationTelegram(S.NotificationPanel);
 			var origInit = S.TabPanel.prototype.initComponent;
-			function after(panel) {
-				if (!panel || !panel.on) { return; }
-				panel.on("afterrender", function () {
-					if (panel._tpsExtraAdded || !panel.add) { return; }
-					panel._tpsExtraAdded = true;
-					try {
-						panel.add(me.buildFeedsTab());
-						if (panel.doLayout) { panel.doLayout(); }
-					} catch (e) {
-						if (window.console && console.error) { console.error("TPS extra tabs", e); }
-					}
-				}, panel, {single: true});
-			}
 			if (origInit) {
 				S.TabPanel.prototype.initComponent = function () {
+					this.enableTabScroll = true;
 					var ret = origInit.apply(this, arguments);
-					after(this);
+					if (!this._tpsExtraAdded && this.add) {
+						this._tpsExtraAdded = true;
+						try { this.add(me.buildFeedsTab()); }
+						catch (e) {
+							if (window.console && console.error) { console.error("TPS extra tabs", e); }
+						}
+					}
 					return ret;
 				};
 			}
@@ -565,14 +578,22 @@ SYNO.SDS.TPS.Bridge = {
 			   ~400px gap before Email/SMS/Push/Subject inputs. */
 			cfg.defaults = Ext.apply({}, cfg.defaults || {});
 			cfg.defaults.labelWidth = 180;
-			Ext.each(cfg.items || [], function (item) {
-				if (!item || item.xtype !== "syno_displayfield") { return; }
+			cfg.autoScroll = true;
+			cfg.padding = cfg.padding || "0px 12px 0px 0px";
+			function fixDisplay(item) {
+				if (!item) { return; }
+				if (Ext.isArray(item)) { Ext.each(item, fixDisplay); return; }
+				if (item.items) { fixDisplay(item.items); }
+				if (item.xtype !== "syno_displayfield" && item.xtype !== "displayfield") { return; }
+				item.htmlEncode = false;
+				if (!item.fieldLabel) { item.hideLabel = true; }
 				if (item.fieldLabel && (item.value === undefined || item.value === "")) {
 					item.value = item.fieldLabel;
 					delete item.fieldLabel;
 					item.hideLabel = true;
 				}
-			});
+			}
+			fixDisplay(cfg.items);
 			cfg.items = (cfg.items || []).concat([me.telegramFieldset(this)]);
 			return cfg;
 		};
@@ -614,11 +635,11 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		return {
 			xtype: "syno_fieldset",
-			border: false,
+			collapsible: false,
 			itemId: "tps_telegram_fieldset",
-			defaults: {labelWidth: 200},
+			defaults: {labelWidth: 180},
 			items: [
-				{xtype: "syno_displayfield", value: '<font style="font-weight:bold;">Telegram</font>'},
+				{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: '<font style="font-weight:bold;">Telegram</font>'},
 				{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot", checked: false},
 				{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: ""},
 				{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1, value: ""},
@@ -752,10 +773,11 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		var Form = (window.SYNO && SYNO.SDS && SYNO.SDS.Utils && SYNO.SDS.Utils.FormPanel) || Ext.form.FormPanel || Ext.Panel;
 		var Grid = (window.SYNO && SYNO.ux && SYNO.ux.GridPanel) || Ext.grid.GridPanel;
+		var Modal = (window.SYNO && SYNO.SDS && SYNO.SDS.ModalWindow) || Ext.Window;
+		var panel;
 		var store = new Ext.data.JsonStore({
 			fields: [
-				{name: "id"}, {name: "name"}, {name: "url"},
-				{name: "enabled"}, {name: "enabled_label"}
+				{name: "id"}, {name: "name"}, {name: "url"}, {name: "enabled"}
 			]
 		});
 		function reload() {
@@ -766,82 +788,150 @@ SYNO.SDS.TPS.Bridge = {
 						id: f.id,
 						name: f.name,
 						url: f.url,
-						enabled: !!f.enabled,
-						enabled_label: f.enabled ? (_T("common", "enabled") || "Enabled") : (_T("common", "disabled") || "Disabled")
+						enabled: !!f.enabled
 					});
 				});
 				store.loadData(rows);
 			});
 		}
+		function selected() {
+			return grid.getSelectionModel().getSelected();
+		}
+		function alertMsg(msg) {
+			var win = panel && panel.findAppWindow && panel.findAppWindow();
+			var box = win && win.getMsgBox && win.getMsgBox();
+			if (box) { box.alert("", msg); return; }
+			if (Ext.Msg) { Ext.Msg.alert("", msg); }
+		}
+		function setButtons() {
+			var bar = panel && panel.getTopToolbar && panel.getTopToolbar();
+			var rec = selected();
+			if (!bar) { return; }
+			Ext.each(["feed_edit", "feed_del"], function (id) {
+				var btn = bar.getComponent(id);
+				if (btn && btn.setDisabled) { btn.setDisabled(!rec); }
+			});
+		}
+		function openEditor(rec) {
+			var inner = new Form({
+				padding: "12px 20px 0px 12px",
+				defaults: {labelWidth: 120},
+				items: [
+					{xtype: "syno_textfield", name: "feed_name", fieldLabel: "Name", width: 320, value: rec ? rec.get("name") : ""},
+					{xtype: "syno_textfield", name: "feed_url", fieldLabel: "HTTPS URL", width: 320, value: rec ? rec.get("url") : ""}
+				]
+			});
+			var win = new Modal({
+				owner: panel && panel.findAppWindow && panel.findAppWindow(),
+				title: rec ? "Edit Rule Feed" : "Add Rule Feed",
+				width: 520,
+				height: 220,
+				closable: true,
+				layout: "fit",
+				items: [inner],
+				buttons: [
+					{xtype: "syno_button", btnStyle: "blue", text: _T("common", "apply") || "Apply", handler: function () {
+						var f = inner.getForm && inner.getForm();
+						var nameFld = f && f.findField("feed_name");
+						var urlFld = f && f.findField("feed_url");
+						var name = nameFld && nameFld.getValue ? nameFld.getValue() : "";
+						var url = urlFld && urlFld.getValue ? urlFld.getValue() : "";
+						function done(ok) {
+							if (!ok) {
+								alertMsg("Could not save feed. Use HTTPS and a name of letters, digits, ._-");
+								return;
+							}
+							if (win.close) { win.close(); } else if (win.hide) { win.hide(); }
+							reload();
+						}
+						if (rec) {
+							me.call("SYNO.TPS.Settings.Feed", "update", 1, {id: rec.get("id"), name: name, url: url}, done);
+						} else {
+							me.call("SYNO.TPS.Settings.Feed", "add", 1, {name: name, url: url, enabled: true}, done);
+						}
+					}},
+					{xtype: "syno_button", text: _T("common", "close") || "Close", handler: function () {
+						if (win.close) { win.close(); } else if (win.hide) { win.hide(); }
+					}}
+				]
+			});
+			if (win.open) { win.open(); } else { win.show(); }
+		}
+		var columns = [];
+		var enableCol = null;
+		if (window.SYNO && SYNO.ux && SYNO.ux.EnableColumn) {
+			enableCol = new SYNO.ux.EnableColumn({
+				header: _T("common", "enabled") || "Enabled",
+				width: 100,
+				dataIndex: "enabled",
+				menuDisabled: true,
+				sortable: false
+			});
+			columns.push(enableCol);
+		}
+		columns.push(
+			{header: "Name", dataIndex: "name", width: 160},
+			{header: "URL", dataIndex: "url", width: 420, id: "url"}
+		);
 		var cm = new Ext.grid.ColumnModel({
 			defaults: {editable: false, sortable: true, menuDisabled: true, align: "left"},
-			columns: [
-				{header: "Name", dataIndex: "name", width: 140},
-				{header: "URL", dataIndex: "url", width: 420, id: "url"},
-				{header: "Status", dataIndex: "enabled_label", width: 100}
-			]
+			columns: columns
 		});
-		var grid = new Grid({
+		var sm = new Ext.grid.RowSelectionModel({singleSelect: true, listeners: {selectionchange: setButtons}});
+		var gridCfg = {
 			flex: 1,
 			cls: "device-grid-panel",
 			store: store,
 			colModel: cm,
 			autoExpandColumn: "url",
-			sm: new Ext.grid.RowSelectionModel({singleSelect: true})
+			sm: sm,
+			enableHdMenu: false,
+			listeners: {
+				rowdblclick: function () {
+					var rec = selected();
+					if (rec) { openEditor(rec); }
+				}
+			}
+		};
+		if (enableCol) { gridCfg.plugins = [enableCol]; }
+		var grid = new Grid(gridCfg);
+		store.on("update", function (s, rec, op) {
+			if (!rec || rec.get("id") === undefined) { return; }
+			if (op && Ext.data && Ext.data.Record && op !== Ext.data.Record.EDIT) { return; }
+			me.call("SYNO.TPS.Settings.Feed", "update", 1, {
+				id: rec.get("id"),
+				enabled: !!rec.get("enabled")
+			}, function () { rec.commit(); });
 		});
-		function fieldVal(name) {
-			var panel = grid.ownerCt;
-			while (panel && !panel.getForm) { panel = panel.ownerCt; }
-			var f = panel && panel.getForm && panel.getForm();
-			var fld = f && f.findField(name);
-			return fld && fld.getValue ? fld.getValue() : "";
-		}
-		function selected() {
-			return grid.getSelectionModel().getSelected();
-		}
-		var panel = new Form({
+		var tbar = [
+			{xtype: "syno_button", itemId: "feed_add", text: _T("common", "add") || "Add", handler: function () { openEditor(null); }},
+			{xtype: "syno_button", itemId: "feed_edit", text: _T("common", "edit") || "Edit", disabled: true, handler: function () {
+				var rec = selected();
+				if (rec) { openEditor(rec); }
+			}},
+			{xtype: "syno_button", itemId: "feed_del", text: _T("common", "delete") || "Delete", disabled: true, handler: function () {
+				var rec = selected();
+				if (!rec) { return; }
+				me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: rec.get("id")}, function () { reload(); });
+			}},
+			"->",
+			{xtype: "syno_textfilter", iconStyle: "filter", store: store, localFilter: true, localFilterField: ["name", "url"]}
+		];
+		panel = new Form({
 			title: "Rule Feeds",
 			itemId: "SYNO.SDS.TPS.Settings.FeedPanel",
+			cls: "syno-sds-ips-settings-device-panel",
 			padding: "0px 12px 0px 0px",
 			trackResetOnLoad: true,
 			useDefaultBtn: false,
 			layout: "vbox",
 			layoutConfig: {align: "stretch"},
-			defaults: {labelWidth: 120},
+			tbar: tbar,
 			items: [
-				{xtype: "syno_fieldset", border: false, items: [
-					{xtype: "syno_displayfield", value: "Extra HTTPS rule feeds are applied on top of ET Open/Pro on General. Run Update Now after changes."}
+				{xtype: "container", layout: "form", autoHeight: true, items: [
+					{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: "Extra HTTPS rule feeds are applied on top of ET Open/Pro on General. Run Update Now after changes."}
 				]},
-				grid,
-				{xtype: "syno_fieldset", border: false, items: [
-					{xtype: "syno_textfield", fieldLabel: "Name", name: "feed_name", width: 220, value: ""},
-					{xtype: "syno_textfield", fieldLabel: "HTTPS URL", name: "feed_url", width: 420, value: ""},
-					{xtype: "syno_compositefield", items: [
-						{xtype: "syno_button", text: _T("common", "add") || "Add", handler: function () {
-							me.call("SYNO.TPS.Settings.Feed", "add", 1, {
-								name: fieldVal("feed_name"),
-								url: fieldVal("feed_url"),
-								enabled: true
-							}, function (ok) {
-								if (!ok && Ext.Msg) { Ext.Msg.alert("", "Could not add feed. Use HTTPS and a name of letters, digits, ._-"); }
-								reload();
-							});
-						}},
-						{xtype: "syno_button", text: "Enable / Disable", handler: function () {
-							var rec = selected();
-							if (!rec) { return; }
-							me.call("SYNO.TPS.Settings.Feed", "update", 1, {
-								id: rec.get("id"),
-								enabled: !rec.get("enabled")
-							}, function () { reload(); });
-						}},
-						{xtype: "syno_button", text: _T("common", "delete") || "Delete", handler: function () {
-							var rec = selected();
-							if (!rec) { return; }
-							me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: rec.get("id")}, function () { reload(); });
-						}}
-					]}
-				]}
+				grid
 			],
 			listeners: {activate: reload}
 		});
