@@ -551,6 +551,7 @@ SYNO.SDS.TPS.Bridge = {
 			if (origInit) {
 				S.TabPanel.prototype.initComponent = function () {
 					this.enableTabScroll = true;
+					this.cls = ((this.cls || "") + " syno-sds-ips-userdefined-tab-panel").replace(/^\s+/, "");
 					var ret = origInit.apply(this, arguments);
 					if (!this._tpsExtraAdded && this.add) {
 						this._tpsExtraAdded = true;
@@ -635,11 +636,11 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		return {
 			xtype: "syno_fieldset",
+			title: "Telegram",
 			collapsible: false,
 			itemId: "tps_telegram_fieldset",
 			defaults: {labelWidth: 180},
 			items: [
-				{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: '<font style="font-weight:bold;">Telegram</font>'},
 				{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot", checked: false},
 				{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: ""},
 				{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1, value: ""},
@@ -804,7 +805,7 @@ SYNO.SDS.TPS.Bridge = {
 			if (Ext.Msg) { Ext.Msg.alert("", msg); }
 		}
 		function setButtons() {
-			var bar = panel && panel.getTopToolbar && panel.getTopToolbar();
+			var bar = grid && grid.getTopToolbar && grid.getTopToolbar();
 			var rec = selected();
 			if (!bar) { return; }
 			Ext.each(["feed_edit", "feed_del"], function (id) {
@@ -877,14 +878,29 @@ SYNO.SDS.TPS.Bridge = {
 			defaults: {editable: false, sortable: true, menuDisabled: true, align: "left"},
 			columns: columns
 		});
+		var tbar = [
+			{xtype: "syno_button", itemId: "feed_add", text: _T("common", "add") || "Add", handler: function () { openEditor(null); }},
+			{xtype: "syno_button", itemId: "feed_edit", text: _T("common", "edit") || "Edit", disabled: true, handler: function () {
+				var rec = selected();
+				if (rec) { openEditor(rec); }
+			}},
+			{xtype: "syno_button", itemId: "feed_del", text: _T("common", "delete") || "Delete", disabled: true, handler: function () {
+				var rec = selected();
+				if (!rec) { return; }
+				me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: rec.get("id")}, function () { reload(); });
+			}},
+			"->",
+			{xtype: "syno_textfilter", iconStyle: "filter", store: store, localFilter: true, localFilterField: ["name", "url"]}
+		];
 		var sm = new Ext.grid.RowSelectionModel({singleSelect: true, listeners: {selectionchange: setButtons}});
 		var gridCfg = {
 			flex: 1,
-			cls: "device-grid-panel",
+			cls: "device-grid-panel syno-sds-ips-userdefined-panel",
 			store: store,
 			colModel: cm,
 			autoExpandColumn: "url",
 			sm: sm,
+			tbar: tbar,
 			enableHdMenu: false,
 			listeners: {
 				rowdblclick: function () {
@@ -903,20 +919,6 @@ SYNO.SDS.TPS.Bridge = {
 				enabled: !!rec.get("enabled")
 			}, function () { rec.commit(); });
 		});
-		var tbar = [
-			{xtype: "syno_button", itemId: "feed_add", text: _T("common", "add") || "Add", handler: function () { openEditor(null); }},
-			{xtype: "syno_button", itemId: "feed_edit", text: _T("common", "edit") || "Edit", disabled: true, handler: function () {
-				var rec = selected();
-				if (rec) { openEditor(rec); }
-			}},
-			{xtype: "syno_button", itemId: "feed_del", text: _T("common", "delete") || "Delete", disabled: true, handler: function () {
-				var rec = selected();
-				if (!rec) { return; }
-				me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: rec.get("id")}, function () { reload(); });
-			}},
-			"->",
-			{xtype: "syno_textfilter", iconStyle: "filter", store: store, localFilter: true, localFilterField: ["name", "url"]}
-		];
 		panel = new Form({
 			title: "Rule Feeds",
 			itemId: "SYNO.SDS.TPS.Settings.FeedPanel",
@@ -926,7 +928,6 @@ SYNO.SDS.TPS.Bridge = {
 			useDefaultBtn: false,
 			layout: "vbox",
 			layoutConfig: {align: "stretch"},
-			tbar: tbar,
 			items: [
 				{xtype: "container", layout: "form", autoHeight: true, items: [
 					{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: "Extra HTTPS rule feeds are applied on top of ET Open/Pro on General. Run Update Now after changes."}
