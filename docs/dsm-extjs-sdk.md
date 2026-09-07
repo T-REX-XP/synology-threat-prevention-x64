@@ -346,6 +346,7 @@ Keep Threat Prevention on ExtJS + bridge.
 
 - Transport and `SYNO.TPS.*` envelopes: [official-app-surface.md](api/official-app-surface.md)
 - Why the backend is a compatibility layer: [backend-replaceability.md](backend-replaceability.md)
+- Shim hacks and how to improve them: [ootb-ui-compat-review.md](ootb-ui-compat-review.md)
 - Port status: [backend-port-backlog.md](api/backend-port-backlog.md)
 - Maps loader (not a WebAPI): [google-maps.md](google-maps.md)
 - Deploy / `dsmappname`: [spk-deploy-and-update.md](spk-deploy-and-update.md)

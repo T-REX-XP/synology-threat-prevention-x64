@@ -200,5 +200,6 @@ Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS). Official UI s
 | `docs/api/backend-port-backlog.md` | P0–P3 port list |
 | `docs/api/SYNO.TPS.contract.md` | simplified community contract |
 | `docs/spk-deploy-and-update.md` | setcap / HTTP DSM / logout |
+| `docs/ootb-ui-compat-review.md` | hacks, poor implementations, how to improve the shim |
 
 Do not publish `synoips.js` or the official texts/help as a community contribution.

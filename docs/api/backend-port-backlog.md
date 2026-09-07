@@ -4,7 +4,7 @@ What is still missing or wrong for the official ExtJS app against the Suricata 8
 
 Do **not** implement NFQUEUE / inline IPS unless asked. Do **not** restore a community webpack UI.
 
-Related: [official-app-surface.md](official-app-surface.md), [backend-replaceability.md](../backend-replaceability.md), [dsm-extjs-sdk.md](../dsm-extjs-sdk.md).
+Related: [official-app-surface.md](official-app-surface.md), [backend-replaceability.md](../backend-replaceability.md), [dsm-extjs-sdk.md](../dsm-extjs-sdk.md), [ootb-ui-compat-review.md](../ootb-ui-compat-review.md).
 
 ## Priority
 

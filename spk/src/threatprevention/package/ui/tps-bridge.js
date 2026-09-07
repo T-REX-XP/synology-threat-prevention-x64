@@ -121,7 +121,7 @@ SYNO.SDS.TPS.Bridge = {
 		"SYNO.TPS.Sensor.Variables", "SYNO.TPS.Settings.Storage", "SYNO.TPS.Settings.Update",
 		"SYNO.TPS.Settings.Update.Schedule", "SYNO.TPS.Settings.Update.Source",
 		"SYNO.TPS.Settings.Telegram", "SYNO.TPS.Settings.Mirror", "SYNO.TPS.Settings.Feed",
-		"SYNO.TPS.Settings.Map",
+		"SYNO.TPS.Settings.Map", "SYNO.TPS.Compound",
 		"SYNO.TPS.Signature", "SYNO.TPS.Signature.Classification", "SYNO.TPS.Signature.Policy",
 		"SYNO.TPS.Signature.Rule", "SYNO.TPS.Statistic.Device", "SYNO.TPS.Statistic.Trends",
 		"SYNO.Core.Network.NSM.Device", "SYNO.Core.SystemDB",
@@ -221,6 +221,18 @@ SYNO.SDS.TPS.Bridge = {
 		if (same(Entry && Entry.Polling) || same(Entry && Entry.Polling && Entry.Polling.prototype)) { return true; }
 		return false;
 	},
+	shouldStealRequest: function (opts) {
+		/* DSM desktop polling uses SYNO.API.Request({compound}) and expects
+		   data.reg_ref. Never steal those, or any Polling.* API. */
+		if (!opts) { return false; }
+		var api = opts.api || (opts.webapi && opts.webapi.api) || "";
+		if (String(api).indexOf("Polling") !== -1) { return false; }
+		if (this.isPollingCallback(opts.callback || opts.status_callback)) { return false; }
+		if (opts.compound && opts.compound.params) {
+			return this.compoundHasHosted(opts.compound);
+		}
+		return this.isHosted(api);
+	},
 	passthrough: function (item, cb, scope) {
 		Ext.Ajax.request({
 			url: "/webapi/entry.cgi",
@@ -243,34 +255,49 @@ SYNO.SDS.TPS.Bridge = {
 	},
 	dispatch: function (opts, fallback) {
 		if (!opts) { return fallback(); }
+		if (!this.shouldStealRequest(opts)) { return fallback(); }
 		if (opts.compound && opts.compound.params) {
-			/* SYNO.API.Request is global. DSM desktop polling compounds also
-			   use it; stealing those and calling back (ok, {result}) crashes
-			   pollingCompoundCallack on data.reg_ref. Only hosted TPS compounds. */
-			if (!this.compoundHasHosted(opts.compound)) { return fallback(); }
-			if (this.isPollingCallback(opts.callback || opts.status_callback)) {
-				return fallback();
-			}
 			return this.compound(opts);
 		}
 		var api = opts.api || (opts.webapi && opts.webapi.api);
 		var method = opts.method || (opts.webapi && opts.webapi.method);
 		var version = opts.version || (opts.webapi && opts.webapi.version) || 1;
 		var params = opts.params || (opts.webapi && opts.webapi.params) || {};
-		if (!this.isHosted(api)) {
-			return fallback();
-		}
 		this.call(api, method, version, params, opts.callback || opts.status_callback, opts.scope);
 		return true;
 	},
 	compound: function (opts) {
 		var me = this;
-		var items = opts.compound.params || [];
+		var items = this.orderCompound(opts.compound.params || []);
 		var out = [];
 		var left = items.length;
 		var failed = false;
 		if (!left) {
 			if (opts.callback) { opts.callback.call(opts.scope || window, true, { result: [], has_fail: false }); }
+			return true;
+		}
+		var allHosted = true;
+		Ext.each(items, function (it) {
+			if (!it || !me.isHosted(it.api)) { allHosted = false; }
+		});
+		if (allHosted) {
+			me.call("SYNO.TPS.Compound", "request", 1, { compound: items }, function (ok, data) {
+				var payload = {
+					result: (data && data.result) || [],
+					has_fail: !ok || !!(data && data.has_fail)
+				};
+				Ext.each(items, function (item) {
+					if (item && item.api === "SYNO.TPS.Notification" && item.method === "set") {
+						var panel = opts.scope;
+						if (panel && panel.getForm && panel.getForm().findField("enable_telegram")) {
+							me.saveTelegramFrom(panel);
+						}
+					}
+				});
+				if (opts.callback) {
+					opts.callback.call(opts.scope || window, ok && !payload.has_fail, payload, { compound: items });
+				}
+			}, opts.scope);
 			return true;
 		}
 		function done(idx, ok, data, raw) {
@@ -287,19 +314,7 @@ SYNO.SDS.TPS.Bridge = {
 			}
 			left -= 1;
 			if (!left && opts.callback) {
-				var payload = { result: out, has_fail: failed };
-				if (me.isPollingCallback(opts.callback)) {
-					opts.callback.call(opts.scope || window, {
-						success: true,
-						data: Ext.apply({
-							reg_ref: (opts.reg_ref || (opts.compound && opts.compound.reg_ref) || "tps"),
-							result: out,
-							has_fail: failed
-						}, payload)
-					});
-					return;
-				}
-				opts.callback.call(opts.scope || window, true, payload, { compound: items });
+				opts.callback.call(opts.scope || window, true, { result: out, has_fail: failed }, { compound: items });
 			}
 		}
 		Ext.each(items, function (item, idx) {
@@ -315,6 +330,23 @@ SYNO.SDS.TPS.Bridge = {
 			}
 		});
 		return true;
+	},
+	orderCompound: function (items) {
+		var rank = {
+			"SYNO.TPS.Settings.Mirror|set": 0,
+			"SYNO.TPS.Sensor|set": 1,
+			"SYNO.TPS.Settings.Update.Schedule|set": 2,
+			"SYNO.TPS.Settings.Update.Source|set": 3
+		};
+		var tagged = [];
+		Ext.each(items || [], function (it, i) {
+			var key = (it && it.api ? it.api : "") + "|" + (it && it.method ? it.method : "");
+			tagged.push({ i: i, it: it, r: rank.hasOwnProperty(key) ? rank[key] : 50 });
+		});
+		tagged.sort(function (a, b) { return a.r === b.r ? a.i - b.i : a.r - b.r; });
+		var out = [];
+		Ext.each(tagged, function (t) { out.push(t.it); });
+		return out;
 	},
 	injectInfo: function () {
 		var info = { path: "entry.cgi", minVersion: 1, maxVersion: 4 };
@@ -857,6 +889,25 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		window.setTimeout(poll, 0);
 	},
+	ensureOverviewIdsNote: function (panel) {
+		if (!panel || !window.Ext) { return; }
+		var box = panel.statusContainerId && Ext.getCmp(panel.statusContainerId);
+		if (!box || !box.add) { return; }
+		if (box.getComponent && box.getComponent("tps_ids_note")) { return; }
+		try {
+			box.add({
+				xtype: "syno_displayfield",
+				itemId: "tps_ids_note",
+				hideLabel: true,
+				htmlEncode: false,
+				cls: "syno-ux-note note-font",
+				margins: "8 0 0 0",
+				value: "IDS only — this NAS does not drop packets (no inline IPS)."
+			});
+			if (panel.doLayout) { panel.doLayout(); }
+			else if (box.doLayout) { box.doLayout(); }
+		} catch (e) { /* status container not ready */ }
+	},
 	bindStatusPathlinks: function (panel) {
 		if (!panel) { return; }
 		var el = panel.el || (panel.getEl && panel.getEl());
@@ -949,7 +1000,11 @@ SYNO.SDS.TPS.Bridge = {
 					var self = this;
 					var ret = origShowStart.apply(this, arguments);
 					me.bindStatusPathlinks(this);
-					window.setTimeout(function () { me.bindStatusPathlinks(self); }, 0);
+					me.ensureOverviewIdsNote(this);
+					window.setTimeout(function () {
+						me.bindStatusPathlinks(self);
+						me.ensureOverviewIdsNote(self);
+					}, 0);
 					return ret;
 				};
 			}
@@ -1211,22 +1266,22 @@ SYNO.SDS.TPS.Bridge = {
 		var form = panel && panel.getForm && panel.getForm();
 		return (form && form.findField && form.findField(name)) || this.findNamed(panel, name);
 	},
-	gateMonitoredIfaces: function (panel) {
-		/* Official load / enable_sensor re-enables the grid. Keep it off in copy mode. */
+	applyIdsOnlyChrome: function (panel) {
+		/* Official drop-packet / security-mode radios imply NFQUEUE IPS. This
+		   package is AF_PACKET IDS only. Keep the widgets visible but off. */
+		if (!panel || !panel.getForm) { return; }
 		var me = this;
-		if (!panel) { return; }
-		function wrap(obj) {
-			if (!obj || !obj.setDisabled || obj.setDisabled._tpsCopyGate) { return; }
-			var orig = obj.setDisabled;
-			obj.setDisabled = function (disabled) {
-				if (me.captureModeIsCopy(panel)) { disabled = true; }
-				return orig.call(this, disabled);
-			};
-			obj.setDisabled._tpsCopyGate = true;
+		var form = panel.getForm();
+		var prev = this.namedField(panel, "enable_prevention");
+		if (prev) {
+			if (prev.setValue) { prev.setValue(false); }
+			me.setCmpEnabled(prev, false);
 		}
-		wrap(panel.interfaceGrid);
-		wrap(this.findByItemId(panel, "tps_iface_fieldset") ||
-			(panel.interfaceGrid && panel.interfaceGrid.ownerCt));
+		var modes = (form.findFields && form.findFields("network_security_mode")) || [];
+		Ext.each(modes, function (fld) {
+			me.setCmpEnabled(fld, false);
+			if (fld && fld.inputValue === "availability" && fld.setValue) { fld.setValue(true); }
+		});
 	},
 	syncCaptureMode: function (panel, forced) {
 		if (!panel || !panel.getForm) { return; }
@@ -1241,7 +1296,6 @@ SYNO.SDS.TPS.Bridge = {
 			copy = this.captureModeIsCopy(panel);
 			panel._tpsCaptureMode = copy ? "copy" : "lan";
 		}
-		this.gateMonitoredIfaces(panel);
 		var sensor = this.namedField(panel, "enable_sensor");
 		var sensorOn = !sensor || !sensor.getValue || !!sensor.getValue();
 		/* Copy-only: Router IP, optional NAS IP. */
@@ -1299,17 +1353,6 @@ SYNO.SDS.TPS.Bridge = {
 			me.syncCaptureMode(panel, fld && fld.inputValue);
 			me.prepareGeneralForm(panel);
 		}
-		function radio(value, label, checked) {
-			return {
-				xtype: "syno_radio",
-				name: "capture_mode",
-				inputValue: value,
-				boxLabel: label,
-				checked: !!checked,
-				handler: onMode,
-				listeners: { check: onMode, click: function () { onMode(this, true); } }
-			};
-		}
 		return {
 			xtype: "syno_fieldset",
 			title: "Capture source",
@@ -1322,8 +1365,16 @@ SYNO.SDS.TPS.Bridge = {
 					xtype: "syno_displayfield", hideLabel: true, htmlEncode: false,
 					value: "The NAS is not the gateway. Choose how Suricata sees packets."
 				},
-				radio("lan", "Listen on NAS LAN interfaces — only traffic to or from this NAS", true),
-				radio("copy", "Receive a traffic copy from the router — LAN↔WAN (OpenWrt GRE)", false),
+				{
+					xtype: "syno_radio", name: "capture_mode", inputValue: "lan", checked: true,
+					boxLabel: "Listen on NAS LAN interfaces — only traffic to or from this NAS",
+					listeners: { check: onMode }
+				},
+				{
+					xtype: "syno_radio", name: "capture_mode", inputValue: "copy",
+					boxLabel: "Receive a traffic copy from the router — LAN↔WAN (OpenWrt GRE)",
+					listeners: { check: onMode }
+				},
 				{ xtype: "hidden", name: "ifname", value: "tps0" },
 				{
 					xtype: "syno_textfield", name: "router_ip", fieldLabel: "Router IP",
@@ -1335,7 +1386,7 @@ SYNO.SDS.TPS.Bridge = {
 				},
 				{
 					xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
-					value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router."
+					value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router. Restart the package after Apply so tps0 can be created."
 				}
 			]
 		};
@@ -1489,8 +1540,8 @@ SYNO.SDS.TPS.Bridge = {
 			return orig.apply(this, arguments);
 		};
 		form.isValid._tpsGeneral = true;
-		me.gateMonitoredIfaces(panel);
 		me.prepareGeneralForm(panel);
+		me.applyIdsOnlyChrome(panel);
 	},
 	patchGeneralSettings: function (Panel) {
 		/* Official isValid requires an enabled monitored interface. Empty
@@ -1516,6 +1567,9 @@ SYNO.SDS.TPS.Bridge = {
 							if (item.name === "code" || item.name === "weekday") {
 								item.allowBlank = true;
 							}
+							if (item.name === "enable_prevention" || item.name === "network_security_mode") {
+								item.disabled = true;
+							}
 							if (item.name === "hour" || item.name === "minute") {
 								item.mode = "local";
 								item.triggerAction = "all";
@@ -1539,10 +1593,21 @@ SYNO.SDS.TPS.Bridge = {
 							}
 						}, this);
 						cfg.items.splice(1, 0, me.captureModeFieldset(this));
+						var sensorFs = cfg.items[0];
+						if (sensorFs && sensorFs.webapi && sensorFs.webapi.api === "SYNO.TPS.Sensor" && sensorFs.items) {
+							sensorFs.items = (sensorFs.items || []).concat([{
+								xtype: "syno_displayfield",
+								name: "tps_ids_note",
+								hideLabel: true,
+								htmlEncode: false,
+								indent: 1,
+								value: "This package is IDS only (AF_PACKET). Packets are not dropped; inline IPS is not wired."
+							}]);
+						}
 					}
 					if (cfg && cfg.listeners) {
 						cfg.listeners.afterrender = function () {
-							me.gateMonitoredIfaces(this);
+							me.applyIdsOnlyChrome(this);
 							me.syncCaptureMode(this);
 						};
 					}
@@ -1557,26 +1622,15 @@ SYNO.SDS.TPS.Bridge = {
 			var origReturn = P.prototype.processReturnData;
 			if (origReturn) {
 				P.prototype.processReturnData = function (b, a) {
-					var self = this;
 					me.registerScheduleFields(this);
 					me.bindTimeCombos(this);
-					me.gateMonitoredIfaces(this);
 					var ret = origReturn.apply(this, arguments);
 					me.applyScheduleFromResult(this, a);
 					me.applyMirrorFromResult(this, a);
+					me.applyIdsOnlyChrome(this);
 					me.syncCaptureMode(this);
 					me.prepareGeneralForm(this);
 					me.clearGeneralDirty(this);
-					window.setTimeout(function () {
-						me.applyScheduleFromResult(self, a);
-						me.syncCaptureMode(self);
-						me.clearGeneralDirty(self);
-					}, 0);
-					window.setTimeout(function () {
-						me.applyScheduleFromResult(self, a);
-						me.syncCaptureMode(self);
-						me.clearGeneralDirty(self);
-					}, 50);
 					return ret;
 				};
 			}
@@ -1659,6 +1713,7 @@ SYNO.SDS.TPS.Bridge = {
 			if (origEnable) {
 				P.prototype.onEnableSensorChecked = function () {
 					var ret = origEnable.apply(this, arguments);
+					me.applyIdsOnlyChrome(this);
 					me.syncCaptureMode(this);
 					return ret;
 				};
@@ -2711,13 +2766,10 @@ SYNO.SDS.TPS.Bridge = {
 			var origReq = SYNO.API.Request;
 			var wrappedReq = function (opts) {
 				var args = arguments;
-				if (opts && opts.compound && opts.compound.params) {
+				if (me.shouldStealRequest(opts)) {
 					return me.dispatch(opts, function () { return origReq.apply(this, args); });
 				}
-				if (opts && me.isHosted(opts.api)) {
-					return me.dispatch(opts, function () { return origReq.apply(this, args); });
-				}
-				return origReq.apply(this, args);
+				return origReq.apply(this, arguments);
 			};
 			var k;
 			for (k in origReq) {

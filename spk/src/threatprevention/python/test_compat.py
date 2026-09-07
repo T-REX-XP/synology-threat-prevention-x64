@@ -31,6 +31,7 @@ from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filter
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
 from tpsweb import (  # noqa: E402
+    SENSOR_CONF,
     _parse_multipart,
     ensure_export_dir,
     fetch_osm_tile,
@@ -38,9 +39,11 @@ from tpsweb import (  # noqa: E402
     handle,
     read_gmaps_key,
     start_job,
+    write_sensor,
     write_update_source,
 )
 from tpsweb import JOBS  # noqa: E402
+import tpsweb as tpsweb_mod  # noqa: E402
 
 
 def check(cond, msg):
@@ -57,6 +60,18 @@ sensor = official_sensor(
 )
 check(sensor["status"] == "engine_start", "sensor status")
 check(sensor["prevention_enforced"] is False and sensor["ips_mode"] == "ids", "ids only")
+check(sensor["enable_prevention"] is False and sensor["network_security_mode"] == "availability", "ids chrome")
+lied = official_sensor(
+    {
+        "enable_sensor": True,
+        "enable_prevention": True,
+        "network_security_mode": "security",
+        "interface_list": [{"if_id": "ovs_eth0", "enabled": True}],
+    },
+    "running", 1, "ovs_eth0", ["ovs_eth0"],
+)
+check(lied["enable_prevention"] is False, "sensor get ignores prevention checkbox")
+check(lied["network_security_mode"] == "availability", "sensor get ignores security mode")
 check(sensor["interface"] == "ovs_eth0", "sensor interface")
 check(all(x["if_id"] != "eth0" for x in sensor["interface_list"]), "hide ovs-enslaved eth0 twin")
 check(any(x["if_id"] == "eth1" for x in official_sensor(
@@ -88,6 +103,84 @@ mir_on = official_sensor(
 )
 check(mir_on["interface"] == "tps0", "mirror_enabled pins tps0 before tap exists")
 check(any(x["if_id"] == "tps0" and x["enabled"] for x in mir_on["interface_list"]), "mirror_enabled injects tps0")
+
+write_sensor({
+    "enable_sensor": True,
+    "enable_prevention": True,
+    "network_security_mode": "security",
+    "interface_list": "ovs_eth0",
+})
+sensor_txt = open(SENSOR_CONF, encoding="utf-8").read()
+check("enable_prevention=no" in sensor_txt, "write_sensor forces prevention off")
+check("network_security_mode=availability" in sensor_txt, "write_sensor forces availability")
+
+
+def _is_hosted(api):
+    api = api or ""
+    if str(api).startswith("SYNO.TPS."):
+        return True
+    return api in (
+        "SYNO.Core.Network.NSM.Device",
+        "SYNO.Core.SystemDB",
+        "SYNO.Core.ExternalDevice.Storage.USB",
+    )
+
+
+def should_steal_request(opts):
+    """Keep in lockstep with tps-bridge.js shouldStealRequest.
+
+    DSM desktop polling uses SYNO.API.Request({compound}) and expects
+    data.reg_ref. Stealing those compounds takes down the DSM session.
+    """
+    if not opts:
+        return False
+    webapi = opts.get("webapi") or {}
+    api = opts.get("api") or webapi.get("api") or ""
+    if "Polling" in str(api):
+        return False
+    if opts.get("is_polling_callback"):
+        return False
+    compound = opts.get("compound")
+    if isinstance(compound, dict) and compound.get("params") is not None:
+        return any(_is_hosted((item or {}).get("api")) for item in (compound.get("params") or []))
+    return _is_hosted(api)
+
+
+check(not should_steal_request({
+    "api": "SYNO.API.Request.Polling.List",
+    "compound": {"params": [{"api": "SYNO.Core.Desktop", "method": "get"}]},
+}), "never steal Polling.* APIs")
+check(not should_steal_request({
+    "compound": {"params": [
+        {"api": "SYNO.Core.Desktop", "method": "get"},
+        {"api": "SYNO.Core.System.Utilization", "method": "get"},
+    ]},
+    "is_polling_callback": True,
+}), "never steal DSM pollingCompoundCallback")
+check(not should_steal_request({
+    "compound": {"params": [
+        {"api": "SYNO.Core.Desktop", "method": "get"},
+        {"api": "SYNO.Entry.Request", "method": "request"},
+    ]},
+}), "Core-only compound stays on entry.cgi (reg_ref)")
+check(should_steal_request({
+    "compound": {"params": [
+        {"api": "SYNO.TPS.Sensor", "method": "get"},
+        {"api": "SYNO.TPS.Settings.Mirror", "method": "set"},
+    ]},
+}), "hosted TPS compound is stolen")
+check(should_steal_request({"api": "SYNO.TPS.Sensor", "method": "get"}), "hosted TPS api is stolen")
+check(not should_steal_request({"api": "SYNO.Core.System.Utilization", "method": "get"}), "Core api is not stolen")
+
+bridge_js = os.path.join(HERE, "..", "package", "ui", "tps-bridge.js")
+js = open(bridge_js, encoding="utf-8").read()
+check("shouldStealRequest" in js, "bridge defines shouldStealRequest")
+check('String(api).indexOf("Polling") !== -1' in js, "bridge refuses Polling APIs")
+check("isPollingCallback" in js and "compoundHasHosted" in js, "bridge keeps reg_ref guards")
+check("wrappedReq.Polling = origReq.Polling" in js, "Request wrap copies .Polling")
+check("gateMonitoredIfaces" not in js, "no interfaceGrid setDisabled monkeypatch")
+check("me.clearGeneralDirty(this);" in js, "General form snaps originalValue once")
+check("setTimeout(function () { me.clearGeneralDirty" not in js, "no timer dirty-clears on General")
 
 src = official_source("et-pro", "abc")
 check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_code")
@@ -258,6 +351,96 @@ check(iface_pin == "tps0", "copy mode pins tps0")
 lan = handle("SYNO.TPS.Settings.Mirror", "set", {"capture_mode": "lan"}, conn)
 check(lan["success"] and lan["data"]["capture_mode"] == "lan", "mirror lan set")
 check(lan["data"]["enabled"] is False, "lan disables copy")
+
+ip_link_mut = []
+_orig_call = tpsweb_mod.subprocess.call
+_orig_popen = tpsweb_mod.subprocess.Popen
+_orig_check = tpsweb_mod.subprocess.check_output
+
+
+def _watch_ip(args):
+    argv = list(args) if not isinstance(args, str) else args.split()
+    if argv and argv[0] == "ip" and "link" in argv and ("add" in argv or "del" in argv):
+        ip_link_mut.append(argv)
+
+
+def _call_watch(args, *a, **kw):
+    _watch_ip(args)
+    return _orig_call(args, *a, **kw)
+
+
+def _popen_watch(args, *a, **kw):
+    _watch_ip(args)
+    return _orig_popen(args, *a, **kw)
+
+
+def _check_watch(args, *a, **kw):
+    _watch_ip(args)
+    return _orig_check(args, *a, **kw)
+
+
+tpsweb_mod.subprocess.call = _call_watch
+tpsweb_mod.subprocess.Popen = _popen_watch
+tpsweb_mod.subprocess.check_output = _check_watch
+try:
+    again = handle("SYNO.TPS.Settings.Mirror", "set", {"capture_mode": "copy", "router_ip": "192.168.1.1"}, conn)
+    check(again["success"], "mirror set without gretap")
+    check("tap_present" in again["data"], "mirror reports tap_present")
+    check(not ip_link_mut, "mirror set does not ip link add/del")
+finally:
+    tpsweb_mod.subprocess.call = _orig_call
+    tpsweb_mod.subprocess.Popen = _orig_popen
+    tpsweb_mod.subprocess.check_output = _orig_check
+
+seq = []
+_ws = tpsweb_mod.write_sensor
+_wm = tpsweb_mod.write_mirror_conf
+_se = tpsweb_mod.start_engine
+_st = tpsweb_mod.stop_engine
+
+
+def _tap_ws(data):
+    seq.append("sensor")
+    return _ws(data)
+
+
+def _tap_wm(data):
+    seq.append("mirror")
+    return _wm(data)
+
+
+tpsweb_mod.write_sensor = _tap_ws
+tpsweb_mod.write_mirror_conf = _tap_wm
+tpsweb_mod.start_engine = lambda: True
+tpsweb_mod.stop_engine = lambda: None
+try:
+    compound = handle("SYNO.TPS.Compound", "request", {
+        "compound": [
+            {"api": "SYNO.TPS.Sensor", "method": "set", "params": {
+                "enable_sensor": True, "interface_list": "ovs_eth0",
+            }},
+            {"api": "SYNO.TPS.Settings.Mirror", "method": "set", "params": {
+                "capture_mode": "copy", "router_ip": "192.168.1.1",
+            }},
+        ],
+    }, conn)
+finally:
+    tpsweb_mod.write_sensor = _ws
+    tpsweb_mod.write_mirror_conf = _wm
+    tpsweb_mod.start_engine = _se
+    tpsweb_mod.stop_engine = _st
+check(compound["success"], "compound request succeeds")
+check(seq == ["mirror", "sensor"], "compound executes Mirror.set before Sensor.set")
+rows = compound["data"]["result"]
+check(rows[0]["api"] == "SYNO.TPS.Sensor" and rows[1]["api"] == "SYNO.TPS.Settings.Mirror",
+      "compound result stays in request order")
+check(compound["data"]["has_fail"] is False, "compound has_fail false")
+nested = handle("SYNO.TPS.Compound", "request", {
+    "compound": [{"api": "SYNO.TPS.Compound", "method": "request", "params": {}}],
+}, conn)
+check(nested["data"]["has_fail"] is True and nested["data"]["result"][0]["error"]["code"] == 102,
+      "compound rejects nested Compound")
+
 busy = start_job({"status": "updating"})
 chk = handle("SYNO.TPS.Settings.Update", "start_check", {}, conn)
 check(chk["success"] and str(chk["data"]["task_id"]) == str(busy), "start_check reuses in-flight update")
@@ -270,7 +453,6 @@ os.makedirs(os.environ["TPS_PKGSHARES"], exist_ok=True)
 os.symlink(share_root, os.path.join(os.environ["TPS_PKGSHARES"], "ThreatPrevention"))
 import importlib
 import paths as paths_mod
-import tpsweb as tpsweb_mod
 importlib.reload(paths_mod)
 importlib.reload(tpsweb_mod)
 check(tpsweb_mod.ensure_export_dir() == "/ThreatPrevention", "export folder is File Station share path")

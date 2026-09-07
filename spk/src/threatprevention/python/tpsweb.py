@@ -277,7 +277,8 @@ def read_sensor():
     if os.path.isfile(IFACE_FILE):
         cfg["interface_list"] = open(IFACE_FILE).read().strip()
     cfg["enable_sensor"] = _truth(cfg.get("enable_sensor", True))
-    cfg["enable_prevention"] = _truth(cfg.get("enable_prevention", False))
+    cfg["enable_prevention"] = False
+    cfg["network_security_mode"] = "availability"
     cfg["default_detect"] = _truth(cfg.get("default_detect", True))
     cfg["enable_auto_export_events_during_postupgrade"] = _truth(
         cfg.get("enable_auto_export_events_during_postupgrade", False)
@@ -334,17 +335,16 @@ def write_sensor(data):
         _pin_iface(pin)
     lines = [
         "enable_sensor=%s" % ("yes" if _truth(data.get("enable_sensor", True)) else "no"),
-        "enable_prevention=%s" % ("yes" if _truth(data.get("enable_prevention", False)) else "no"),
+        "enable_prevention=no",
         "default_detect=%s" % ("yes" if _truth(data.get("default_detect", True)) else "no"),
         "enable_auto_export_events_during_postupgrade=%s" % (
             "yes" if _truth(data.get("enable_auto_export_events_during_postupgrade", False)) else "no"
         ),
-        "network_security_mode=%s" % (data.get("network_security_mode") or "availability"),
+        "network_security_mode=availability",
         "interface_list=%s" % iface,
     ]
     with open(SENSOR_CONF, "w") as fh:
         fh.write("\n".join(lines) + "\n")
-    # persist the checkbox; capture stays AF_PACKET IDS (no NFQUEUE).
 
 
 def _truth(v):
@@ -438,7 +438,7 @@ def write_mirror_conf(data):
     os.makedirs(PKGETC, exist_ok=True)
     lines = [
         "# Copy LAN↔WAN traffic from the OpenWrt router into a local gretap for Suricata.",
-        "# 1 = create tps0 and capture on it. 0 = capture on the NAS LAN NIC (ovs_eth0).",
+        "# 1 = capture on tps0 (created at package start). 0 = capture on the NAS LAN NIC (ovs_eth0).",
         "enabled=%s" % ("1" if enabled else "0"),
         "router_ip=%s" % router_ip,
         "# Empty local_ip: pick the IPv4 used to reach router_ip.",
@@ -467,67 +467,6 @@ def mirror_status():
     }
 
 
-def _run_ip(args):
-    try:
-        return subprocess.call(
-            ["ip"] + list(args),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return 1
-
-
-def _detect_local_ip(router):
-    if not router:
-        return ""
-    try:
-        out = subprocess.check_output(
-            ["ip", "-4", "route", "get", router],
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-        ).decode("utf-8", "replace")
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    match = re.search(r"\bsrc\s+(\d+\.\d+\.\d+\.\d+)", out)
-    return match.group(1) if match else ""
-
-
-def _destroy_gretap(ifname):
-    if not ifname or not os.path.exists("/sys/class/net/" + ifname):
-        return
-    _run_ip(["link", "set", ifname, "down"])
-    _run_ip(["link", "del", ifname])
-
-
-def apply_gretap():
-    """Best-effort tps0 create. Package user often lacks CAP_NET_ADMIN."""
-    m = read_mirror_conf()
-    ifname = m.get("ifname") or "tps0"
-    if not m.get("enabled"):
-        _destroy_gretap(ifname)
-        return
-    router = m.get("router_ip") or ""
-    local_ip = m.get("local_ip") or _detect_local_ip(router)
-    if not router or not local_ip:
-        return
-    if os.path.exists("/sys/class/net/" + ifname):
-        _run_ip(["link", "set", ifname, "up"])
-        return
-    try:
-        subprocess.call(
-            ["modprobe", "ip_gre"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass
-    _run_ip(["link", "add", ifname, "type", "gretap", "remote", router, "local", local_ip, "ttl", "255"])
-    _run_ip(["link", "set", ifname, "up"])
-
-
 def settings_mirror(method, p):
     if method == "get":
         return ok(mirror_status())
@@ -535,7 +474,6 @@ def settings_mirror(method, p):
         bad = write_mirror_conf(p or {})
         if bad:
             return err(100)
-        apply_gretap()
         m = read_mirror_conf()
         tap = m.get("ifname") or "tps0"
         if m.get("enabled"):
@@ -783,6 +721,72 @@ def event_row(r, conn=None):
     }
 
 
+_COMPOUND_SET_ORDER = {
+    ("SYNO.TPS.Settings.Mirror", "set"): 0,
+    ("SYNO.TPS.Sensor", "set"): 1,
+    ("SYNO.TPS.Settings.Update.Schedule", "set"): 2,
+    ("SYNO.TPS.Settings.Update.Source", "set"): 3,
+}
+
+
+def _compound_items(params):
+    raw = (params or {}).get("compound")
+    if raw is None:
+        raw = (params or {}).get("params")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = []
+    if isinstance(raw, dict):
+        raw = raw.get("params") or []
+    if not isinstance(raw, list):
+        return []
+    return raw
+
+
+def handle_compound(params, conn):
+    """Apply a hosted compound in a defined order. Result rows stay in request order."""
+    items = _compound_items(params)
+    indexed = list(enumerate(items))
+
+    def sort_key(pair):
+        item = pair[1] if isinstance(pair[1], dict) else {}
+        return (_COMPOUND_SET_ORDER.get((item.get("api"), item.get("method")), 50), pair[0])
+
+    result = [None] * len(items)
+    failed = False
+    for orig_i, item in sorted(indexed, key=sort_key):
+        if not isinstance(item, dict):
+            result[orig_i] = {"api": "", "method": "", "success": False, "error": {"code": 100}}
+            failed = True
+            continue
+        api = item.get("api") or ""
+        method = item.get("method") or ""
+        if api == "SYNO.TPS.Compound":
+            result[orig_i] = {"api": api, "method": method, "success": False, "error": {"code": 102}}
+            failed = True
+            continue
+        p = item.get("params") or {}
+        if isinstance(p, str):
+            try:
+                p = json.loads(p)
+            except ValueError:
+                p = {}
+        body = handle(api, method, p, conn)
+        row = {
+            "api": api,
+            "method": method,
+            "success": bool(body.get("success")),
+            "data": body.get("data") or {},
+        }
+        if not row["success"]:
+            failed = True
+            row["error"] = body.get("error") or {"code": 500}
+        result[orig_i] = row
+    return ok({"result": result, "has_fail": failed})
+
+
 def handle(api, method, params, conn):
     params = coerce_params(params)
     if api == "SYNO.TPS.Event" and method == "list":
@@ -845,6 +849,8 @@ def handle(api, method, params, conn):
         return overview(conn)
     if api == "SYNO.TPS.Settings.Map" and method == "get":
         return ok({"key": read_gmaps_key()})
+    if api == "SYNO.TPS.Compound" and method == "request":
+        return handle_compound(params, conn)
     if api == "SYNO.TPS.Settings.Telegram":
         return settings_telegram(conn, method, params)
     if api == "SYNO.TPS.Settings.Mirror":

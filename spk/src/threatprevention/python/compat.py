@@ -360,11 +360,11 @@ def official_sensor(cfg, status, pid, iface, live=None, mirror_ifname="", mirror
     exist = os.path.isfile(SENSOR_CONF) or os.path.isfile(IFACE_FILE)
     return {
         "enable_sensor": cfg.get("enable_sensor", True),
-        "enable_prevention": cfg.get("enable_prevention", False),
+        "enable_prevention": False,
         "enable_auto_export_events_during_postupgrade": cfg.get(
             "enable_auto_export_events_during_postupgrade", False
         ),
-        "network_security_mode": cfg.get("network_security_mode") or "availability",
+        "network_security_mode": "availability",
         "default_detect": cfg.get("default_detect", True),
         "interface": (next((x["if_id"] for x in ifaces if x.get("enabled")), "") or (ifaces[0]["if_id"] if ifaces else "")),
         "interface_list": ifaces,
@@ -373,7 +373,6 @@ def official_sensor(cfg, status, pid, iface, live=None, mirror_ifname="", mirror
         "sensor_config_exist": exist,
         "status": eng,
         "pid": pid,
-        # Stored checkbox only. This PoC stays AF_PACKET IDS (no NFQUEUE).
         "prevention_enforced": False,
         "ips_mode": "ids",
     }
