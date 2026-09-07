@@ -26,6 +26,8 @@ from compat import (
     official_variables,
     parse_event_id,
     severity_name,
+    severity_num,
+    to_epoch,
 )
 from compiler import compile_rules, import_rules, reload_suricata
 from paths import (
@@ -252,27 +254,30 @@ def event_list(conn, p):
     if p.get("sig_sid"):
         where.append("sig_sid=?")
         args.append(int(p["sig_sid"]))
-    if p.get("severity"):
+    sev = severity_num(p.get("severity"))
+    if sev is not None:
         where.append("impact_flag=?")
-        args.append(int(p["severity"]))
+        args.append(sev)
     if p.get("ip_src"):
         where.append("(ip_src_str=? OR ip_src=?)")
         args.extend([p["ip_src"], ip_to_int(p["ip_src"])])
     if p.get("ip_dst"):
         where.append("(ip_dst_str=? OR ip_dst=?)")
         args.extend([p["ip_dst"], ip_to_int(p["ip_dst"])])
-    if p.get("begin"):
+    begin = to_epoch(p.get("begin"))
+    finish = to_epoch(p.get("finish") or p.get("end"))
+    if begin is not None:
         where.append("ts_epoch>=?")
-        args.append(int(p["begin"]))
+        args.append(begin)
     elif p.get("date_range") == "7days":
         where.append("ts_epoch>=?")
         args.append(int(time.time()) - 7 * 86400)
     elif p.get("date_range") == "30days":
         where.append("ts_epoch>=?")
         args.append(int(time.time()) - 30 * 86400)
-    if p.get("finish"):
+    if finish is not None:
         where.append("ts_epoch<=?")
-        args.append(int(p["finish"]))
+        args.append(finish)
     sql = "FROM event WHERE " + " AND ".join(where)
     total = conn.execute("SELECT COUNT(*) n " + sql, args).fetchone()["n"]
     rows = conn.execute(

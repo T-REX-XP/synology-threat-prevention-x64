@@ -19,32 +19,9 @@ done
 [ -n "${PYTHON}" ] || PYTHON="python3"
 
 write_status() {
-	ui="${PKGDEST}/ui/status.html"
-	[ -d "${PKGDEST}/ui" ] || return 0
-	state="$1"
-	iface="$2"
-	cls="bad"
-	label="stopped"
-	pid=""
-	if [ "${state}" = "running" ] && [ -f "${PIDFILE}" ]; then
-		pid="$(cat "${PIDFILE}" 2>/dev/null || true)"
-		if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
-			cls="ok"
-			label="running"
-		fi
-	fi
-	rules="bundled ET Open 2021 (Suricata 5 syntax)"
-	if [ -f "${PKGVAR}/rules/.from-suricata-update" ]; then
-		rules="suricata-update (current ET Open for Suricata 8)"
-	fi
-	{
-		printf '<p>Engine: <span class="%s">%s</span>' "${cls}" "${label}"
-		[ -n "${pid}" ] && printf ' (pid %s)' "${pid}"
-		printf '</p>\n'
-		printf '<p>Capture interface: <code>%s</code></p>\n' "${iface:-unknown}"
-		printf '<p>Rules: %s</p>\n' "${rules}"
-		printf '<p>API: <code>http://NAS:19557/</code> (tpsweb)</p>\n'
-	} > "${ui}.tmp" && mv "${ui}.tmp" "${ui}"
+	# Keep status out of target/ui — leftover HTML there was opened as the old custom app.
+	mkdir -p "${PKGVAR}"
+	echo "$1 ${2:-}" > "${PKGVAR}/engine.status" 2>/dev/null || true
 }
 
 pick_iface() {

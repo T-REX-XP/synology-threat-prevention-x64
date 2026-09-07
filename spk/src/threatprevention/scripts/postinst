@@ -12,7 +12,8 @@ rm -f "${PKGDEST}/ui/threatprevention.js" \
 	"${PKGDEST}/ui/index.html" \
 	"${PKGDEST}/ui/app.js" \
 	"${PKGDEST}/ui/app.css" \
-	"${PKGDEST}/ui/status.html"
+	"${PKGDEST}/ui/status.html" \
+	"${PKGDEST}/ui/tps-bridge.js"
 if [ -f "${RULES_TGZ}" ] && [ ! -d "${RULES_DIR}/rules" ]; then
 	tar -xzf "${RULES_TGZ}" -C "${RULES_DIR}"
 	rm -f "${RULES_DIR}/rules/emerging-deleted.rules" \

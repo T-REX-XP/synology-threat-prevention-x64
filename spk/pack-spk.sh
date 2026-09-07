@@ -58,6 +58,8 @@ cp -a "${ORIG_RULES}/version.txt" "${STAGING}/package/etc/rules/" 2>/dev/null ||
 cp -a "${ROOT}/unpacked/package/etc/suricata/threshold.config" "${STAGING}/package/etc/suricata/"
 cp -a "${SRC}/package/etc/sensor/sensor.conf" "${STAGING}/package/etc/sensor/sensor.conf"
 cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/suricata/suricata.yaml"
+mkdir -p "${STAGING}/package/etc/nginx"
+cp -a "${SRC}/package/etc/nginx/dsm-tpsweb.conf" "${STAGING}/package/etc/nginx/dsm-tpsweb.conf"
 
 info "Stage official ExtJS UI (research PoC — not redistributable)"
 OFFICIAL_UI="${ROOT}/unpacked/package/ui"
@@ -65,38 +67,28 @@ OFFICIAL_UI="${ROOT}/unpacked/package/ui"
 rm -rf "${STAGING}/package/ui"
 mkdir -p "${STAGING}/package/ui"
 cp -a "${OFFICIAL_UI}/." "${STAGING}/package/ui/"
-cp -a "${SRC}/package/ui/tps-bridge.js" "${STAGING}/package/ui/tps-bridge.js"
+# One JS file only. A second config module (tps-bridge.js) makes DSM JSLoad
+# a cycle: synoips.js ↔ tps-bridge.js, and AppLaunch dies with "loop detected".
+{
+  printf '%s\n' "/* tps-bridge inlined — do not add tps-bridge.js to ui/config */"
+  cat "${SRC}/package/ui/tps-bridge.js"
+  printf '\n'
+  cat "${STAGING}/package/ui/synoips.js"
+} > "${STAGING}/package/ui/synoips.js.new"
+mv "${STAGING}/package/ui/synoips.js.new" "${STAGING}/package/ui/synoips.js"
+rm -f "${STAGING}/package/ui/tps-bridge.js"
 python3 - "${STAGING}/package/ui/config" <<'PY'
 import json, sys
 path = sys.argv[1]
 cfg = json.load(open(path, encoding="utf-8"))
+cfg.pop("tps-bridge.js", None)
 app = cfg["synoips.js"]["SYNO.SDS.TPS.Application"]
-deps = list(app.get("depend") or [])
-if "SYNO.SDS.TPS.Bridge" not in deps:
-    deps = ["SYNO.SDS.TPS.Bridge"] + deps
-app["depend"] = deps
-merged = {
-    "tps-bridge.js": {
-        "SYNO.SDS.TPS.Bridge": {
-            "type": "lib",
-            "title": "TPS Suricata compatibility",
-            "formatedTitle": "TPS Suricata compatibility",
-        },
-        "SYNO.SDS.ThreatPrevention.Application": {
-            "type": "app",
-            "appWindow": "SYNO.SDS.TPS.MainWindow",
-            "title": "Threat Prevention",
-            "formatedTitle": "Threat Prevention",
-            "icon": "images/IDS_IPS_{0}.png",
-            "allUsers": False,
-            "maxInstance": 1,
-            "depend": ["SYNO.SDS.TPS.Bridge", "SYNO.SDS.TPS.MainWindow"],
-        },
-    }
-}
-merged.update(cfg)
-json.dump(merged, open(path, "w", encoding="utf-8"), indent=2)
-print("merged official ui/config with tps-bridge.js")
+app["depend"] = [d for d in (app.get("depend") or []) if d != "SYNO.SDS.TPS.Bridge"]
+cfg["synoips.js"].pop("SYNO.SDS.ThreatPrevention.Application", None)
+json.dump(cfg, open(path, "w", encoding="utf-8"), indent=2)
+print("ui/config modules:", list(cfg))
+print("apps:", [k for k, v in cfg["synoips.js"].items() if isinstance(v, dict) and v.get("type") == "app"])
+print("official depend:", app.get("depend"))
 PY
 # DSM tile sizes official tree may omit
 if command -v sips >/dev/null 2>&1 && [ -f "${STAGING}/package/ui/images/IDS_IPS_256.png" ]; then

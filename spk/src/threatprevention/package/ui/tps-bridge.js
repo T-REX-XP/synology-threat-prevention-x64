@@ -1,21 +1,15 @@
-/* Research PoC compatibility layer.
-   Official synoips.js talks only to DSM sendWebAPI / SYNO.API.Store / pollReg
-   (entry.cgi → SYNO.TPS.*.so). Those .so files are aarch64 and cannot load on
-   x86_64 DSM. This original hook sends SYNO.TPS.* to tpsweb on :19557, which
-   implements the official envelopes on top of vanilla Suricata 8. */
+/* Research PoC compatibility layer, inlined into synoips.js at pack time.
+   Official ExtJS talks to sendWebAPI / Store / pollReg. Those hit aarch64
+   SYNO.TPS.*.so on SRM. Here they go to tpsweb via same-origin /api. */
 Ext.namespace("SYNO.SDS.TPS");
-Ext.namespace("SYNO.SDS.ThreatPrevention");
-
-/* Existing Start Menu pins from 8.0.6-0010 launch this class. Point it at the official window. */
-Ext.define("SYNO.SDS.ThreatPrevention.Application", {
-	extend: "SYNO.SDS.AppInstance",
-	appWindowName: "SYNO.SDS.TPS.MainWindow"
-});
 
 SYNO.SDS.TPS.Bridge = {
 	base: function () {
-		var host = window.location.hostname || "127.0.0.1";
-		return "http://" + host + ":19557/";
+		return "/webman/3rdparty/ThreatPrevention/api";
+	},
+	fallbackBase: function () {
+		if (window.location.protocol === "https:") { return ""; }
+		return "http://" + (window.location.hostname || "127.0.0.1") + ":19557/";
 	},
 	apis: [
 		"SYNO.TPS.Backup", "SYNO.TPS.Device", "SYNO.TPS.Event", "SYNO.TPS.Event.ExportFolder",
@@ -40,34 +34,66 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		return out;
 	},
+	envelope: function (j) {
+		var data = (j && j.data) || {};
+		var out = Ext.apply({ success: !!(j && j.success), data: data }, data);
+		if (j && j.error) { out.error = j.error; }
+		return out;
+	},
 	call: function (api, method, version, params, cb, scope) {
+		var me = this;
 		var q = Ext.apply({ api: api, method: method, version: version || 1 }, this.encodeParams(params));
-		Ext.Ajax.request({
-			url: this.base(),
-			method: "POST",
-			params: q,
-			_tpsDirect: true,
-			success: function (resp) {
-				var j = {};
-				try { j = Ext.decode(resp.responseText); } catch (e) { j = { success: false }; }
-				if (cb) {
-					cb.call(scope || window, !!j.success, j.data || {}, j, q);
+		function fire(ok, j) {
+			if (cb) { cb.call(scope || window, ok, (j && j.data) || {}, j || {}, q); }
+		}
+		function post(url, then404) {
+			Ext.Ajax.request({
+				url: url,
+				method: "POST",
+				params: q,
+				_tpsDirect: true,
+				success: function (resp) {
+					var j = {};
+					try { j = Ext.decode(resp.responseText); } catch (e) { j = { success: false }; }
+					fire(!!j.success, j);
+				},
+				failure: function (resp) {
+					if (then404 && resp && (resp.status === 404 || resp.status === 0)) {
+						then404();
+						return;
+					}
+					fire(false, { success: false, error: { code: 500 } });
 				}
-			},
-			failure: function (resp) {
-				var err = { success: false, error: { code: 500 } };
-				if (resp && resp.status === 0) {
-					err.error = { code: 500, isTimeout: false, message: "tpsweb unreachable (use HTTP DSM :5000, not HTTPS mixed content)" };
-				}
-				if (cb) { cb.call(scope || window, false, err.error || {}, err, q); }
-			}
-		});
+			});
+		}
+		var alt = me.fallbackBase();
+		post(me.base(), alt ? function () { post(alt); } : null);
 	},
 	isTps: function (api) {
 		return api && String(api).indexOf("SYNO.TPS.") === 0;
 	},
-	dispatch: function (opts, fallback, ctx) {
-		if (!opts) { return fallback.call(ctx); }
+	passthrough: function (item, cb, scope) {
+		Ext.Ajax.request({
+			url: "/webapi/entry.cgi",
+			method: "POST",
+			params: Ext.apply({
+				api: item.api,
+				method: item.method,
+				version: item.version || 1
+			}, this.encodeParams(item.params || {})),
+			_tpsDirect: true,
+			success: function (resp) {
+				var j = {};
+				try { j = Ext.decode(resp.responseText); } catch (e) { j = { success: false }; }
+				if (cb) { cb.call(scope || window, !!j.success, j.data || {}, j); }
+			},
+			failure: function () {
+				if (cb) { cb.call(scope || window, false, {}, { success: false, error: { code: 500 } }); }
+			}
+		});
+	},
+	dispatch: function (opts, fallback) {
+		if (!opts) { return fallback(); }
 		if (opts.compound && opts.compound.params) {
 			return this.compound(opts);
 		}
@@ -76,11 +102,9 @@ SYNO.SDS.TPS.Bridge = {
 		var version = opts.version || (opts.webapi && opts.webapi.version) || 1;
 		var params = opts.params || (opts.webapi && opts.webapi.params) || {};
 		if (!this.isTps(api)) {
-			return fallback.call(ctx);
+			return fallback();
 		}
-		var cb = opts.callback || opts.status_callback;
-		var scope = opts.scope || ctx;
-		this.call(api, method, version, params, cb, scope);
+		this.call(api, method, version, params, opts.callback || opts.status_callback, opts.scope);
 		return true;
 	},
 	compound: function (opts) {
@@ -93,18 +117,25 @@ SYNO.SDS.TPS.Bridge = {
 			if (opts.callback) { opts.callback.call(opts.scope || window, true, { result: [], has_fail: false }); }
 			return true;
 		}
+		function done(idx, ok, data, raw) {
+			out[idx] = { api: items[idx].api, method: items[idx].method, success: ok, data: data };
+			if (!ok) {
+				failed = true;
+				out[idx].error = (raw && raw.error) || { code: 500 };
+			}
+			left -= 1;
+			if (!left && opts.callback) {
+				opts.callback.call(opts.scope || window, true, { result: out, has_fail: failed });
+			}
+		}
 		Ext.each(items, function (item, idx) {
-			me.call(item.api, item.method, item.version || 1, item.params || {}, function (ok, data, raw) {
-				out[idx] = { api: item.api, method: item.method, success: ok, data: data };
-				if (!ok) {
-					failed = true;
-					out[idx].error = (raw && raw.error) || { code: 500 };
-				}
-				left -= 1;
-				if (!left && opts.callback) {
-					opts.callback.call(opts.scope || window, true, { result: out, has_fail: failed });
-				}
-			});
+			if (me.isTps(item.api)) {
+				me.call(item.api, item.method, item.version || 1, item.params || {}, function (ok, data, raw) {
+					done(idx, ok, data, raw);
+				});
+			} else {
+				me.passthrough(item, function (ok, data, raw) { done(idx, ok, data, raw); });
+			}
 		});
 		return true;
 	},
@@ -118,9 +149,7 @@ SYNO.SDS.TPS.Bridge = {
 		if (window._S) { targets.push(_S.knowns, _S.Info); }
 		Ext.each(this.apis, function (api) {
 			Ext.each(targets, function (obj) {
-				if (obj && typeof obj === "object" && !obj[api]) {
-					obj[api] = info;
-				}
+				if (obj && typeof obj === "object" && !obj[api]) { obj[api] = info; }
 			});
 		});
 	},
@@ -136,38 +165,47 @@ SYNO.SDS.TPS.Bridge = {
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
-		if (opts.callback) {
-			opts.callback.call(opts.scope || window, true, {});
-		}
+		if (opts.callback) { opts.callback.call(opts.scope || window, true, {}); }
 		return true;
+	},
+	pickApi: function (opts) {
+		var p = (opts && (opts.params || opts.jsonData)) || {};
+		return p.api || (opts && opts.api) || "";
 	},
 	install: function () {
 		var me = this;
+		if (me._installed) {
+			me.injectInfo();
+			return;
+		}
 		me.injectInfo();
 		function hookProto(cls, name, extra) {
 			if (!cls || !cls.prototype || !cls.prototype[name] || cls.prototype[name]._tpsBridge) { return; }
 			var orig = cls.prototype[name];
-			cls.prototype[name] = function (opts) {
-				if (extra) { return extra.call(this, opts, orig); }
-				var self = this;
-				var hit = me.dispatch(opts, function () { return orig.apply(self, arguments); }, self);
+			cls.prototype[name] = function () {
+				var args = arguments;
+				var opts = args[0];
+				if (extra) { return extra.call(this, opts, orig, args); }
+				var hit = me.dispatch(opts, function () { return orig.apply(this, args); }.bind(this));
 				if (hit === true) { return; }
-				return orig.apply(this, arguments);
+				return orig.apply(this, args);
 			};
 			cls.prototype[name]._tpsBridge = true;
 		}
 		hookProto(SYNO.SDS.AppWindow, "sendWebAPI");
-		hookProto(SYNO.SDS.AppWindow, "downloadWebAPI", function (opts, orig) {
+		if (SYNO.SDS.AppInstance) { hookProto(SYNO.SDS.AppInstance, "sendWebAPI"); }
+		hookProto(SYNO.SDS.AppWindow, "downloadWebAPI", function (opts, orig, args) {
 			var api = opts && (opts.api || (opts.webapi && opts.webapi.api));
 			if (me.isTps(api)) { return me.download(opts); }
-			return orig.apply(this, arguments);
+			return orig.apply(this, args);
 		});
 		if (SYNO.SDS.AppWindow && SYNO.SDS.AppWindow.prototype.pollReg && !SYNO.SDS.AppWindow.prototype.pollReg._tpsBridge) {
 			var origPoll = SYNO.SDS.AppWindow.prototype.pollReg;
 			var origUnreg = SYNO.SDS.AppWindow.prototype.pollUnreg;
 			SYNO.SDS.AppWindow.prototype.pollReg = function (opts) {
+				var args = arguments;
 				var api = opts && opts.webapi && opts.webapi.api;
-				if (!me.isTps(api)) { return origPoll.apply(this, arguments); }
+				if (!me.isTps(api)) { return origPoll.apply(this, args); }
 				var self = this;
 				var tick = function () {
 					me.call(
@@ -194,10 +232,11 @@ SYNO.SDS.TPS.Bridge = {
 		if (window.SYNO && SYNO.API && SYNO.API.Request && !SYNO.API.Request._tpsBridge) {
 			var origReq = SYNO.API.Request;
 			SYNO.API.Request = function (opts) {
+				var args = arguments;
 				if (opts && me.isTps(opts.api)) {
-					return me.dispatch(opts, function () { return origReq.apply(this, arguments); }, this);
+					return me.dispatch(opts, function () { return origReq.apply(this, args); });
 				}
-				return origReq.apply(this, arguments);
+				return origReq.apply(this, args);
 			};
 			SYNO.API.Request._tpsBridge = true;
 		}
@@ -206,26 +245,35 @@ SYNO.SDS.TPS.Bridge = {
 			Ext.Ajax.request = function (opts) {
 				opts = opts || {};
 				if (opts._tpsDirect) { return origAjax.apply(this, arguments); }
-				var p = opts.params || {};
-				var api = p.api || opts.api;
-				if (me.isTps(api)) {
-					return me.call(api, p.method || opts.method, p.version || 1, p, opts.success && function (ok, data, raw) {
-						if (ok && opts.success) {
-							opts.success.call(opts.scope || window, { responseText: Ext.encode(raw) }, opts);
-						} else if (opts.failure) {
-							opts.failure.call(opts.scope || window, { responseText: Ext.encode(raw), status: 500 }, opts);
-						}
-					}, opts.scope);
-				}
-				return origAjax.apply(this, arguments);
+				var api = me.pickApi(opts);
+				if (!me.isTps(api)) { return origAjax.apply(this, arguments); }
+				var p = opts.params || opts.jsonData || {};
+				return me.call(api, p.method || opts.method, p.version || 1, p, function (ok, data, raw) {
+					var env = me.envelope(raw || { success: ok, data: data });
+					var fake = { responseText: Ext.encode(env), status: ok ? 200 : 500 };
+					if (ok && opts.success) {
+						opts.success.call(opts.scope || window, fake, opts);
+					} else if (!ok && opts.failure) {
+						opts.failure.call(opts.scope || window, fake, opts);
+					}
+				});
 			};
 			Ext.Ajax.request._tpsBridge = true;
 		}
+		me._installed = true;
 	}
 };
 
-Ext.onReady(function () {
-	SYNO.SDS.TPS.Bridge.install();
-	window.setTimeout(function () { SYNO.SDS.TPS.Bridge.install(); }, 400);
-	window.setTimeout(function () { SYNO.SDS.TPS.Bridge.install(); }, 2000);
-});
+(function () {
+	function boot() {
+		if (window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Bridge) {
+			SYNO.SDS.TPS.Bridge.install();
+		}
+	}
+	if (window.Ext && Ext.onReady) {
+		if (Ext.isReady) { boot(); }
+		Ext.onReady(boot);
+	} else {
+		window.setTimeout(boot, 0);
+	}
+}());

@@ -44,6 +44,46 @@ def coerce_params(params):
     return out
 
 
+def to_epoch(value):
+    """Official Event.list sends begin/end as 'YYYY-MM-DD[ HH:MM:SS]', not epoch."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    text = text.replace("T", " ", 1)
+    for fmt, n in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d", 10), ("%Y/%m/%d %H:%M:%S", 19), ("%Y/%m/%d", 10)):
+        try:
+            return int(time.mktime(time.strptime(text[:n], fmt)))
+        except (ValueError, OverflowError):
+            continue
+    return None
+
+
+def severity_num(value):
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lower()
+    if text in ("high", "1"):
+        return 1
+    if text in ("medium", "2"):
+        return 2
+    if text in ("low", "3"):
+        return 3
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def flatten_keywords(value):
     if value is None:
         return ""
