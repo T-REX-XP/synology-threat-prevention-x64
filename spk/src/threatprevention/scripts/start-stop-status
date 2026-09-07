@@ -1,0 +1,56 @@
+#!/bin/sh
+PKGDEST="${SYNOPKG_PKGDEST:-/var/packages/ThreatPrevention/target}"
+PKGVAR="/var/packages/ThreatPrevention/var"
+PIDFILE="${PKGVAR}/suricata.pid"
+BIN="${PKGDEST}/bin/suricata"
+YAML="${PKGDEST}/etc/suricata/suricata.yaml"
+LOGDIR="${PKGVAR}/log"
+
+pick_iface() {
+	# First non-loopback interface; override with /var/packages/ThreatPrevention/etc/interface
+	if [ -f /var/packages/ThreatPrevention/etc/interface ]; then
+		cat /var/packages/ThreatPrevention/etc/interface
+		return
+	fi
+	ip -o link show 2>/dev/null | awk -F': ' '$2 !~ /^(lo|docker|veth|br-|ovs-system)/ { print $2; exit }' | cut -d'@' -f1
+}
+
+start() {
+	mkdir -p "${LOGDIR}" "${PKGVAR}"
+	if [ ! -x "${BIN}" ]; then
+		echo "suricata binary missing" >&2
+		return 1
+	fi
+	IFACE="$(pick_iface)"
+	if [ -z "${IFACE}" ]; then
+		echo "no capture interface" >&2
+		return 1
+	fi
+	# IDS (af-packet). NFQUEUE IPS is not enabled in this unsigned package.
+	"${BIN}" -c "${YAML}" --pidfile "${PIDFILE}" -D -i "${IFACE}" \
+		-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}"
+}
+
+stop() {
+	if [ -f "${PIDFILE}" ]; then
+		kill "$(cat "${PIDFILE}")" 2>/dev/null || true
+		rm -f "${PIDFILE}"
+	fi
+	killall suricata 2>/dev/null || true
+}
+
+status() {
+	if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+		exit 0
+	fi
+	exit 1
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	status) status ;;
+	log) exit 1 ;;
+	*) exit 1 ;;
+esac
+exit 0

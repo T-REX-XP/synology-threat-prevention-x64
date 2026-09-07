@@ -1,0 +1,17 @@
+#!/bin/sh
+# Unpack ET rules once into the package var area if missing.
+PKGDEST="${SYNOPKG_PKGDEST:-/var/packages/ThreatPrevention/target}"
+PKGVAR="/var/packages/ThreatPrevention/var"
+RULES_TGZ="${PKGDEST}/etc/rules/emerging.rules.tar.gz"
+RULES_DIR="${PKGDEST}/etc/rules/suricata"
+
+mkdir -p "${PKGVAR}/log" "${RULES_DIR}"
+if [ -f "${RULES_TGZ}" ] && [ ! -d "${RULES_DIR}/rules" ]; then
+	tar -xzf "${RULES_TGZ}" -C "${RULES_DIR}"
+	rm -f "${RULES_DIR}/rules/emerging-deleted.rules" \
+		"${RULES_DIR}/rules/botcc.portgrouped.rules"
+	cp -f "${PKGDEST}/etc/rules/syno-custom-events.rules" "${RULES_DIR}/rules/" 2>/dev/null || true
+	cp -f "${PKGDEST}/etc/rules/classification.config" "${RULES_DIR}/" 2>/dev/null || true
+	cp -f "${PKGDEST}/etc/rules/reference.config" "${RULES_DIR}/" 2>/dev/null || true
+fi
+exit 0
