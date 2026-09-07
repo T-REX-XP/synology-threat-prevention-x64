@@ -52,6 +52,8 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 | T24 | `Sensor.set` prevention / `security` | stored, not enforced | done (0029): `prevention_enforced:false`, `ips_mode:ids`; no NFQUEUE |
 | T25 | `Settings.Update.Source` ET Pro | licensed feed | done (0029): sidecar + `update-rules.sh`; missing code → `etpro_error` |
 | T26 | `Settings.Storage` USB max | Core compound | done (0029): empty USB/SystemDB shapes; `logStorageMaxLimit` fallback |
+| T27 | Telegram notify | extra Settings tab | done (0031): `Settings.Telegram` + `etc/telegram.conf` |
+| T28 | Extra rule feeds | extra Settings tab | done (0031): `Settings.Feed` + `etc/feeds.json` (additive to ET) |
 
 ## P3 — out of scope unless asked
 
@@ -65,12 +67,12 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 
 ## Suggested order
 
-1. Install **0030** (Maps key hook + GeoIP symlink + 0029 notify/ET Pro/USB).
+1. Install **0031** (Telegram + extra feeds + Maps key hook).
 2. Drop a GeoIP Country `.dat` if Map / country pies should show pins (LAN-only events stay empty).
 3. ET Pro needs a real oinkcode in Settings; empty code returns `etpro_error`.
 4. Leave P3 alone (no NFQUEUE, no official `.dss`, no SMTP).
 
-## Counts (2026-09-07, tree 8.0.6-0029)
+## Counts (2026-09-07, tree 8.0.6-0031)
 
 - 21 `SYNO.TPS.*` APIs, 42 `.lib` methods — all have a tpsweb `handle()` branch.
 - 9 DSM-core / Entry.Request calls — passthrough only.

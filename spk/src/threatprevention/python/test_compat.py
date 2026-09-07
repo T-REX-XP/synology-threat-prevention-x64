@@ -24,7 +24,8 @@ from compat import (  # noqa: E402
 from compiler import parse_header, parse_refs  # noqa: E402
 from geoip import is_public_ipv4, lookup as geoip_lookup  # noqa: E402
 from ingest import payload_hex  # noqa: E402
-from notify import list_filters, maybe_notify, upsert_filters  # noqa: E402
+from feeds import add_feed, feed_url_ok, list_feeds  # noqa: E402
+from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
 from tpsweb import _parse_multipart, handle, read_gmaps_key, write_update_source  # noqa: E402
 
@@ -110,8 +111,11 @@ check(open(os.path.join(os.environ["TPS_PKGETC"], "update-source")).read().strip
 check(open(os.path.join(os.environ["TPS_PKGETC"], "etpro.code")).read().strip() == "secret", "etpro code file")
 write_update_source("et-open", "")
 check(not os.path.isfile(os.path.join(os.environ["TPS_PKGETC"], "etpro.code")), "et-open clears code")
+gmaps_path = os.path.join(os.environ["TPS_PKGETC"], "gmaps.key")
+if os.path.isfile(gmaps_path):
+    os.remove(gmaps_path)
 check(read_gmaps_key() == "", "no gmaps key by default")
-open(os.path.join(os.environ["TPS_PKGETC"], "gmaps.key"), "w").write("AIzaSyTestKey123\n")
+open(gmaps_path, "w").write("AIzaSyTestKey123\n")
 check(read_gmaps_key() == "AIzaSyTestKey123", "gmaps key file")
 mapped = handle("SYNO.TPS.Settings.Map", "get", {}, conn)
 check(mapped["success"] and mapped["data"]["key"] == "AIzaSyTestKey123", "settings.map get")
@@ -128,4 +132,20 @@ ip_src, port_src, ip_dst, port_dst = parse_header(raw)
 check(ip_src == "$HOME_NET" and port_dst == "any", "rule header")
 refs = parse_refs(raw)
 check(refs[0]["ref_system_name"] == "url" and refs[1]["ref_tag"] == "2024-1", "rule refs")
+
+check(feed_url_ok("https://example.com/extra.rules"), "https feed ok")
+check(not feed_url_ok("file:///etc/passwd"), "file feed blocked")
+check(not feed_url_ok("https://127.0.0.1/x"), "loopback feed blocked")
+check(not feed_url_ok("http://example.com/x"), "public http blocked")
+check(feed_url_ok("http://192.168.1.10/x.rules"), "rfc1918 http ok")
+check(add_feed(conn, "et-open", "https://example.com/x", True) is None, "reserved feed name")
+fid = add_feed(conn, "local-extra", "https://example.com/extra.rules", True)
+check(fid and list_feeds(conn)[0]["name"] == "local-extra", "feed add")
+listed = handle("SYNO.TPS.Settings.Feed", "list", {}, conn)
+check(listed["success"] and listed["data"]["feeds"][0]["url"].startswith("https://"), "feed list api")
+write_telegram_conf("123:ABC", "-1001")
+cfg = read_telegram_conf()
+check(cfg["token"] == "123:ABC" and cfg["chat"] == "-1001", "telegram.conf")
+tg = handle("SYNO.TPS.Settings.Telegram", "get", {}, conn)
+check(tg["success"] and tg["data"]["has_token"] and tg["data"]["token"] == "", "telegram get hides token")
 print("ok")

@@ -1,9 +1,12 @@
-"""Notification filters + optional DSM desktop notify (no mail transport)."""
+"""Notification filters + optional DSM desktop notify + Telegram."""
+import json
 import os
 import subprocess
 import time
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-from paths import PKGVAR
+from paths import PKGETC, PKGVAR, TELEGRAM_CONF
 from store import kv_get, kv_set
 
 
@@ -14,6 +17,7 @@ def migrate_filters(conn):
         ("enable_mail", "INTEGER NOT NULL DEFAULT 0"),
         ("enable_sms", "INTEGER NOT NULL DEFAULT 0"),
         ("enable_push", "INTEGER NOT NULL DEFAULT 0"),
+        ("enable_telegram", "INTEGER NOT NULL DEFAULT 0"),
     ):
         if name not in cols:
             conn.execute("ALTER TABLE notification_filter ADD COLUMN %s %s" % (name, spec))
@@ -49,6 +53,7 @@ def list_filters(conn):
             "enable_mail": _flag(s.get("enable_mail")),
             "enable_sms": _flag(s.get("enable_sms")),
             "enable_push": _flag(s.get("enable_push")),
+            "enable_telegram": _flag(s.get("enable_telegram")),
             "action": s.get("action") or "",
         })
     for name, s in saved.items():
@@ -61,6 +66,7 @@ def list_filters(conn):
             "enable_mail": _flag(s.get("enable_mail")),
             "enable_sms": _flag(s.get("enable_sms")),
             "enable_push": _flag(s.get("enable_push")),
+            "enable_telegram": _flag(s.get("enable_telegram")),
             "action": s.get("action") or "",
         })
     return out
@@ -74,14 +80,15 @@ def upsert_filters(conn, items):
             continue
         conn.execute(
             """INSERT INTO notification_filter
-               (name, description, severity, enable_mail, enable_sms, enable_push, action)
-               VALUES (?,?,?,?,?,?,?)
+               (name, description, severity, enable_mail, enable_sms, enable_push, enable_telegram, action)
+               VALUES (?,?,?,?,?,?,?,?)
                ON CONFLICT(name) DO UPDATE SET
                  description=excluded.description,
                  severity=excluded.severity,
                  enable_mail=excluded.enable_mail,
                  enable_sms=excluded.enable_sms,
                  enable_push=excluded.enable_push,
+                 enable_telegram=excluded.enable_telegram,
                  action=excluded.action""",
             (
                 name,
@@ -90,13 +97,24 @@ def upsert_filters(conn, items):
                 1 if _flag(item.get("enable_mail")) else 0,
                 1 if _flag(item.get("enable_sms")) else 0,
                 1 if _flag(item.get("enable_push")) else 0,
+                1 if _flag(item.get("enable_telegram")) else 0,
                 item.get("action") or "",
             ),
         )
 
 
-def maybe_notify(conn, classtype, sig_name, severity=3):
-    """Best-effort DSM notify. Control Panel still owns mail/SMS/push transport."""
+def maybe_notify(conn, classtype, sig_name, severity=3, ip_src=""):
+    """Best-effort DSM notify + Telegram. Mail/SMS/push stay Control Panel."""
+    title = kv_get(conn, "subject_prefix", "Threat Prevention") or "Threat Prevention"
+    msg = "%s: %s" % (classtype or "alert", sig_name or "")
+    if ip_src:
+        msg = "%s (%s)" % (msg, ip_src)
+    dsm = _maybe_dsm(conn, classtype, title, msg)
+    tg = _maybe_telegram(conn, classtype, title, msg)
+    return dsm or tg
+
+
+def _maybe_dsm(conn, classtype, title, msg):
     if kv_get(conn, "enable_notification", "0") != "1":
         return False
     migrate_filters(conn)
@@ -123,12 +141,110 @@ def maybe_notify(conn, classtype, sig_name, severity=3):
     now = int(time.time())
     if last and now - last < gap:
         return False
-    title = kv_get(conn, "subject_prefix", "Threat Prevention") or "Threat Prevention"
-    msg = "%s: %s" % (classtype or "alert", sig_name or "")
     sent = _dsm_notify(title, msg)
     kv_set(conn, "last_notify_ts", str(now))
     kv_set(conn, "last_notify_msg", msg[:200])
     return sent
+
+
+def _telegram_class_ok(conn, classtype):
+    migrate_filters(conn)
+    row = conn.execute(
+        "SELECT * FROM notification_filter WHERE name=?", (classtype or "",)
+    ).fetchone()
+    has_filters = conn.execute("SELECT COUNT(*) n FROM notification_filter").fetchone()["n"]
+    follow = kv_get(conn, "telegram_follow_mail", "1") == "1"
+    if not has_filters:
+        return True
+    if not row:
+        return False
+    if follow:
+        return _flag(row["enable_mail"])
+    return _flag(row["enable_telegram"] if "enable_telegram" in row.keys() else 0)
+
+
+def _maybe_telegram(conn, classtype, title, msg):
+    if kv_get(conn, "enable_telegram", "0") != "1":
+        return False
+    if not _telegram_class_ok(conn, classtype):
+        return False
+    gap = int(kv_get(conn, "min_interval_telegram", "300") or 300)
+    last = int(kv_get(conn, "last_telegram_ts", "0") or 0)
+    now = int(time.time())
+    if last and now - last < gap:
+        return False
+    cfg = read_telegram_conf()
+    if not cfg.get("token") or not cfg.get("chat"):
+        _notify_log("telegram skipped: missing token/chat")
+        return False
+    sent = send_telegram(cfg["token"], cfg["chat"], "%s\n%s" % (title, msg))
+    kv_set(conn, "last_telegram_ts", str(now))
+    kv_set(conn, "last_telegram_msg", msg[:200])
+    return sent
+
+
+def read_telegram_conf():
+    out = {"token": "", "chat": ""}
+    if not os.path.isfile(TELEGRAM_CONF):
+        return out
+    try:
+        with open(TELEGRAM_CONF, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                key = k.strip().upper()
+                val = v.strip()
+                if key in ("TOKEN", "BOT_TOKEN"):
+                    out["token"] = val
+                elif key in ("CHAT", "CHAT_ID"):
+                    out["chat"] = val
+    except OSError:
+        return out
+    return out
+
+
+def write_telegram_conf(token=None, chat=None):
+    cur = read_telegram_conf()
+    if token:
+        cur["token"] = str(token).strip()
+    if chat is not None and str(chat).strip() != "":
+        cur["chat"] = str(chat).strip()
+    os.makedirs(PKGETC, exist_ok=True)
+    with open(TELEGRAM_CONF, "w", encoding="utf-8") as fh:
+        fh.write("TOKEN=%s\nCHAT=%s\n" % (cur.get("token") or "", cur.get("chat") or ""))
+    try:
+        os.chmod(TELEGRAM_CONF, 0o600)
+    except OSError:
+        pass
+    return cur
+
+
+def send_telegram(token, chat, text, timeout=10):
+    if not token or not chat or not text:
+        return False
+    url = "https://api.telegram.org/bot%s/sendMessage" % token
+    body = urlencode({"chat_id": chat, "text": text[:3500], "disable_web_page_preview": "1"}).encode("utf-8")
+    req = Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+        data = json.loads(raw)
+        return bool(data.get("ok"))
+    except Exception as exc:
+        _notify_log("telegram send failed: %s" % exc)
+        return False
+
+
+def _notify_log(line):
+    try:
+        os.makedirs(os.path.join(PKGVAR, "log"), exist_ok=True)
+        with open(os.path.join(PKGVAR, "log", "notify.log"), "a", encoding="utf-8") as fh:
+            fh.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), line))
+    except OSError:
+        pass
 
 
 def _dsm_notify(title, msg):

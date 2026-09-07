@@ -163,6 +163,13 @@ CREATE TABLE IF NOT EXISTS notification_filter (
     severity INTEGER NOT NULL DEFAULT 0,
     action TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS rule_feed (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    url TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created INTEGER NOT NULL DEFAULT 0
+);
 """
 
 DEFAULTS = {
@@ -171,9 +178,12 @@ DEFAULTS = {
     "enable_mail": "0",
     "enable_push": "0",
     "enable_sms": "0",
+    "enable_telegram": "0",
+    "telegram_follow_mail": "1",
     "min_interval_mail": "300",
     "min_interval_push": "300",
     "min_interval_sms": "300",
+    "min_interval_telegram": "300",
     "subject_prefix": "Threat Prevention",
     "auto_update": "0",
     "update_weekday": "daily",
@@ -211,7 +221,9 @@ def init_db(path=None):
     conn.commit()
     seed_classes(conn)
     from notify import migrate_filters
+    from feeds import migrate_feeds
     migrate_filters(conn)
+    migrate_feeds(conn)
     conn.commit()
     return conn
 
@@ -354,11 +366,18 @@ def clear_events(conn):
 
 
 def backup_json(conn):
-    payload = {"kv": {}, "policy_class": [], "policy_signature": [], "policy_filter": [], "device": []}
+    payload = {"kv": {}, "policy_class": [], "policy_signature": [], "policy_filter": [], "device": [], "rule_feed": []}
+    skip = ("telegram_token", "bot_token", "etpro_code")
     for row in conn.execute("SELECT k, v FROM kv"):
+        if row["k"] in skip:
+            continue
         payload["kv"][row["k"]] = row["v"]
     for table in ("policy_class", "policy_signature", "policy_filter", "device"):
         payload[table] = [dict(r) for r in conn.execute("SELECT * FROM %s" % table)]
+    try:
+        payload["rule_feed"] = [dict(r) for r in conn.execute("SELECT name, url, enabled FROM rule_feed")]
+    except sqlite3.Error:
+        payload["rule_feed"] = []
     return json.dumps(payload, indent=2)
 
 
@@ -390,6 +409,20 @@ def restore_json(conn, text):
                 row.get("ip_src_str", ""), row.get("ip_dst_str", ""), row.get("comment", ""),
             ),
         )
+    if "rule_feed" in payload:
+        try:
+            conn.execute("DELETE FROM rule_feed")
+            for row in payload.get("rule_feed") or []:
+                name = (row.get("name") or "").strip()
+                url = (row.get("url") or "").strip()
+                if not name or not url:
+                    continue
+                conn.execute(
+                    "INSERT OR REPLACE INTO rule_feed(name, url, enabled, created) VALUES (?,?,?,?)",
+                    (name, url, 1 if row.get("enabled", 1) else 0, int(time.time())),
+                )
+        except sqlite3.Error:
+            pass
     conn.commit()
 
 

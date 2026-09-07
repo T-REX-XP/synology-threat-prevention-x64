@@ -38,7 +38,14 @@ from compat import (
     to_epoch,
 )
 from compiler import compile_rules, import_rules, parse_header, parse_refs, reload_suricata
-from notify import list_filters, upsert_filters
+from feeds import add_feed, delete_feed, list_feeds, update_feed, write_feeds_json
+from notify import (
+    list_filters,
+    read_telegram_conf,
+    send_telegram,
+    upsert_filters,
+    write_telegram_conf,
+)
 from paths import (
     EXPORT_DIR,
     GMAPS_KEY,
@@ -521,6 +528,10 @@ def handle(api, method, params, conn):
         return overview(conn)
     if api == "SYNO.TPS.Settings.Map" and method == "get":
         return ok({"key": read_gmaps_key()})
+    if api == "SYNO.TPS.Settings.Telegram":
+        return settings_telegram(conn, method, params)
+    if api == "SYNO.TPS.Settings.Feed":
+        return settings_feed(conn, method, params)
     return err(101)
 
 
@@ -1335,6 +1346,81 @@ def notification_filter(conn, method, p):
     if method == "set":
         upsert_filters(conn, p.get("notification_filters") or [])
         conn.commit()
+        return ok({})
+    return err(102)
+
+
+def settings_telegram(conn, method, p):
+    if method == "get":
+        cfg = read_telegram_conf()
+        return ok({
+            "enable_telegram": kv_get(conn, "enable_telegram", "0") == "1",
+            "follow_mail": kv_get(conn, "telegram_follow_mail", "1") == "1",
+            "min_interval_telegram": int(kv_get(conn, "min_interval_telegram", "300") or 300),
+            "has_token": bool(cfg.get("token")),
+            "chat_id": cfg.get("chat") or "",
+            "token": "",
+        })
+    if method == "set":
+        if "enable_telegram" in p:
+            kv_set(conn, "enable_telegram", "1" if _truth(p.get("enable_telegram")) else "0")
+        if "follow_mail" in p or "telegram_follow_mail" in p:
+            kv_set(conn, "telegram_follow_mail", "1" if _truth(p.get("follow_mail", p.get("telegram_follow_mail"))) else "0")
+        if "min_interval_telegram" in p:
+            try:
+                kv_set(conn, "min_interval_telegram", str(max(0, int(p.get("min_interval_telegram") or 300))))
+            except (TypeError, ValueError):
+                kv_set(conn, "min_interval_telegram", "300")
+        token = p.get("token") or p.get("bot_token")
+        chat = p.get("chat_id") if "chat_id" in p else p.get("chat")
+        if token or chat is not None:
+            write_telegram_conf(token if token else None, chat)
+        conn.commit()
+        return ok({})
+    if method == "test":
+        cfg = read_telegram_conf()
+        token = (p.get("token") or "").strip() or cfg.get("token")
+        chat = (p.get("chat_id") or p.get("chat") or "").strip() or cfg.get("chat")
+        if not token or not chat:
+            return err(100)
+        prefix = kv_get(conn, "subject_prefix", "Threat Prevention") or "Threat Prevention"
+        if send_telegram(token, chat, "%s\nThreat Prevention Telegram test" % prefix):
+            return ok({"sent": True})
+        return err(104)
+    return err(102)
+
+
+def settings_feed(conn, method, p):
+    if method == "list":
+        return ok({"feeds": list_feeds(conn)})
+    if method == "add":
+        fid = add_feed(conn, p.get("name"), p.get("url"), _truth(p.get("enabled", True)))
+        if not fid:
+            return err(100)
+        conn.commit()
+        write_feeds_json(conn)
+        return ok({"id": fid})
+    if method == "update":
+        try:
+            fid = int(p.get("id") or 0)
+        except (TypeError, ValueError):
+            return err(100)
+        enabled = None
+        if "enabled" in p:
+            enabled = _truth(p.get("enabled"))
+        if not update_feed(conn, fid, p.get("name"), p.get("url"), enabled):
+            return err(100)
+        conn.commit()
+        write_feeds_json(conn)
+        return ok({})
+    if method == "delete":
+        try:
+            fid = int(p.get("id") or 0)
+        except (TypeError, ValueError):
+            return err(100)
+        delete_feed(conn, fid)
+        conn.commit()
+        write_feeds_json(conn)
         return ok({})
     return err(102)
 

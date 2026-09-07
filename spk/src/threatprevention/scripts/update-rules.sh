@@ -44,6 +44,46 @@ else
 		--data-dir "${SU_DATA}" >>"${LOG}" 2>&1 || true
 fi
 
+# Additive custom feeds from Settings → Rule feeds (etc/feeds.json).
+if [ -r "${PKGETC}/feeds.json" ]; then
+	PYJSON=""
+	for c in /usr/bin/python3 /usr/local/bin/python3 python3; do
+		if command -v "${c}" >/dev/null 2>&1 || [ -x "${c}" ]; then
+			PYJSON="${c}"
+			break
+		fi
+	done
+	if [ -n "${PYJSON}" ]; then
+		"${PYJSON}" - "${PKGETC}/feeds.json" "${SU_DATA}/sources" >>"${LOG}" 2>&1 <<'PY'
+import json, os, re, sys
+path, dest = sys.argv[1], sys.argv[2]
+os.makedirs(dest, exist_ok=True)
+try:
+    payload = json.load(open(path, encoding="utf-8"))
+except Exception:
+    payload = {}
+wanted = set()
+safe = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+for item in payload.get("feeds") or []:
+    name = str(item.get("name") or "")
+    url = str(item.get("url") or "")
+    if not item.get("enabled", True) or not safe.match(name) or not url.startswith(("https://", "http://")):
+        continue
+    wanted.add(name)
+    with open(os.path.join(dest, "custom-%s.yaml" % name), "w", encoding="utf-8") as fh:
+        fh.write("url: %s\n" % url)
+for fn in os.listdir(dest):
+    if fn.startswith("custom-") and fn.endswith(".yaml"):
+        name = fn[7:-5]
+        if name not in wanted:
+            try:
+                os.remove(os.path.join(dest, fn))
+            except OSError:
+                pass
+PY
+	fi
+fi
+
 "${BIN}" update-sources \
 	--suricata "${PKGDEST}/bin/suricata" \
 	--data-dir "${SU_DATA}" \

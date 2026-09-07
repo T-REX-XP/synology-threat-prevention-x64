@@ -236,6 +236,7 @@ def run():
                             alert.get("category") or alert.get("classtype") or "",
                             alert.get("signature") or "",
                             alert.get("severity") or 3,
+                            obj.get("src_ip") or "",
                         )
                     except Exception:
                         pass
