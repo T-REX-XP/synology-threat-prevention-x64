@@ -1,10 +1,16 @@
 {
 	"web-config": {
 		"nginx-static-config": {
-			"enable": [{
-				"type": "dsm",
-				"relpath": "etc/nginx/dsm-tpsweb.conf"
-			}]
+			"enable": [
+				{
+					"type": "dsm",
+					"relpath": "etc/nginx/dsm-tpsweb.conf"
+				},
+				{
+					"type": "www",
+					"relpath": "etc/nginx/dsm-tpsweb.conf"
+				}
+			]
 		}
 	}
 }

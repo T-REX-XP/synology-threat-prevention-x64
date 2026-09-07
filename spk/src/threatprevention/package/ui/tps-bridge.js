@@ -1,10 +1,113 @@
 /* Research PoC compatibility layer, inlined into synoips.js at pack time.
    Official ExtJS talks to sendWebAPI / Store / pollReg. Those hit aarch64
-   SYNO.TPS.*.so on SRM. Here they go to tpsweb via same-origin /api. */
-Ext.namespace("SYNO.SDS.TPS");
+   SYNO.TPS.*.so on SRM. Here they go to tpsweb via same-origin /webman/tps-api. */
+window.SYNO = window.SYNO || {};
+SYNO.SDS = SYNO.SDS || {};
+SYNO.SDS.TPS = SYNO.SDS.TPS || {};
+SYNO.SDS.Chart = SYNO.SDS.Chart || {};
+if (window.Ext && Ext.namespace) {
+	Ext.namespace("SYNO.SDS.TPS");
+	Ext.namespace("SYNO.SDS.Chart");
+}
+
+/* DSM 7 desktop has no SYNO.SDS.Chart.* (those are SRM widgets). Stub enough
+   for TrendsGraphComponent / TopNPieChartPanel constructors to finish. */
+(function () {
+	if (!window.Ext || !Ext.extend) { return; }
+	if (SYNO.SDS.Chart.LineChart && SYNO.SDS.Chart.LineChart.prototype && SYNO.SDS.Chart.LineChart.prototype.setChartItems) {
+		return;
+	}
+	SYNO.SDS.Chart.CreateAxis = SYNO.SDS.Chart.CreateAxis || function (cfg) {
+		return Ext.apply({ type: "default", ticks: 0, tickPadding: 0, max: 0, tickFormatter: Ext.emptyFn }, cfg || {});
+	};
+	var Base = Ext.BoxComponent || Ext.Component;
+	if (!Base) { return; }
+	SYNO.SDS.Chart.LineChart = Ext.extend(Base, {
+		constructor: function (cfg) {
+			cfg = cfg || {};
+			this.chartItems = [];
+			this.axisX = SYNO.SDS.Chart.CreateAxis({});
+			this.axisY = SYNO.SDS.Chart.CreateAxis({ max: 0 });
+			this.chartPaddings = cfg.chartPaddings || { top: 6, right: 0, bottom: 22, left: 38 };
+			this.trackFormatter = Ext.emptyFn;
+			SYNO.SDS.Chart.LineChart.superclass.constructor.call(this, Ext.apply({
+				autoEl: { tag: "div", cls: "syno-sds-tps-linechart", style: "width:100%;height:" + (cfg.height || 210) + "px;background:#F5F7FA;" }
+			}, cfg));
+		},
+		setChartItems: function (items) {
+			this.chartItems = items || [];
+			var max = 0;
+			Ext.each(this.chartItems, function (series) {
+				Ext.each(series.data || [], function (pt) {
+					var y = Ext.isArray(pt) ? Number(pt[1]) || 0 : Number(pt && pt.y) || 0;
+					if (y > max) { max = y; }
+				});
+			});
+			this.axisY = this.axisY || {};
+			this.axisY.max = max || 1;
+		},
+		draw: function () {
+			if (!this.el || !this.el.dom) { return; }
+			var w = this.el.getWidth() || 400, h = this.el.getHeight() || 210;
+			var pad = this.chartPaddings || {};
+			var left = pad.left || 38, bottom = pad.bottom || 22, top = pad.top || 6, right = pad.right || 0;
+			var iw = Math.max(10, w - left - right), ih = Math.max(10, h - top - bottom);
+			var max = (this.axisY && this.axisY.max) || 1;
+			var paths = [];
+			Ext.each(this.chartItems, function (series) {
+				var pts = series.data || [];
+				if (!pts.length) { return; }
+				var n = pts.length;
+				var d = [];
+				Ext.each(pts, function (pt, i) {
+					var x = left + (n <= 1 ? iw / 2 : (iw * i / (n - 1)));
+					var yv = Ext.isArray(pt) ? Number(pt[1]) || 0 : 0;
+					var y = top + ih - (ih * yv / max);
+					d.push((i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1));
+				});
+				paths.push('<path d="' + d.join(" ") + '" fill="none" stroke="' + (series.color || "#2A588C") + '" stroke-width="' + (series.width || 2) + '"/>');
+			});
+			this.el.update('<svg width="' + w + '" height="' + h + '" xmlns="http://www.w3.org/2000/svg">' + paths.join("") + "</svg>");
+		}
+	});
+	SYNO.SDS.Chart.PieChart = Ext.extend(Base, {
+		constructor: function (cfg) {
+			cfg = cfg || {};
+			this.chartItems = cfg.chartItems || [];
+			SYNO.SDS.Chart.PieChart.superclass.constructor.call(this, Ext.apply({
+				autoEl: { tag: "div", cls: "syno-sds-tps-piechart", style: "width:" + (cfg.width || 128) + "px;height:" + (cfg.height || 136) + "px;" }
+			}, cfg));
+			this.on("afterrender", this.draw, this);
+		},
+		draw: function () {
+			if (!this.el || !this.el.dom) { return; }
+			var items = this.chartItems || [];
+			var total = 0;
+			Ext.each(items, function (it) { total += Number(it.data) || 0; });
+			var r = this.initialConfig.radius || 58;
+			var ir = this.initialConfig.innerRadius || 20;
+			var cx = (this.initialConfig.width || 128) / 2, cy = (this.initialConfig.height || 136) / 2;
+			var a0 = -Math.PI / 2, parts = [];
+			Ext.each(items, function (it) {
+				var frac = total ? (Number(it.data) || 0) / total : 0;
+				var a1 = a0 + frac * Math.PI * 2;
+				var x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+				var x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+				var large = frac > 0.5 ? 1 : 0;
+				parts.push('<path d="M ' + cx + " " + cy + " L " + x0.toFixed(1) + " " + y0.toFixed(1) + " A " + r + " " + r + " 0 " + large + " 1 " + x1.toFixed(1) + " " + y1.toFixed(1) + ' Z" fill="' + (it.color || "#2A588C") + '"/>');
+				a0 = a1;
+			});
+			this.el.update('<svg width="' + (this.initialConfig.width || 128) + '" height="' + (this.initialConfig.height || 136) + '">' + parts.join("") + '<circle cx="' + cx + '" cy="' + cy + '" r="' + ir + '" fill="#fff"/></svg>');
+		}
+	});
+}());
+
 
 SYNO.SDS.TPS.Bridge = {
 	base: function () {
+		return "/webman/tps-api";
+	},
+	legacyBase: function () {
 		return "/webman/3rdparty/ThreatPrevention/api";
 	},
 	fallbackBase: function () {
@@ -44,7 +147,11 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		var q = Ext.apply({ api: api, method: method, version: version || 1 }, this.encodeParams(params));
 		function fire(ok, j) {
-			if (cb) { cb.call(scope || window, ok, (j && j.data) || {}, j || {}, q); }
+			try {
+				if (cb) { cb.call(scope || window, ok, (j && j.data) || {}, j || {}, q); }
+			} catch (e) {
+				if (window.console && console.error) { console.error("SYNO.TPS callback", e); }
+			}
 		}
 		function post(url, then404) {
 			Ext.Ajax.request({
@@ -66,8 +173,12 @@ SYNO.SDS.TPS.Bridge = {
 				}
 			});
 		}
-		var alt = me.fallbackBase();
-		post(me.base(), alt ? function () { post(alt); } : null);
+		post(me.base(), function () {
+			post(me.legacyBase(), function () {
+				var alt = me.fallbackBase();
+				if (alt) { post(alt); } else { fire(false, { success: false, error: { code: 404 } }); }
+			});
+		});
 	},
 	isTps: function (api) {
 		return api && String(api).indexOf("SYNO.TPS.") === 0;
@@ -168,6 +279,66 @@ SYNO.SDS.TPS.Bridge = {
 		if (opts.callback) { opts.callback.call(opts.scope || window, true, {}); }
 		return true;
 	},
+	adminList: function (ids) {
+		var admin = ids || [];
+		admin.size = function () { return this.length; };
+		return { admin: admin };
+	},
+	hookPolling: function () {
+		var me = this;
+		if (!window.SYNO || !SYNO.API || !SYNO.API.Request) { return; }
+		var Polling = SYNO.API.Request.Polling;
+		if (!Polling) {
+			Polling = SYNO.API.Request.Polling = {};
+		}
+		if (Polling._tpsBridge) { return; }
+		var origList = Polling.List;
+		var origReg = Polling.Register;
+		var origUnreg = Polling.Unregister;
+		Polling.List = function (opts) {
+			opts = opts || {};
+			if (opts.task_id_prefix && String(opts.task_id_prefix).indexOf("SYNO.TPS") === 0) {
+				var ids = [];
+				var updater = SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.SignatureUpdater;
+				if (updater && updater.taskId) { ids.push(updater.taskId); }
+				if (opts.callback) {
+					opts.callback.call(opts.scope || window, true, me.adminList(ids));
+				}
+				return;
+			}
+			if (origList) { return origList.apply(this, arguments); }
+			if (opts.callback) {
+				opts.callback.call(opts.scope || window, true, me.adminList([]));
+			}
+		};
+		Polling.Register = function (opts) {
+			var api = opts && opts.webapi && opts.webapi.api;
+			if (me.isTps(api)) {
+				var self = (opts && opts.scope) || window;
+				var tick = function () {
+					me.call(
+						opts.webapi.api,
+						opts.webapi.method,
+						opts.webapi.version,
+						(opts.webapi.params) || {},
+						opts.status_callback || opts.callback,
+						self
+					);
+				};
+				if (!opts || opts.immediate !== false) { tick(); }
+				return window.setInterval(tick, ((opts && opts.interval) || 5) * 1000);
+			}
+			if (origReg) { return origReg.apply(this, arguments); }
+			return 0;
+		};
+		Polling.Unregister = function (id) {
+			if (id) { window.clearInterval(id); }
+			if (origUnreg) {
+				try { return origUnreg.apply(this, arguments); } catch (e) { return; }
+			}
+		};
+		Polling._tpsBridge = true;
+	},
 	pickApi: function (opts) {
 		var p = (opts && (opts.params || opts.jsonData)) || {};
 		return p.api || (opts && opts.api) || "";
@@ -194,6 +365,7 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		hookProto(SYNO.SDS.AppWindow, "sendWebAPI");
 		if (SYNO.SDS.AppInstance) { hookProto(SYNO.SDS.AppInstance, "sendWebAPI"); }
+		if (Ext.Component) { hookProto(Ext.Component, "sendWebAPI"); }
 		hookProto(SYNO.SDS.AppWindow, "downloadWebAPI", function (opts, orig, args) {
 			var api = opts && (opts.api || (opts.webapi && opts.webapi.api));
 			if (me.isTps(api)) { return me.download(opts); }
@@ -229,17 +401,59 @@ SYNO.SDS.TPS.Bridge = {
 				SYNO.SDS.AppWindow.prototype.pollUnreg._tpsBridge = true;
 			}
 		}
+		if (window.SYNO && SYNO.API && SYNO.API.Store && SYNO.API.Store.prototype && SYNO.API.Store.prototype.load && !SYNO.API.Store.prototype.load._tpsBridge) {
+			var origStoreLoad = SYNO.API.Store.prototype.load;
+			SYNO.API.Store.prototype.load = function (options) {
+				if (!me.isTps(this.api)) {
+					return origStoreLoad.apply(this, arguments);
+				}
+				var self = this;
+				var params = Ext.apply({}, this.baseParams || {}, (options && options.params) || {});
+				me.call(this.api, this.method, this.version || 1, params, function (ok, data, raw) {
+					var env = me.envelope(raw || { success: ok, data: data });
+					var fake = { responseText: Ext.encode(env), status: ok ? 200 : 500 };
+					if (ok && self.reader && self.loadRecords) {
+						try {
+							var recs = self.reader.read(fake);
+							self.loadRecords(recs, options || {}, true);
+							if (options && options.callback) {
+								options.callback.call(options.scope || self, recs, options, true);
+							}
+							return;
+						} catch (e) {
+							if (self.loadData && data) {
+								self.loadData(data);
+								return;
+							}
+						}
+					}
+					if (!ok && self.fireEvent) {
+						self.fireEvent("loadexception", self, fake, options);
+					}
+				});
+			};
+			SYNO.API.Store.prototype.load._tpsBridge = true;
+		}
 		if (window.SYNO && SYNO.API && SYNO.API.Request && !SYNO.API.Request._tpsBridge) {
 			var origReq = SYNO.API.Request;
-			SYNO.API.Request = function (opts) {
+			var wrappedReq = function (opts) {
 				var args = arguments;
 				if (opts && me.isTps(opts.api)) {
 					return me.dispatch(opts, function () { return origReq.apply(this, args); });
 				}
 				return origReq.apply(this, args);
 			};
-			SYNO.API.Request._tpsBridge = true;
+			var k;
+			for (k in origReq) {
+				if (Object.prototype.hasOwnProperty.call(origReq, k)) {
+					wrappedReq[k] = origReq[k];
+				}
+			}
+			wrappedReq.Polling = origReq.Polling;
+			wrappedReq._tpsBridge = true;
+			SYNO.API.Request = wrappedReq;
 		}
+		me.hookPolling();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {
 			var origAjax = Ext.Ajax.request;
 			Ext.Ajax.request = function (opts) {

@@ -1,6 +1,6 @@
 # Threat Prevention SPK — deploy and update
 
-Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0017`). Community webpack SPA plus a thin ExtJS Start Menu shell. Official `synoips.js` is not packed. See [native-app-plan.md](native-app-plan.md).  
+Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0024`). Official ExtJS app with a custom `tpsweb` backend (bridge inlined into `synoips.js` at pack time; Chart stubs in `tps-chart.js`). Not a product. See [backend-replaceability.md](backend-replaceability.md).  
 SPK scripts under `spk/src/threatprevention/scripts/` are stubs except `postinst`, `start-stop-status`, and `update-rules.sh`. **Most of the work that makes capture actually run is admin-side:** DSM will not let an unsigned package declare `run-as: root` or file capabilities (`synopkg` error 319). `start-stop-status` tries `setcap` but it is a no-op when Package Center starts the unit as the package user.
 
 Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
@@ -80,7 +80,7 @@ echo ovs_eth0 | sudo tee /var/packages/ThreatPrevention/etc/interface
 sudo synopkg restart ThreatPrevention
 ```
 
-**Start Menu tile:** one app, `SYNO.SDS.ThreatPrevention.Application` (iframe → webpack SPA). After install, **log out of DSM and back in** and remove any leftover official `SYNO.SDS.TPS.Application` pin. The SPA calls same-origin `/webman/3rdparty/ThreatPrevention/api` (nginx → tpsweb).
+**Start Menu tile:** one app, `SYNO.SDS.TPS.Application`. After install, **log out of DSM and back in** and remove any leftover community `SYNO.SDS.ThreatPrevention.Application` pin. The bridge calls same-origin `/webman/tps-api` (nginx → tpsweb `:19557`), then falls back to `/webman/3rdparty/ThreatPrevention/api`. After UI/`config` changes, confirm the script URL is `synoips.js?v=8.0.6-0021` or newer — `?v=1.3.3-0926` is a stale cache.
 
 Optional but recommended — replace the 2021 Suricata-5 ET dump with a current Suricata 8 feed (do **not** convert the old files):
 
@@ -160,11 +160,13 @@ sudo synopkg uninstall ThreatPrevention
 
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |
-| Installed, Start in Package Center fails / flaps | Missing `liblz4` / GLIBC 2.38 on old SPKs; or AF_PACKET denied | Use ≥ `8.0.6-0005` (vendored glibc+libs). Then `setcap` + `synopkg start`. |
+| Installed, Start in Package Center fails / flaps | Missing `liblz4` / GLIBC 2.38 on old SPKs; AF_PACKET denied; or root-owned `etc/interface` (`0600`) so the package user cannot read the iface pin | Use ≥ `8.0.6-0023`. `start-stop-status` ignores an unreadable pin and treats tpsweb as started. Then `setcap` + `synopkg start`. If a leftover `interface` file is still `root:root`, `sudo chown ThreatPrevention:ThreatPrevention /var/packages/ThreatPrevention/etc/interface && sudo chmod 644 /var/packages/ThreatPrevention/etc/interface`. |
 | `Operation not permitted` on `ovs_eth0` | Package user, no file caps | Post-deploy `setcap` (see above). |
 | `error 319 invalid package privilege content` | SPK declared `run-as: root` or `tool.capabilities` | Unsigned packages cannot; keep `conf/privilege` as `run-as: package`. |
 | No Start Menu icon | Missing `dsmuidir` (fixed in `0006`) or DSM cache | Install ≥ `0006`, log out/in. |
 | `fanout not supported` | `cluster_flow` on this kernel | Harmless if `Engine started` with `W: 1`. Current yaml omits fanout. |
 | Stale pidfile abort | Previous crash left `var/suricata.pid` | Current start script removes it if the pid is dead. |
+| `Cannot read properties of undefined (reading 'LineChart')` | DSM 7 has no SRM `SYNO.SDS.Chart.*`; or browser still has `synoips.js?v=1.3.3-0926` | Install ≥ `0021`, log out/in, hard-refresh. JSLoad should fetch `tps-chart.js` and `synoips.js?v=8.0.6-0021`. |
+| `POST …/ThreatPrevention/api` or `/webman/tps-api` 404 | nginx rewrote the POST to `/` and tpsweb served missing `index.html` (≤0019); or nginx not reloaded | Install ≥ `0021`. Then `sudo nginx -s reload`. Confirm: `curl -sS -d 'api=SYNO.TPS.Sensor&method=get&version=1' http://127.0.0.1:19557/api`. |
 
 Do not set `LD_LIBRARY_PATH` to `target/lib` in a root shell: that Ubuntu `libc.so.6` will break DSM tools (`tail`, etc.) in the same environment. The ELF interpreter is already patched to `target/lib/ld-linux-x86-64.so.2`.

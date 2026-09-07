@@ -19,14 +19,20 @@ done
 [ -n "${PYTHON}" ] || PYTHON="python3"
 
 write_status() {
-	# Keep status out of target/ui — leftover HTML there was opened as the old custom app.
 	mkdir -p "${PKGVAR}"
 	echo "$1 ${2:-}" > "${PKGVAR}/engine.status" 2>/dev/null || true
 }
 
+read_iface_file() {
+	# A root-owned 0600 leftover must not abort start.
+	[ -r "${PKGETC}/interface" ] || return 1
+	tr -d '\r' < "${PKGETC}/interface" | awk 'NF { print $1; exit }'
+}
+
 pick_iface() {
-	if [ -f "${PKGETC}/interface" ]; then
-		cat "${PKGETC}/interface"
+	iface="$(read_iface_file || true)"
+	if [ -n "${iface}" ]; then
+		echo "${iface}"
 		return
 	fi
 	if ip link show ovs_eth0 >/dev/null 2>&1; then
@@ -47,12 +53,11 @@ alive() {
 kill_pidfile() {
 	if [ -f "$1" ]; then
 		kill "$(cat "$1" 2>/dev/null)" 2>/dev/null || true
-		rm -f "$1"
+		rm -f "$1" 2>/dev/null || true
 	fi
 }
 
 link_webapi() {
-	# Official start does this as root. Unsigned package user may fail; bridge does not need it.
 	if [ -f "${PKGDEST}/webapi/SYNO.TPS.lib" ]; then
 		ln -sf "${PKGDEST}/webapi/SYNO.TPS.lib" /usr/syno/synoman/webapi/SYNO.TPS.lib 2>/dev/null || true
 	fi
@@ -63,10 +68,11 @@ unlink_webapi() {
 }
 
 start_helpers() {
-	mkdir -p "${PKGVAR}" "${PKGETC}" "${PKGVAR}/export"
+	mkdir -p "${PKGVAR}" "${PKGETC}" "${PKGVAR}/export" "${LOGDIR}"
 	link_webapi
 	if [ ! -f "${PKGETC}/sensor.conf" ] && [ -f "${PKGDEST}/etc/sensor/sensor.conf" ]; then
-		cp -f "${PKGDEST}/etc/sensor/sensor.conf" "${PKGETC}/sensor.conf"
+		cp -f "${PKGDEST}/etc/sensor/sensor.conf" "${PKGETC}/sensor.conf" 2>/dev/null || true
+		chmod 644 "${PKGETC}/sensor.conf" 2>/dev/null || true
 	fi
 	if [ -x "${PYTHON}" ] || command -v "${PYTHON}" >/dev/null 2>&1; then
 		if ! alive "${INGEST_PID}"; then
@@ -82,21 +88,31 @@ start_helpers() {
 	fi
 }
 
+helpers_ok() {
+	alive "${TPSWEB_PID}"
+}
+
 start() {
-	mkdir -p "${LOGDIR}" "${PKGVAR}" "${PKGETC}"
-	if [ ! -x "${BIN}" ]; then
-		echo "suricata binary missing" >&2
-		return 1
-	fi
+	mkdir -p "${LOGDIR}" "${PKGVAR}" "${PKGETC}" "${PKGVAR}/export"
+	# Package Center start must not die on a stale root-owned iface pin.
 	IFACE="$(pick_iface)"
 	if [ -z "${IFACE}" ]; then
 		echo "no capture interface" >&2
+		start_helpers
+		if helpers_ok; then
+			write_status failed ""
+			return 0
+		fi
 		return 1
+	fi
+	if [ -w "${PKGETC}" ] && [ ! -r "${PKGETC}/interface" ]; then
+		echo "${IFACE}" > "${PKGETC}/interface" 2>/dev/null || true
+		chmod 644 "${PKGETC}/interface" 2>/dev/null || true
 	fi
 	if [ -f "${PIDFILE}" ]; then
 		oldpid="$(cat "${PIDFILE}" 2>/dev/null || true)"
 		if [ -z "${oldpid}" ] || ! kill -0 "${oldpid}" 2>/dev/null; then
-			rm -f "${PIDFILE}"
+			rm -f "${PIDFILE}" 2>/dev/null || true
 		fi
 	fi
 	echo "starting suricata on ${IFACE}" >&2
@@ -105,26 +121,34 @@ start() {
 	fi
 	chmod 755 "${LOGDIR}" 2>/dev/null || true
 	chmod 644 "${LOGDIR}/eve.json" "${LOGDIR}/suricata.log" 2>/dev/null || true
-	if ! "${BIN}" -c "${YAML}" --pidfile "${PIDFILE}" -D -i "${IFACE}" \
-		-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}"; then
-		echo "suricata failed to start (see ${LOGDIR}/suricata.log)" >&2
-		write_status failed "${IFACE}"
-		start_helpers
-		return 1
-	fi
-	i=0
-	while [ "${i}" -lt 45 ]; do
-		if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
-			start_helpers
-			write_status running "${IFACE}"
-			return 0
+	suricata_ok=0
+	if [ -x "${BIN}" ] && [ ! -f "${PIDFILE}" ]; then
+		if "${BIN}" -c "${YAML}" --pidfile "${PIDFILE}" -D -i "${IFACE}" \
+			-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}"; then
+			i=0
+			while [ "${i}" -lt 20 ]; do
+				if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+					suricata_ok=1
+					break
+				fi
+				sleep 1
+				i=$((i + 1))
+			done
+		else
+			echo "suricata failed to start (see ${LOGDIR}/suricata.log)" >&2
 		fi
-		sleep 1
-		i=$((i + 1))
-	done
-	echo "suricata did not daemonize (see ${LOGDIR}/suricata.log)" >&2
-	write_status failed "${IFACE}"
+	fi
 	start_helpers
+	if [ "${suricata_ok}" -eq 1 ]; then
+		write_status running "${IFACE}"
+	else
+		write_status failed "${IFACE}"
+	fi
+	# tpsweb is what the official ExtJS app needs. AF_PACKET may need a
+	# post-install setcap; do not fail Package Center for that.
+	if helpers_ok || [ "${suricata_ok}" -eq 1 ]; then
+		return 0
+	fi
 	return 1
 }
 
@@ -134,14 +158,14 @@ stop() {
 	kill_pidfile "${TPSWEB_PID}"
 	if [ -f "${PIDFILE}" ]; then
 		kill "$(cat "${PIDFILE}")" 2>/dev/null || true
-		rm -f "${PIDFILE}"
+		rm -f "${PIDFILE}" 2>/dev/null || true
 	fi
 	killall suricata 2>/dev/null || true
 	write_status stopped ""
 }
 
 status() {
-	if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+	if alive "${PIDFILE}" || helpers_ok; then
 		exit 0
 	fi
 	exit 1

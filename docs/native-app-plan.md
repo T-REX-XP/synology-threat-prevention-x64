@@ -1,27 +1,21 @@
 # Native Threat Prevention desktop app
 
-**8.0.6-0017** restores the community UI as a webpack source tree. The Start Menu tile is a thin ExtJS `type: app` window (`threatprevention.js`) that iframes the SPA. Official `synoips.js` is no longer packed.
+**8.0.6-0018** packs the official ExtJS app (`synoips.js`, `SYNO.SDS.TPS.Application`) from `unpacked/package/ui/` and talks to the community `tpsweb` backend through an inlined `tps-bridge.js`. Official `.so` modules are still aarch64 and are **not** packed. This is a research PoC, not a product. See [backend-replaceability.md](backend-replaceability.md).
+
+The official sources are **not** cloned or rebuilt. The custom work is the Python `SYNO.TPS.*` compatibility layer.
 
 | Piece | Path |
 | --- | --- |
 | API contract | [api/SYNO.TPS.contract.md](api/SYNO.TPS.contract.md) |
 | SQLite + ingest + compiler + tpsweb | `spk/src/threatprevention/python/` |
-| SPA source (webpack) | `ui/src/` |
-| Packed SPA + ExtJS shell | `spk/src/threatprevention/package/ui/` (`threatprevention.js`, `config`) |
+| Bridge (inlined at pack time) | `spk/src/threatprevention/package/ui/tps-bridge.js` |
+| Official UI (packed as-is) | `unpacked/package/ui/` |
 | Start helpers | `spk/src/threatprevention/scripts/start-stop-status` |
 
-Build the UI (also run automatically by `spk/pack-spk.sh`):
+Start Menu launches `SYNO.SDS.TPS.Application`. The bridge sends `SYNO.TPS.*` to same-origin `/webman/3rdparty/ThreatPrevention/api` (nginx → tpsweb `:19557`). HTTPS DSM needs that nginx location.
 
-```sh
-cd ui && npm ci && npm run build
-```
+Auth: DSM session cookie, SynoToken, localhost, or RFC1918 peer. Admin-only tile.
 
-Output is `ui/dist/{index.html,app.js,app.css}`. Local preview: `npm start` in `ui/` (proxies `/api` to tpsweb `:19557`).
-
-`tpsweb` listens on **TCP 19557** and `var/tpsweb.sock`. The Start Menu tile launches `SYNO.SDS.ThreatPrevention.Application`. The SPA is also at `/webman/3rdparty/ThreatPrevention/index.html` and `http://<nas>:19557/`. HTTPS DSM should use the same-origin nginx location `/webman/3rdparty/ThreatPrevention/api` → `127.0.0.1:19557`.
-
-Auth: DSM session cookie, SynoToken, localhost, or RFC1918 peer. Admin-only tile (`grantPrivilege: admin`).
-
-DB: `/var/packages/ThreatPrevention/var/tps.db`. Events from `eve.json`. Policy compile writes `var/rules/suricata.rules`; catalog source is `var/rules/catalog.rules` after `update-rules.sh`. Auto-update is a tpsweb scheduler thread (the package user cannot write `/etc/crontab`).
+DB: `/var/packages/ThreatPrevention/var/tps.db`. Events from `eve.json`. Policy compile writes `var/rules/suricata.rules`.
 
 Still IDS-only (AF_PACKET). `setcap` after every install/upgrade: [spk-deploy-and-update.md](spk-deploy-and-update.md).

@@ -6,15 +6,14 @@ RULES_TGZ="${PKGDEST}/etc/rules/emerging.rules.tar.gz"
 RULES_DIR="${PKGDEST}/etc/rules/suricata"
 
 mkdir -p "${PKGVAR}/log" "${PKGVAR}/rules" "${PKGVAR}/export" "${RULES_DIR}"
-# Upgrade leftover from 8.0.6-0011..0016 official ExtJS pack. DSM does not wipe extra files in target/ui.
-rm -f "${PKGDEST}/ui/synoips.js" \
-	"${PKGDEST}/ui/synoips_no_check.js" \
-	"${PKGDEST}/ui/tps-bridge.js" \
-	"${PKGDEST}/ui/style.css" \
-	"${PKGDEST}/ui/index.conf" \
-	"${PKGDEST}/ui/helptoc.conf" \
-	"${PKGDEST}/ui/status.html"
-rm -rf "${PKGDEST}/ui/texts" "${PKGDEST}/ui/help" "${PKGDEST}/ui/.helptoc"
+# DSM does not wipe extra files in target/ui. Community leftovers keep the Start Menu
+# on SYNO.SDS.ThreatPrevention.Application instead of the official window.
+rm -f "${PKGDEST}/ui/threatprevention.js" \
+	"${PKGDEST}/ui/index.html" \
+	"${PKGDEST}/ui/app.js" \
+	"${PKGDEST}/ui/app.css" \
+	"${PKGDEST}/ui/status.html" \
+	"${PKGDEST}/ui/tps-bridge.js"
 if [ -f "${RULES_TGZ}" ] && [ ! -d "${RULES_DIR}/rules" ]; then
 	tar -xzf "${RULES_TGZ}" -C "${RULES_DIR}"
 	rm -f "${RULES_DIR}/rules/emerging-deleted.rules" \
@@ -23,7 +22,6 @@ if [ -f "${RULES_TGZ}" ] && [ ! -d "${RULES_DIR}/rules" ]; then
 	cp -f "${PKGDEST}/etc/rules/classification.config" "${RULES_DIR}/" 2>/dev/null || true
 	cp -f "${PKGDEST}/etc/rules/reference.config" "${RULES_DIR}/" 2>/dev/null || true
 fi
-# First boot: one file the yaml can load. Later replaced by update-rules.sh.
 if [ ! -s "${PKGVAR}/rules/suricata.rules" ] && [ -d "${RULES_DIR}/rules" ]; then
 	cat "${RULES_DIR}/rules/"*.rules > "${PKGVAR}/rules/suricata.rules" 2>/dev/null || true
 	cp -f "${PKGVAR}/rules/suricata.rules" "${PKGVAR}/rules/catalog.rules" 2>/dev/null || true

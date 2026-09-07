@@ -36,6 +36,10 @@ check(sensor["status"] == "engine_start", "sensor status")
 check(sensor["interface"] == "ovs_eth0", "sensor interface")
 check(any(x["if_id"] == "eth0" for x in sensor["interface_list"]), "live iface merge")
 
+empty = official_sensor({"enable_sensor": True, "interface_list": ""}, "running", 1, "", ["ovs_eth0", "eth0"])
+check(empty["interface"] == "ovs_eth0", "empty iface prefers ovs_eth0")
+check(any(x["if_id"] == "ovs_eth0" and x["enabled"] for x in empty["interface_list"]), "empty live enable")
+
 src = official_source("et-pro", "abc")
 check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_code")
 

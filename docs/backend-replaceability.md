@@ -16,7 +16,7 @@ To make the official app fully replaceable you still need:
 
 | Layer | Official | Vanilla Suricata 8 | PoC replacement |
 | --- | --- | --- | --- |
-| Desktop | ExtJS `synoips.js` + `ui/config` `type: app` | none | community webpack SPA + iframe ExtJS shell (`8.0.6-0017`) |
+| Desktop | ExtJS `synoips.js` + `ui/config` `type: app` | none | pack official UI + inlined `tps-bridge.js` |
 | WebAPI transport | DSM `sendWebAPI` → `entry.cgi` → `.so` | none | bridge to `tpsweb :19557` |
 | 21 `SYNO.TPS.*` contracts | 8 aarch64 CGI modules + `libsynotps` | none | Python `tpsweb` + `compat.py` |
 | Event store | PostgreSQL `synotps` (Barnyard2 schema) | `eve.json` only | SQLite + `ingest.py` |
@@ -145,18 +145,18 @@ Score: **S** = Suricata-native (yaml / eve / suricatasc / suricata-update). **M*
 
 ---
 
-## 5. What this PoC implements (8.0.6-0017)
+## 5. What this PoC implements (8.0.6-0024)
 
-Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS):
+Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS). Official UI sources are packed as-is; they are not cloned or rebuilt.
 
-1. **Community webpack SPA** from `ui/src/` (Overview / Events / Policy / Statistics / Settings). Packed as `index.html` + `app.js` + `app.css`.
-2. **Thin ExtJS shell** `threatprevention.js` — iframe to `/webman/3rdparty/ThreatPrevention/index.html`. `dsmappname=SYNO.SDS.ThreatPrevention.Application`.
-3. **`compat.py` + `tpsweb`** — community contract plus official-shaped envelopes (task_id jobs, Sensor ifaces, Signature/Policy roots, Statistic buckets, Source `use_code`, Storage `db_size_*`).
-4. **`ingest.py`** — tail `eve.json` into SQLite (payload as hex, L3/L4 headers, device `loading_score`).
+1. **Pack official UI** from `unpacked/package/ui/` (`synoips.js`, texts, help, icons).
+2. **`tps-bridge.js`** inlined into `synoips.js` at pack time — `sendWebAPI`, `downloadWebAPI`, `pollReg`, `SYNO.API.Request`, `SYNO.API.Store`, `Ext.Ajax` → tpsweb.
+3. **`compat.py` + `tpsweb`** — official envelopes: Event `task_id` / `list_status`, Sensor state names + live ifaces, Signature `signatures` / Policy `list`, Statistic buckets, Source `use_code`, Storage `db_size_*` + clear `task_id`.
+4. **`ingest.py`** — tail `eve.json` into SQLite (payload hex, L3/L4 headers, device `loading_score`).
 5. **`compiler.py`** — `signature.conf` + `policy_*` → `var/rules/suricata.rules` + reload.
-6. **Scheduled `suricata-update`** inside tpsweb (package user cannot write `/etc/crontab`). Export dir: `var/export`.
+6. **`SYNO.TPS.lib`** copied for Info listing. **No** aarch64 `.so`.
 
-Official `synoips.js` / texts / help are **not** packed. `tps-bridge.js` remains in the tree as a research note only.
+`INFO.dsmappname=SYNO.SDS.TPS.Application`.
 
 ### Still not replaced (honest gaps)
 
@@ -196,6 +196,8 @@ Official `synoips.js` / texts / help are **not** packed. `tps-bridge.js` remains
 | `spk/src/threatprevention/package/ui/tps-bridge.js` | research hook (original) |
 | `spk/src/threatprevention/python/compat.py` | official envelopes |
 | `spk/src/threatprevention/python/tpsweb.py` | HTTP + unix API |
+| `docs/api/official-app-surface.md` | official JS + `.lib` inventory |
+| `docs/api/backend-port-backlog.md` | P0–P3 port list |
 | `docs/api/SYNO.TPS.contract.md` | simplified community contract |
 | `docs/spk-deploy-and-update.md` | setcap / HTTP DSM / logout |
 

@@ -62,44 +62,68 @@ cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/surica
 mkdir -p "${STAGING}/package/etc/nginx"
 cp -a "${SRC}/package/etc/nginx/dsm-tpsweb.conf" "${STAGING}/package/etc/nginx/dsm-tpsweb.conf"
 
-info "Build community webpack UI"
-command -v npm >/dev/null 2>&1 || die "npm is required to pack the UI (ui/)"
-(
-  cd "${ROOT}/ui"
-  if [ -f package-lock.json ]; then
-    npm ci
-  else
-    npm install
-  fi
-  npm run build
-)
-[ -f "${ROOT}/ui/dist/index.html" ] || die "webpack did not write ui/dist/index.html"
-
-info "Stage community UI (webpack dist + ExtJS iframe shell)"
+info "Stage official ExtJS UI (research PoC — not redistributable)"
+OFFICIAL_UI="${ROOT}/unpacked/package/ui"
+[ -f "${OFFICIAL_UI}/synoips.js" ] || die "Official UI missing at ${OFFICIAL_UI}/synoips.js"
 rm -rf "${STAGING}/package/ui"
-mkdir -p "${STAGING}/package/ui/images"
-cp -a "${ROOT}/ui/dist/." "${STAGING}/package/ui/"
-cp -a "${SRC}/package/ui/threatprevention.js" "${STAGING}/package/ui/threatprevention.js"
-cp -a "${SRC}/package/ui/config" "${STAGING}/package/ui/config"
-# Tile icons from the official SPK artwork (sizes DSM asks for)
-ICON256="${ORIG_SPK}/PACKAGE_ICON_256.PNG"
-OFF_IMG="${ROOT}/unpacked/package/ui/images"
-if [ -f "${OFF_IMG}/IDS_IPS_256.png" ]; then
-  ICON256="${OFF_IMG}/IDS_IPS_256.png"
-  for sz in 16 32 48 64 72 256; do
-    if [ -f "${OFF_IMG}/IDS_IPS_${sz}.png" ]; then
-      cp -a "${OFF_IMG}/IDS_IPS_${sz}.png" "${STAGING}/package/ui/images/threatprevention_${sz}.png"
+mkdir -p "${STAGING}/package/ui"
+cp -a "${OFFICIAL_UI}/." "${STAGING}/package/ui/"
+# One JS file only. A second config module (tps-bridge.js) makes DSM JSLoad
+# a cycle: synoips.js ↔ tps-bridge.js, and AppLaunch dies with "loop detected".
+{
+  printf '%s\n' "/* tps-bridge inlined — do not add tps-bridge.js to ui/config */"
+  cat "${SRC}/package/ui/tps-bridge.js"
+  printf '\n'
+  cat "${STAGING}/package/ui/synoips.js"
+} > "${STAGING}/package/ui/synoips.js.new"
+mv "${STAGING}/package/ui/synoips.js.new" "${STAGING}/package/ui/synoips.js"
+cp -a "${SRC}/package/ui/tps-chart.js" "${STAGING}/package/ui/tps-chart.js"
+rm -f "${STAGING}/package/ui/tps-bridge.js" \
+  "${STAGING}/package/ui/threatprevention.js" \
+  "${STAGING}/package/ui/index.html" \
+  "${STAGING}/package/ui/app.js" \
+  "${STAGING}/package/ui/app.css"
+python3 - "${STAGING}/package/ui/config" "${PKG_VER}" <<'PY'
+import json, sys
+path, ver = sys.argv[1], sys.argv[2]
+cfg = json.load(open(path, encoding="utf-8"))
+cfg.pop("tps-bridge.js", None)
+cfg.pop("threatprevention.js", None)
+# Official Trends/TopN depend on SYNO.SDS.Chart.* (SRM desktop). Register
+# stubs as their own module so JSLoad defines LineChart before Overview runs.
+# Do not put these keys on synoips.js — a second define of Application-adjacent
+# names on tps-bridge.js previously caused a JSLoad cycle.
+cfg["tps-chart.js"] = {
+    "SYNO.SDS.Chart.LineChart": {"type": "lib", "depend": []},
+    "SYNO.SDS.Chart.PieChart": {"type": "lib", "depend": []},
+    "SYNO.SDS.Chart.CreateAxis": {"type": "lib", "depend": []},
+}
+app = cfg["synoips.js"]["SYNO.SDS.TPS.Application"]
+app["depend"] = [d for d in (app.get("depend") or []) if d != "SYNO.SDS.TPS.Bridge"]
+for extra in ("SYNO.SDS.Chart.LineChart", "SYNO.SDS.Chart.PieChart"):
+    if extra not in app["depend"]:
+        app["depend"].insert(0, extra)
+# Bust DSM/browser cache of synoips.js?v=1.3.3-0926
+app["version"] = ver
+cfg["synoips.js"].pop("SYNO.SDS.ThreatPrevention.Application", None)
+json.dump(cfg, open(path, "w", encoding="utf-8"), indent=2)
+print("ui/config modules:", list(cfg))
+print("apps:", [k for k, v in cfg["synoips.js"].items() if isinstance(v, dict) and v.get("type") == "app"])
+print("app version:", app.get("version"))
+print("official depend:", app.get("depend"))
+PY
+if command -v sips >/dev/null 2>&1 && [ -f "${STAGING}/package/ui/images/IDS_IPS_256.png" ]; then
+  for sz in 16 32; do
+    if [ ! -f "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" ]; then
+      sips -z "${sz}" "${sz}" "${STAGING}/package/ui/images/IDS_IPS_256.png" \
+        --out "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" >/dev/null
     fi
   done
 fi
-if command -v sips >/dev/null 2>&1 && [ -f "${ICON256}" ]; then
-  for sz in 16 32 48 64 72 256; do
-    if [ ! -f "${STAGING}/package/ui/images/threatprevention_${sz}.png" ]; then
-      sips -z "${sz}" "${sz}" "${ICON256}" \
-        --out "${STAGING}/package/ui/images/threatprevention_${sz}.png" >/dev/null
-    fi
-  done
-fi
+
+info "Stage SYNO.TPS.lib (Info listing only; aarch64 .so are not packed)"
+mkdir -p "${STAGING}/package/webapi"
+cp -a "${ROOT}/unpacked/package/webapi/SYNO.TPS.lib" "${STAGING}/package/webapi/SYNO.TPS.lib"
 
 info "Compute extractsize"
 EXTRACT_KB="$(du -sk "${STAGING}/package" | awk '{print $1}')"

@@ -141,6 +141,8 @@ def official_event(row, conn, detail=False):
         "sig_sid": row["sig_sid"],
         "sig_rev": row["sig_rev"],
         "sig_name": row["sig_name"],
+        "signature": row["sig_name"],
+        "id": "%s-%s" % (row["sid"], row["cid"]),
         "sig_class_id": row["sig_class_id"],
         "sig_class_name": class_name,
         "severity": sev,
@@ -261,7 +263,8 @@ def official_sensor(cfg, status, pid, iface, live=None):
         ifaces.append({"if_id": str(iface), "ifname": str(iface), "enabled": True})
         enabled.add(str(iface))
     if ifaces and not enabled:
-        prefer = str(iface or "").split()[0]
+        parts = str(iface or "").split()
+        prefer = parts[0] if parts else "ovs_eth0"
         pick = next((x for x in ifaces if x["if_id"] in (prefer, "ovs_eth0")), ifaces[0])
         pick["enabled"] = True
     if status == "running":
@@ -326,7 +329,8 @@ def official_signature_classes(rows):
             "class_name": r.get("class_name") or r.get("name") or "",
             "sig_class_id": r.get("sig_class_id"),
             "description": r.get("description") or "",
-            "severity": severity_name(0, r.get("severity") or 3),
+            "severity": int(r.get("severity") or 3),
+            "severity_name": severity_name(0, r.get("severity") or 3),
             "enabled": action not in ("disable", "disabled", "pass"),
             "enabledCount": enabled_n,
             "totalCount": total,
@@ -552,7 +556,7 @@ def official_update_status(status, last_updated="", remote_version="", task_id="
     return out
 
 
-def official_devices(rows):
+def official_devices(rows, default_detect=True):
     items = []
     for r in rows:
         items.append({
@@ -562,5 +566,10 @@ def official_devices(rows):
             "loading": r.get("loading_score") if r.get("loading_score") is not None else r.get("loading") or 0,
             "loading_score": r.get("loading_score") or 0,
             "online": bool(r.get("online")),
+            "mesh_re": False,
         })
-    return {"device_list": items, "devices": items}
+    return {
+        "device_list": items,
+        "devices": items,
+        "default_detect": bool(default_detect),
+    }

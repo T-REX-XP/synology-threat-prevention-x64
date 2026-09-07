@@ -1,6 +1,8 @@
 # SYNO.TPS.* contract (community rebuild)
 
-The official ExtJS app uses a stricter envelope (async Event.list `task_id`, Policy `list` + int types, Statistic `days7`/`days30`/`all_logs`, Device `device_list`). That mapping lives in `spk/src/threatprevention/python/compat.py`. Why it exists: [backend-replaceability.md](../backend-replaceability.md).
+**Official app inventory and port backlog:** [official-app-surface.md](official-app-surface.md), [backend-port-backlog.md](backend-port-backlog.md).
+
+This file is the **simplified** community envelope. The official ExtJS app uses a stricter shape (async Event.list `task_id`, Policy `list` + int types, Statistic `days7`/`days30`/`all_logs`, Device `device_list`). That mapping lives in `spk/src/threatprevention/python/compat.py`. Why it exists: [backend-replaceability.md](../backend-replaceability.md).
 
 Sources (no official JS in this file): [`unpacked/package/webapi/SYNO.TPS.lib`](../../unpacked/package/webapi/SYNO.TPS.lib), [`unpacked/package/schema/syno_create_postgresql`](../../unpacked/package/schema/syno_create_postgresql), `strings` on the eight `SYNO.TPS.*.so` files, and keys in [`unpacked/package/ui/texts/enu/strings`](../../unpacked/package/ui/texts/enu/strings).
 

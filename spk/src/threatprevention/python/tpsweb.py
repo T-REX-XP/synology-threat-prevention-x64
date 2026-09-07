@@ -140,6 +140,10 @@ def write_sensor(data):
     if iface:
         with open(IFACE_FILE, "w") as fh:
             fh.write(iface.split()[0] + "\n")
+        try:
+            os.chmod(IFACE_FILE, 0o644)
+        except OSError:
+            pass
     lines = [
         "enable_sensor=%s" % ("yes" if _truth(data.get("enable_sensor", True)) else "no"),
         "enable_prevention=%s" % ("yes" if _truth(data.get("enable_prevention", False)) else "no"),
@@ -361,9 +365,8 @@ def event_list(conn, p):
     EVENT_TASKS[tid] = payload
     while len(EVENT_TASKS) > 32:
         EVENT_TASKS.pop(next(iter(EVENT_TASKS)))
-    payload = dict(payload)
-    payload["task_id"] = tid
-    return ok(payload)
+    # Official JS only reads task_id here, then polls list_status.
+    return ok({"task_id": tid})
 
 
 def event_list_status(p):
@@ -487,6 +490,9 @@ def signature_rules(conn, p):
     if p.get("sig_class_id"):
         where.append("s.sig_class_id=?")
         args.append(int(p["sig_class_id"]))
+    if p.get("name") and not p.get("sig_class_id"):
+        where.append("c.sig_class_name=?")
+        args.append(p["name"])
     if p.get("key_words"):
         where.append("(s.sig_name LIKE ? OR CAST(s.sig_sid AS TEXT) LIKE ?)")
         q = "%" + p["key_words"] + "%"
@@ -508,10 +514,18 @@ def signature_rules(conn, p):
             "sig_rev": r["sig_rev"],
             "sig_name": r["sig_name"],
             "name": r["sig_name"],
+            "msg": r["sig_name"],
+            "encode": False,
             "action": r["eff"],
             "sig_class_id": r["sig_class_id"],
             "class_name": r["sig_class_name"],
             "sig_protocol": r["sig_protocol"],
+            "ip_proto": r["sig_protocol"] or "ip",
+            "ip_src": r["sig_ip_src"] or "any",
+            "ip_dst": r["sig_ip_dst"] or "any",
+            "port_src": r["sig_port_src"] or "any",
+            "port_dst": r["sig_port_dst"] or "any",
+            "references": [],
         })
     return ok({"rules": rules, "total": total})
 
@@ -664,17 +678,38 @@ def _apply_policy_batch(conn, policy):
 def settings_update(conn, api, method, p):
     if api == "SYNO.TPS.Settings.Update.Schedule":
         if method == "get":
+            stored = kv_get(conn, "update_minute", "120")
+            hour = kv_get(conn, "update_hour", "")
+            minute = kv_get(conn, "update_min_of_hour", "")
+            if hour == "" or minute == "":
+                try:
+                    combined = int(stored or 120)
+                except ValueError:
+                    combined = 120
+                hour, minute = combined // 60, combined % 60
             return ok({
                 "auto_update": kv_get(conn, "auto_update") == "1",
                 "weekday": kv_get(conn, "update_weekday", "daily"),
-                "minute": int(kv_get(conn, "update_minute", "120") or 120),
+                "hour": int(hour or 2),
+                "minute": int(minute or 0),
+                "schedule_minute": int(stored or 120) if str(stored).isdigit() else stored,
             })
         if method == "set":
             kv_set(conn, "auto_update", "1" if _truth(p.get("auto_update")) else "0")
             if "weekday" in p:
                 kv_set(conn, "update_weekday", p["weekday"])
-            if "minute" in p:
-                kv_set(conn, "update_minute", p["minute"])
+            if "hour" in p or "minute" in p:
+                try:
+                    hour = int(p.get("hour") if p.get("hour") not in (None, "") else kv_get(conn, "update_hour", "2") or 2)
+                except ValueError:
+                    hour = 2
+                try:
+                    minute = int(p.get("minute") if p.get("minute") not in (None, "") else kv_get(conn, "update_min_of_hour", "0") or 0)
+                except ValueError:
+                    minute = 0
+                kv_set(conn, "update_hour", str(hour))
+                kv_set(conn, "update_min_of_hour", str(minute))
+                kv_set(conn, "update_minute", str(hour * 60 + minute))
             conn.commit()
             return ok({})
     if api == "SYNO.TPS.Settings.Update.Source":
@@ -840,7 +875,7 @@ def devices(conn, method, p):
                 "loading": r["loading_score"],
                 "online": r["mac"].lower() in online,
             })
-        return ok(official_devices(out))
+        return ok(official_devices(out, kv_get(conn, "default_detect", "1") == "1"))
     if method == "set":
         if "default_detect" in p:
             kv_set(conn, "default_detect", "1" if _truth(p.get("default_detect")) else "0")
@@ -944,6 +979,30 @@ def notification(conn, method, p):
 def notification_filter(conn, method, p):
     if method == "list":
         rows = [dict(r) for r in conn.execute("SELECT * FROM notification_filter")]
+        if not rows:
+            for r in conn.execute("SELECT sig_class_name, sig_class_description, sig_priority FROM sig_class ORDER BY sig_priority, sig_class_name"):
+                rows.append({
+                    "name": r["sig_class_name"],
+                    "description": r["sig_class_description"] or r["sig_class_name"],
+                    "severity": int(r["sig_priority"] or 3),
+                    "enable_mail": False,
+                    "enable_sms": False,
+                    "enable_push": False,
+                    "action": "",
+                })
+        else:
+            out = []
+            for r in rows:
+                out.append({
+                    "name": r.get("name") or "",
+                    "description": r.get("description") or r.get("name") or "",
+                    "severity": int(r.get("severity") or 3),
+                    "enable_mail": _truth(r.get("enable_mail") or r.get("action") == "mail"),
+                    "enable_sms": _truth(r.get("enable_sms")),
+                    "enable_push": _truth(r.get("enable_push")),
+                    "action": r.get("action") or "",
+                })
+            rows = out
         return ok({"notification_filters": rows})
     if method == "set":
         conn.execute("DELETE FROM notification_filter")
@@ -1093,7 +1152,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path or "/"
         pre_qs = parse_qs(parsed.query)
-        if path in ("/", "/index.html") and not pre_qs.get("api"):
+        # POST / is the nginx proxy_pass target. Only GET / is the old SPA.
+        if self.command == "GET" and path in ("/", "/index.html") and not pre_qs.get("api"):
             return self._static("index.html", "text/html; charset=utf-8")
         if path == "/app.js":
             return self._static("app.js", "application/javascript; charset=utf-8")
@@ -1119,7 +1179,12 @@ class Handler(BaseHTTPRequestHandler):
         params = {k: v[0] if len(v) == 1 else v for k, v in qs.items()}
         api = params.get("api") or ""
         method = params.get("method") or ""
-        if path in ("/api", "/webapi", "/") or api:
+        api_paths = (
+            "/", "/api", "/webapi",
+            "/webman/tps-api",
+            "/webman/3rdparty/ThreatPrevention/api",
+        )
+        if path.rstrip("/") in api_paths or api:
             if not authorized(self):
                 return self._json(err(403), 403)
             if not api:
@@ -1145,6 +1210,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(result)
         self.send_response(404)
         self._cors()
+        self.send_header("Content-Length", "0")
         self.end_headers()
 
     def _json(self, obj, status=200):
@@ -1165,6 +1231,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not os.path.isfile(full):
             self.send_response(404)
+            self.send_header("Content-Length", "0")
             self.end_headers()
             return
         data = open(full, "rb").read()
