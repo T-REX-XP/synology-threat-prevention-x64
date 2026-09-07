@@ -24,6 +24,8 @@ Map severity chips (`getSeverityIcons`) are HTML in a `syno_displayfield`. DSM 7
 | --- | --- |
 | `Google Maps JavaScript API warning: NoApiKeys` | Official URL has no key. Expected. Map tiles stay blank or watermarked. |
 | `GET …/mapsjs/gen_204?csp_test=true net::ERR_BLOCKED_BY_CLIENT` | Browser extension (uBlock, privacy/ad block) dropped Google’s telemetry/CSP probe. Not a DSM or tpsweb failure. |
+| `d.first is not a function` in `gmapWarningHidden` | Official code treats MutationObserver records as Ext (`.first()`). DSM is native. Bridge replaces that helper from **0032**. |
+| `img-src` CSP blocks `tile.openstreetmap.org` | Official map type is OSM tiles. DSM’s CSP has no OSM host. Tiles stay blank; not tpsweb. |
 | `loaded directly without loading=async` | Google’s loader hint. Harmless. |
 | Empty map / no event pins | `Event.Map.list` `location[]` is empty until GeoIP (backlog T21). A key only buys tiles. Pins need a `GeoIP.dat` and **public** `ip_src` (LAN stays empty). Drop the file at `/var/packages/ThreatPrevention/etc/geoip/GeoIP.dat` or use DSM `/usr/share/GeoIP/GeoIP.dat`. |
 

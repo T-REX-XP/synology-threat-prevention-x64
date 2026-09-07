@@ -26,6 +26,7 @@ from geoip import is_public_ipv4, lookup as geoip_lookup  # noqa: E402
 from ingest import payload_hex  # noqa: E402
 from feeds import add_feed, feed_url_ok, list_feeds  # noqa: E402
 from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
+from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
 from tpsweb import _parse_multipart, handle, read_gmaps_key, write_update_source  # noqa: E402
 
@@ -148,4 +149,21 @@ cfg = read_telegram_conf()
 check(cfg["token"] == "123:ABC" and cfg["chat"] == "-1001", "telegram.conf")
 tg = handle("SYNO.TPS.Settings.Telegram", "get", {}, conn)
 check(tg["success"] and tg["data"]["has_token"] and tg["data"]["token"] == "", "telegram get hides token")
+
+leases = _parse_isc_leases(
+    'lease 192.168.1.50 {\n  hardware ethernet AA:BB:CC:DD:EE:FF;\n'
+    '  client-hostname "phone";\n  binding state active;\n}\n'
+)
+check(leases and leases[0][0] == "aa:bb:cc:dd:ee:ff" and leases[0][2] == "phone", "isc dhcp lease")
+syno = _parse_syno_info("IP=10.0.0.8\nMAC=11:22:33:44:55:66\nHOSTNAME=cam\n")
+check(syno and syno[0][0] == "11:22:33:44:55:66" and syno[0][2] == "cam", "syno dhcpd.info")
+nsm = handle("SYNO.Core.Network.NSM.Device", "get", {}, conn)
+check(nsm["success"] and isinstance(nsm["data"]["devices"], list), "nsm device list")
+usb = handle("SYNO.Core.ExternalDevice.Storage.USB", "list", {}, conn)
+check(usb["success"] and isinstance(usb["data"]["devices"], list), "usb list")
+for dev in usb["data"]["devices"]:
+    check("partitions" in dev, "usb partitions")
+sdb = handle("SYNO.Core.SystemDB", "get", {}, conn)
+check(sdb["success"] and "systemdb_shares" in sdb["data"], "systemdb share")
+check(systemdb_get()["systemdb_shares"] == (usb_list()["devices"][0]["partitions"][0]["share_name"] if usb_list()["devices"] else ""), "systemdb matches first usb share")
 print("ok")

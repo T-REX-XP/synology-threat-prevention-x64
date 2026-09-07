@@ -38,6 +38,7 @@ from compat import (
     to_epoch,
 )
 from compiler import compile_rules, import_rules, parse_header, parse_refs, reload_suricata
+from corehost import iface_ipv4, list_neighbors, nsm_device_list, systemdb_get, usb_list
 from feeds import add_feed, delete_feed, list_feeds, update_feed, write_feeds_json
 from notify import (
     list_filters,
@@ -239,7 +240,10 @@ def read_sensor():
                 pass
     elif ui:
         st = ui
-    return official_sensor(cfg, st, pid, cfg.get("interface_list") or "", list_ifaces())
+    data = official_sensor(cfg, st, pid, cfg.get("interface_list") or "", list_ifaces())
+    for item in data.get("interface_list") or []:
+        item["ip_addr"] = iface_ipv4(item.get("if_id") or item.get("ifname") or "") or ""
+    return data
 
 
 def write_sensor(data):
@@ -532,6 +536,12 @@ def handle(api, method, params, conn):
         return settings_telegram(conn, method, params)
     if api == "SYNO.TPS.Settings.Feed":
         return settings_feed(conn, method, params)
+    if api == "SYNO.Core.Network.NSM.Device" and method == "get":
+        return ok(nsm_device_list())
+    if api == "SYNO.Core.SystemDB" and method == "get":
+        return ok(systemdb_get())
+    if api == "SYNO.Core.ExternalDevice.Storage.USB" and method == "list":
+        return ok(usb_list())
     return err(101)
 
 
@@ -1206,20 +1216,22 @@ def settings_storage(conn, method, p):
 
 def devices(conn, method, p):
     online = set()
-    arp = "/proc/net/arp"
-    if os.path.isfile(arp):
-        with open(arp, encoding="utf-8", errors="replace") as fh:
-            next(fh, None)
-            for line in fh:
-                parts = line.split()
-                if len(parts) >= 4 and parts[3] != "00:00:00:00:00:00":
-                    online.add(parts[3].lower())
-                    mac = parts[3].lower()
-                    conn.execute(
-                        "INSERT OR IGNORE INTO device(mac, device_name, detect, loading_score) VALUES (?,?,?,0)",
-                        (mac, parts[0], 1 if kv_get(conn, "default_detect", "1") == "1" else 0),
-                    )
-        conn.commit()
+    default_detect = 1 if kv_get(conn, "default_detect", "1") == "1" else 0
+    for rec in list_neighbors():
+        mac = rec.get("mac") or ""
+        if not mac:
+            continue
+        if rec.get("is_online"):
+            online.add(mac)
+        name = rec.get("hostname") or rec.get("ip") or mac
+        conn.execute(
+            "INSERT OR IGNORE INTO device(mac, device_name, detect, loading_score) VALUES (?,?,?,0)",
+            (mac, name, default_detect),
+        )
+        row = conn.execute("SELECT device_name FROM device WHERE mac=?", (mac,)).fetchone()
+        if row and row["device_name"] in (mac, rec.get("ip") or "") and rec.get("hostname"):
+            conn.execute("UPDATE device SET device_name=? WHERE mac=?", (rec["hostname"], mac))
+    conn.commit()
     if method == "list":
         conn.execute(
             """UPDATE device SET loading_score = COALESCE((

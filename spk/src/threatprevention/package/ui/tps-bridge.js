@@ -122,7 +122,14 @@ SYNO.SDS.TPS.Bridge = {
 		"SYNO.TPS.Settings.Update.Schedule", "SYNO.TPS.Settings.Update.Source",
 		"SYNO.TPS.Settings.Telegram", "SYNO.TPS.Settings.Feed", "SYNO.TPS.Settings.Map",
 		"SYNO.TPS.Signature", "SYNO.TPS.Signature.Classification", "SYNO.TPS.Signature.Policy",
-		"SYNO.TPS.Signature.Rule", "SYNO.TPS.Statistic.Device", "SYNO.TPS.Statistic.Trends"
+		"SYNO.TPS.Signature.Rule", "SYNO.TPS.Statistic.Device", "SYNO.TPS.Statistic.Trends",
+		"SYNO.Core.Network.NSM.Device", "SYNO.Core.SystemDB",
+		"SYNO.Core.ExternalDevice.Storage.USB"
+	],
+	compat: [
+		"SYNO.Core.Network.NSM.Device",
+		"SYNO.Core.SystemDB",
+		"SYNO.Core.ExternalDevice.Storage.USB"
 	],
 	encodeParams: function (params) {
 		var out = {}, k, v;
@@ -184,15 +191,11 @@ SYNO.SDS.TPS.Bridge = {
 	isTps: function (api) {
 		return api && String(api).indexOf("SYNO.TPS.") === 0;
 	},
-	normalizeCore: function (api, ok, data) {
-		data = data || {};
-		if (api === "SYNO.Core.SystemDB") {
-			if (data.systemdb_shares === undefined) { data.systemdb_shares = ""; }
-		}
-		if (api === "SYNO.Core.ExternalDevice.Storage.USB") {
-			if (!data.devices) { data.devices = []; }
-		}
-		return data;
+	isCompat: function (api) {
+		return api && this.compat.indexOf(api) >= 0;
+	},
+	isHosted: function (api) {
+		return this.isTps(api) || this.isCompat(api);
 	},
 	passthrough: function (item, cb, scope) {
 		Ext.Ajax.request({
@@ -223,7 +226,7 @@ SYNO.SDS.TPS.Bridge = {
 		var method = opts.method || (opts.webapi && opts.webapi.method);
 		var version = opts.version || (opts.webapi && opts.webapi.version) || 1;
 		var params = opts.params || (opts.webapi && opts.webapi.params) || {};
-		if (!this.isTps(api)) {
+		if (!this.isHosted(api)) {
 			return fallback();
 		}
 		this.call(api, method, version, params, opts.callback || opts.status_callback, opts.scope);
@@ -240,8 +243,7 @@ SYNO.SDS.TPS.Bridge = {
 			return true;
 		}
 		function done(idx, ok, data, raw) {
-			data = me.normalizeCore(items[idx].api, ok, data);
-			out[idx] = { api: items[idx].api, method: items[idx].method, success: ok, data: data };
+			out[idx] = { api: items[idx].api, method: items[idx].method, success: ok, data: data || {} };
 			if (!ok) {
 				failed = true;
 				out[idx].error = (raw && raw.error) || { code: 500 };
@@ -252,7 +254,7 @@ SYNO.SDS.TPS.Bridge = {
 			}
 		}
 		Ext.each(items, function (item, idx) {
-			if (me.isTps(item.api)) {
+			if (me.isHosted(item.api)) {
 				me.call(item.api, item.method, item.version || 1, item.params || {}, function (ok, data, raw) {
 					done(idx, ok, data, raw);
 				});
@@ -300,13 +302,40 @@ SYNO.SDS.TPS.Bridge = {
 		return typeof v === "string" && v.indexOf("<") !== -1 &&
 			(v.indexOf("pathlink") !== -1 || v.indexOf("<font") !== -1 ||
 				v.indexOf("<a ") !== -1 || v.indexOf("<a>") !== -1 ||
+				v.indexOf("font-order") !== -1 ||
 				v.indexOf("syno-sds-ips-event-") !== -1 ||
 				v.indexOf('class="syno-sds-ips') !== -1);
+	},
+	restoreOfficialLabel: function (field) {
+		var html = field && field.fieldLabel;
+		if (!this.looksOfficialHtml(html)) { return; }
+		var sep = field.labelSeparator;
+		if (sep === undefined || sep === null) { sep = ""; }
+		var markup = html + sep;
+		var el = field.labelEl;
+		if (!el && field.el && field.el.down) {
+			el = field.el.down("label.x-form-item-label") ||
+				field.el.down(".x-form-item-label") ||
+				field.el.down("label");
+		}
+		if (!el && field.itemCt && field.itemCt.down) {
+			el = field.itemCt.down("label.x-form-item-label") ||
+				field.itemCt.down(".x-form-item-label") ||
+				field.itemCt.down("label");
+		}
+		if (!el && field.el && field.el.up) {
+			var item = field.el.up(".x-form-item");
+			el = item && item.down && (item.down("label.x-form-item-label") ||
+				item.down(".x-form-item-label") || item.down("label"));
+		}
+		if (el && el.dom) { el.dom.innerHTML = markup; }
 	},
 	patchDisplayHtml: function () {
 		/* Official Overview injects <a class="pathlink"> into syno_displayfield.
 		   SRM rendered that HTML. DSM 7 encodes it, so the link is visible as
-		   text and afterrender does b.el.down("a").on(...) on null. */
+		   text and afterrender does b.el.down("a").on(...) on null.
+		   Statistics TopNPercentPanel puts <font class="font-order"> in
+		   fieldLabel (not value); DSM 7 encodes that too. */
 		var me = this;
 		var seen = [];
 		function patch(Cls) {
@@ -316,9 +345,17 @@ SYNO.SDS.TPS.Bridge = {
 			var origInit = proto.initComponent;
 			proto.initComponent = function () {
 				var v = (this.initialConfig && this.initialConfig.value) || this.value;
+				var label = (this.initialConfig && this.initialConfig.fieldLabel) || this.fieldLabel;
+				var field = this;
 				if (me.looksOfficialHtml(v)) { this.htmlEncode = false; }
 				if (origInit) { origInit.apply(this, arguments); }
 				if (me.looksOfficialHtml(this.value || v)) { this.htmlEncode = false; }
+				if (me.looksOfficialHtml(this.fieldLabel || label)) {
+					this.on("afterrender", function () {
+						me.restoreOfficialLabel(field);
+						window.setTimeout(function () { me.restoreOfficialLabel(field); }, 0);
+					}, this);
+				}
 			};
 			var origSet = proto.setValue;
 			proto.setValue = function (v) {
@@ -327,7 +364,31 @@ SYNO.SDS.TPS.Bridge = {
 				this.value = v;
 				if (this.rendered && this.el) { this.el.update(this.htmlEncode ? Ext.util.Format.htmlEncode(v) : v); }
 			};
+			var origSetLabel = proto.setFieldLabel;
+			if (origSetLabel) {
+				proto.setFieldLabel = function (label) {
+					var ret = origSetLabel.apply(this, arguments);
+					if (me.looksOfficialHtml(label || this.fieldLabel)) {
+						me.restoreOfficialLabel(this);
+					}
+					return ret;
+				};
+			}
 			proto._tpsHtml = true;
+		}
+		function patchFormLayout(Layout) {
+			if (!Layout || !Layout.prototype || Layout.prototype._tpsLabelHtml) { return; }
+			var orig = Layout.prototype.getTemplateArgs;
+			if (!orig) { return; }
+			Layout.prototype.getTemplateArgs = function (field) {
+				var args = orig.apply(this, arguments);
+				if (args && field && me.looksOfficialHtml(field.fieldLabel)) {
+					args.label = field.fieldLabel;
+					args.fieldLabel = field.fieldLabel;
+				}
+				return args;
+			};
+			Layout.prototype._tpsLabelHtml = true;
 		}
 		patch(window.SYNO && SYNO.ux && SYNO.ux.DisplayField);
 		patch(window.Ext && Ext.form && Ext.form.DisplayField);
@@ -335,6 +396,37 @@ SYNO.SDS.TPS.Bridge = {
 			patch(Ext.ComponentMgr.types.syno_displayfield);
 			patch(Ext.ComponentMgr.types.displayfield);
 		}
+		if (window.Ext && Ext.layout) {
+			patchFormLayout(Ext.layout.FormLayout);
+			if (Ext.layout.container) { patchFormLayout(Ext.layout.container.Form); }
+		}
+	},
+	patchPercentLabels: function () {
+		/* Top 5 Source/Dest IPs use PercentageField({fieldLabel: '<font class="font-order">…'}).
+		   DSM 7 htmlEncodes form labels; restore after render. */
+		var me = this;
+		var tries = 0;
+		function attach() {
+			var Cls = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Event &&
+				SYNO.SDS.TPS.Event.PercentageField;
+			if (!Cls || !Cls.prototype) {
+				if (tries++ < 40) { window.setTimeout(attach, 100); }
+				return;
+			}
+			if (Cls.prototype._tpsPctLabel) { return; }
+			var orig = Cls.prototype.afterRender;
+			Cls.prototype.afterRender = function () {
+				var field = this;
+				if (orig) { orig.apply(this, arguments); }
+				else if (Cls.superclass && Cls.superclass.afterRender) {
+					Cls.superclass.afterRender.apply(this, arguments);
+				}
+				me.restoreOfficialLabel(this);
+				window.setTimeout(function () { me.restoreOfficialLabel(field); }, 0);
+			};
+			Cls.prototype._tpsPctLabel = true;
+		}
+		attach();
 	},
 	injectSettingsTabs: function () {
 		var me = this;
@@ -540,6 +632,61 @@ SYNO.SDS.TPS.Bridge = {
 			me.applyGmapsKey();
 		});
 		me.wrapGmapsLoader();
+	},
+	patchGmapObserver: function () {
+		/* Official gmapWarningHidden does d.first() on MutationObserver records.
+		   Native MutationRecord lists have length but no Ext .first(). */
+		var tries = 0;
+		function attach() {
+			var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic && SYNO.SDS.TPS.Statistic.MapPanel;
+			if (!P || !P.prototype) {
+				if (tries++ < 40) { window.setTimeout(attach, 100); }
+				return;
+			}
+			if (P.prototype._tpsGmapObs) { return; }
+			P.prototype.gmapWarningHidden = function () {
+				var Ctor = window.MutationObserver || window.WebKitMutationObserver;
+				if (!Ctor || !this.mapContainer || !this.mapContainer.getEl) { return; }
+				var el = this.mapContainer.getEl();
+				if (!el || !el.dom) { return; }
+				var obs = new Ctor(function (records) {
+					if (!records || !records.length) { return; }
+					var c = records[0] && records[0].target;
+					if (c && c.children && c.children.length === 2) {
+						c.removeChild(c.children[1]);
+					}
+				});
+				obs.observe(el.dom, { childList: true });
+			};
+			P.prototype._tpsGmapObs = true;
+		}
+		attach();
+	},
+	patchDeviceCellClick: function () {
+		/* Official onCellClick does Ext.DomQuery.select(...).first().
+		   DSM 7 DomQuery returns a native array / NodeList, not Ext Collection. */
+		var tries = 0;
+		function attach() {
+			var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Overview &&
+				SYNO.SDS.TPS.Overview.ConcernedDevicePanel;
+			if (!P || !P.prototype) {
+				if (tries++ < 40) { window.setTimeout(attach, 100); }
+				return;
+			}
+			if (P.prototype._tpsCellClick) { return; }
+			P.prototype.onCellClick = function (grid, row, col, ev) {
+				var cell = grid.getView().getCell(row, col);
+				var links = (Ext.DomQuery && Ext.DomQuery.select) ? Ext.DomQuery.select("a", cell) : [];
+				var node = links && (links[0] || (links.item && links.item(0)));
+				if (!node) { return; }
+				var wrap = Ext.fly(node);
+				if (!wrap || !ev.within(wrap)) { return; }
+				var rec = grid.getStore().getAt(row);
+				if (rec && rec.data) { this.onShowDetail(rec.data.name); }
+			};
+			P.prototype._tpsCellClick = true;
+		}
+		attach();
 	},
 	applyGmapsKey: function () {
 		var key = this._gmapsKey;
@@ -784,7 +931,7 @@ SYNO.SDS.TPS.Bridge = {
 			var origReq = SYNO.API.Request;
 			var wrappedReq = function (opts) {
 				var args = arguments;
-				if (opts && me.isTps(opts.api)) {
+				if (opts && me.isHosted(opts.api)) {
 					return me.dispatch(opts, function () { return origReq.apply(this, args); });
 				}
 				return origReq.apply(this, args);
@@ -800,8 +947,11 @@ SYNO.SDS.TPS.Bridge = {
 			SYNO.API.Request = wrappedReq;
 		}
 		me.patchDisplayHtml();
+		me.patchPercentLabels();
 		me.patchMapSeverity();
 		me.patchGmapsKey();
+		me.patchGmapObserver();
+		me.patchDeviceCellClick();
 		me.injectSettingsTabs();
 		me.hookPolling();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {
@@ -810,7 +960,7 @@ SYNO.SDS.TPS.Bridge = {
 				opts = opts || {};
 				if (opts._tpsDirect) { return origAjax.apply(this, arguments); }
 				var api = me.pickApi(opts);
-				if (!me.isTps(api)) { return origAjax.apply(this, arguments); }
+				if (!me.isHosted(api)) { return origAjax.apply(this, arguments); }
 				var p = opts.params || opts.jsonData || {};
 				return me.call(api, p.method || opts.method, p.version || 1, p, function (ok, data, raw) {
 					var env = me.envelope(raw || { success: ok, data: data });

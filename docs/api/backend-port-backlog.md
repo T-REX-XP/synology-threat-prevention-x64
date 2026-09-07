@@ -36,7 +36,7 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 | T13 | `Settings.Update.start_check` | probe ET | done (0025) |
 | T14 | `Settings.Update.status` | nested `data.status` | done (0025) |
 | T15 | `Event.ExportFolder.get` | File Station path | done (0025); skip `@eaDir` |
-| T16 | `Device.list` | ARP + `mesh_re:false` | done (0025); NSM names via Core passthrough |
+| T16 | `Device.list` | ARP + `mesh_re:false` | done (0032): stub `SYNO.Core.Network.NSM.Device` on DSM (SRM-only; 0031 showed No such API) |
 | T17 | `Statistic.Device.list` | `devices` + `loading` | done (0025) |
 | T18 | Compound `result[]` | Settings / Policy / Storage | coded; re-test on 0027 UI |
 | T19 | `Backup.restore` | `dss_file` upload | coded (0028); JSON only, not official `.dss` |
@@ -72,7 +72,7 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 3. ET Pro needs a real oinkcode in Settings; empty code returns `etpro_error`.
 4. Leave P3 alone (no NFQUEUE, no official `.dss`, no SMTP).
 
-## Counts (2026-09-07, tree 8.0.6-0031)
+## Counts (2026-09-07, tree 8.0.6-0032)
 
 - 21 `SYNO.TPS.*` APIs, 42 `.lib` methods — all have a tpsweb `handle()` branch.
 - 9 DSM-core / Entry.Request calls — passthrough only.
