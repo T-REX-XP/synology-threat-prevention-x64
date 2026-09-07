@@ -1466,6 +1466,9 @@ def settings_update(conn, api, method, p):
                 str(p.get("task_id") or ""),
             ))
         if method == "start_check":
+            for existing, job in list(JOBS.items()):
+                if (job or {}).get("status") == "updating":
+                    return ok({"task_id": existing, "status": "updating"})
             tid = start_job({"status": "checking"})
             kv_set(conn, "update_status", "checking")
             conn.commit()

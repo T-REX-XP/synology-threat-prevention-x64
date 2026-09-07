@@ -40,6 +40,12 @@ mkdir -p "${STAGING}/package/lib/tps"
 cp -a "${SRC}/python/." "${STAGING}/package/lib/tps/"
 rm -f "${STAGING}/package/lib/tps/test_"*.py "${STAGING}/package/lib/tps/"*.pyc
 
+info "Stage PyYAML for suricata-update (DSM python3 has none)"
+[ -f "${SRC}/vendor/yaml/__init__.py" ] || die "Missing ${SRC}/vendor/yaml — vendored PyYAML"
+mkdir -p "${STAGING}/package/lib/python"
+cp -a "${SRC}/vendor/yaml" "${STAGING}/package/lib/python/yaml"
+cp -a "${SRC}/vendor/PyYAML.LICENSE" "${STAGING}/package/lib/python/PyYAML.LICENSE" 2>/dev/null || true
+
 info "Strip linux/amd64 binaries (keep original engine tree unstripped)"
 if command -v docker >/dev/null 2>&1; then
   docker run --rm --pull never --platform linux/amd64 \

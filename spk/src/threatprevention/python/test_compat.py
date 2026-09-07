@@ -37,8 +37,10 @@ from tpsweb import (  # noqa: E402
     filestation_path_for,
     handle,
     read_gmaps_key,
+    start_job,
     write_update_source,
 )
+from tpsweb import JOBS  # noqa: E402
 
 
 def check(cond, msg):
@@ -256,6 +258,10 @@ check(iface_pin == "tps0", "copy mode pins tps0")
 lan = handle("SYNO.TPS.Settings.Mirror", "set", {"capture_mode": "lan"}, conn)
 check(lan["success"] and lan["data"]["capture_mode"] == "lan", "mirror lan set")
 check(lan["data"]["enabled"] is False, "lan disables copy")
+busy = start_job({"status": "updating"})
+chk = handle("SYNO.TPS.Settings.Update", "start_check", {}, conn)
+check(chk["success"] and str(chk["data"]["task_id"]) == str(busy), "start_check reuses in-flight update")
+JOBS[str(busy)]["status"] = "up_to_date"
 check(filestation_path_for("/volume1/@appdata/ThreatPrevention/export") == "", "hide @appdata from File Station")
 check(filestation_path_for("/volume1/ThreatPrevention") == "/ThreatPrevention", "volume share maps to FS path")
 share_root = tempfile.mkdtemp(prefix="tps-share-")

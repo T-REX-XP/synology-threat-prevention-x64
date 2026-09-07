@@ -25,7 +25,8 @@ if [ ! -x "${BIN}" ]; then
 fi
 
 mkdir -p "${OUT}" "${SU_DATA}/sources" "${PKGVAR}/log"
-export PYTHONPATH="${PKGDEST}/lib/suricata/python${PYTHONPATH:+:${PYTHONPATH}}"
+# DSM python3 has no PyYAML. The SPK vendors a pure-Python copy.
+export PYTHONPATH="${PKGDEST}/lib/python:${PKGDEST}/lib/suricata/python${PYTHONPATH:+:${PYTHONPATH}}"
 
 if [ "${SOURCE}" = "et-pro" ]; then
 	if [ -z "${CODE}" ]; then

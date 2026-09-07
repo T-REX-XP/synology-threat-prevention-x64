@@ -2520,6 +2520,65 @@ SYNO.SDS.TPS.Bridge = {
 		};
 		Polling._tpsBridge = true;
 	},
+	patchSignatureUpdater: function () {
+		/* Official update()/startCheck() ignore the returned task_id and
+		   pollList() for DSM jobs named SYNO.TPS_Updater. We never register
+		   those, so Update Now fell through to start_check (HEAD probe) and
+		   never watched the real download. Poll Update.status on our job. */
+		var me = this;
+		function tryPatch() {
+			var U = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Utils &&
+				SYNO.SDS.TPS.Utils.SignatureUpdater;
+			if (!U || !U.checkStatus || U._tpsUpdater) { return !!(U && U._tpsUpdater); }
+			U._tpsUpdater = true;
+			U.update = function () {
+				var self = this;
+				SYNO.Debug("start updating");
+				this.response.data.status = "updating";
+				this.getComponent().sendWebAPI({
+					api: "SYNO.TPS.Settings.Update",
+					method: "start_update",
+					version: 1,
+					scope: this,
+					callback: function (ok, data) {
+						if (ok && data && data.task_id) {
+							self.taskId = data.task_id;
+							self.checkStatus();
+							return;
+						}
+						if (data) { self.helper.getErrorMsg(data.code, data.isTimeout); }
+						else { self.helper.getErrorMsg("update error"); }
+					}
+				});
+			};
+			U.startCheck = function () {
+				var self = this;
+				SYNO.Debug("sending SYNO.TPS.Settings.Update.start_check");
+				this.response = { data: { status: "checking", last_updated: (this.response && this.response.data && this.response.data.last_updated) || "--" } };
+				this.getComponent().sendWebAPI({
+					api: "SYNO.TPS.Settings.Update",
+					method: "start_check",
+					version: 1,
+					scope: this,
+					callback: function (ok, data) {
+						if (ok && data && data.task_id) {
+							self.taskId = data.task_id;
+							self.checkStatus();
+							return;
+						}
+						if (data) { self.helper.getErrorMsg(data.code, data.isTimeout); }
+						else { self.helper.getErrorMsg("startCheck error"); }
+					}
+				});
+			};
+			return true;
+		}
+		if (tryPatch()) { return; }
+		var n = 0;
+		var id = window.setInterval(function () {
+			if (tryPatch() || ++n > 80) { window.clearInterval(id); }
+		}, 25);
+	},
 	pickApi: function (opts) {
 		var p = (opts && (opts.params || opts.jsonData)) || {};
 		return p.api || (opts && opts.api) || "";
@@ -2595,6 +2654,26 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		wrapPollReg(SYNO.SDS.AppWindow);
 		wrapPollReg(Ext.Component);
+		function wrapPollList(cls) {
+			if (!cls || !cls.prototype || !cls.prototype.pollList || cls.prototype.pollList._tpsBridge) { return; }
+			var origList = cls.prototype.pollList;
+			cls.prototype.pollList = function (opts) {
+				opts = opts || {};
+				if (opts.task_id_prefix && String(opts.task_id_prefix).indexOf("SYNO.TPS") === 0) {
+					var ids = [];
+					var updater = SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.SignatureUpdater;
+					if (updater && updater.taskId) { ids.push(updater.taskId); }
+					if (opts.callback) {
+						opts.callback.call(opts.scope || window, true, me.adminList(ids));
+					}
+					return;
+				}
+				return origList.apply(this, arguments);
+			};
+			cls.prototype.pollList._tpsBridge = true;
+		}
+		wrapPollList(Ext.Component);
+		wrapPollList(SYNO.SDS.AppWindow);
 		if (window.SYNO && SYNO.API && SYNO.API.Store && SYNO.API.Store.prototype && SYNO.API.Store.prototype.load && !SYNO.API.Store.prototype.load._tpsBridge) {
 			var origStoreLoad = SYNO.API.Store.prototype.load;
 			SYNO.API.Store.prototype.load = function (options) {
@@ -2664,6 +2743,7 @@ SYNO.SDS.TPS.Bridge = {
 		me.patchRuleGridCombo();
 		me.injectSettingsTabs();
 		me.hookPolling();
+		me.patchSignatureUpdater();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {
 			var origAjax = Ext.Ajax.request;
 			Ext.Ajax.request = function (opts) {
