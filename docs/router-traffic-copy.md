@@ -1,39 +1,50 @@
-# Router traffic copy (gretap IDS)
+# Router traffic copy (gretap / TZSP IDS)
 
-The NAS is not the gateway. Suricata on `ovs_eth0` only sees packets to/from the NAS. To inspect **LAN ↔ WAN** client traffic, OpenWrt duplicates those FORWARD frames into a **gretap** toward the NAS. Suricata listens on local `tps0`. This is IDS only (no NFQUEUE).
+The NAS is not the gateway. Suricata on `ovs_eth0` only sees packets to/from the NAS. To inspect **LAN ↔ WAN** client traffic, the LAN gateway sends a copy toward the NAS. Suricata listens on local `tps0`. This is IDS only (no NFQUEUE).
+
+Two router families share the same NAS capture pin (`tps0`). They do **not** use the same wire format:
+
+| Gateway | On the router | On the NAS | DSM Firewall |
+| --- | --- | --- | --- |
+| **OpenWrt** (nftables / fw4) | `gretap` + nft `dup` on **forward** | Linux `gretap` (`tps0`) | GRE, IP protocol **47**, from the router LAN IP |
+| **MikroTik** RouterOS | mangle `sniff-tzsp` on **forward** | TAP `tps0` + `tzsp_tap.py` (UDP **37008**) | UDP **37008** from the router LAN IP |
+
+MikroTik **EoIP** is a proprietary GRE flavor (tunnel-id). It will not peer with Linux gretap (ethertype 0x6558, Transparent Ethernet Bridging). `/interface gre` is L3 only. That is why this package uses TZSP for RouterOS.
 
 ```
-LAN clients ↔ br-lan ↔ wan
+LAN clients ↔ LAN bridge/switch ↔ WAN
                  │
-                 │ nft dup (FORWARD only)
+                 │  OpenWrt: nft dup → gretap
+                 │  MikroTik: sniff-tzsp → UDP 37008
                  ▼
-            gretap (GRE proto 47)  →  NAS tps0  →  Suricata AF_PACKET
+            NAS tps0  →  Suricata AF_PACKET
 ```
 
-GRE is originated on the router (OUTPUT). The nft hook is **forward** only, so the copy is not re-mirrored. The include also `return`s `ip protocol gre`.
+Copies are originated on the router as **OUTPUT**. The copy hook is **forward** only, so the copy is not re-mirrored.
 
-The SPK **never** rewrites the router. Copy snippets from the NAS and run them on OpenWrt.
+The SPK **never** rewrites the router. Copy snippets from the NAS and run them on the gateway.
 
 Shipped with the package:
 
 | Where | What |
 | --- | --- |
 | DSM Help → **Router traffic copy** | Operator steps inside Help Center / the app **?** button |
-| `/var/packages/ThreatPrevention/target/etc/openwrt/README.txt` | Same steps on the NAS (copy this folder to the router) |
+| `/var/packages/ThreatPrevention/target/etc/openwrt/` | OpenWrt script + README |
+| `/var/packages/ThreatPrevention/target/etc/mikrotik/` | RouterOS script + README |
 | This file | Full operator reference |
 
-Example addresses below: router `192.168.1.1`, NAS `192.168.1.130`. Substitute yours. Do this only on a trusted LAN; do not allow GRE from the WAN.
+Example addresses below: router `192.168.1.1`, NAS `192.168.1.130`. Substitute yours. Do this only on a trusted LAN; do not allow GRE or TZSP from the WAN.
 
 ---
 
 ## Prerequisites
 
-1. OpenWrt as the LAN gateway (nftables / fw4).
+1. OpenWrt (nftables / fw4) **or** MikroTik RouterOS as the LAN gateway.
 2. This NAS on the same LAN, Threat Prevention installed, **`setcap`** on `bin/suricata`, package started. See [spk-deploy-and-update.md](spk-deploy-and-update.md).
-3. Administrator access to DSM Firewall and SSH on both hosts.
-4. GRE support on the router: `opkg install kmod-gre gre`.
+3. Administrator access to DSM Firewall and SSH (OpenWrt) or Winbox/terminal (MikroTik).
+4. OpenWrt GRE support: `opkg install kmod-gre gre`. MikroTik: disable **fasttrack** for the traffic you want copied (mangle never sees fasttracked flows).
 
-Recommended order: **DSM Firewall → OpenWrt script → Settings Apply → package restart → verify**.
+Recommended order: **DSM Firewall → router script → Settings Apply → package restart → verify**.
 
 ---
 
@@ -42,26 +53,22 @@ Recommended order: **DSM Firewall → OpenWrt script → Settings Apply → pack
 `/var/packages/ThreatPrevention/etc/mirror.conf` (shipped **disabled**). Choose the mode in **Settings → General → Capture source**:
 
 - **Listen on NAS LAN interfaces** — Suricata sees only traffic to/from this NAS (`ovs_eth0`).
-- **Receive a traffic copy from the router** — OpenWrt GRE-copies LAN↔WAN onto local `tps0`. Enter the **router LAN IPv4**. Optional NAS IP (empty = auto).
+- **Receive a traffic copy from the router** — then pick **OpenWrt** (GRE tap) or **MikroTik** (TZSP). Enter the **router LAN IPv4**. Optional NAS IP is gretap-only (empty = auto).
 
-Apply writes:
+Apply writes `enabled=1`, `router_kind`, `encap` (`gretap` or `tzsp`), and `ifname=tps0`. `start-stop-status` creates `tps0` on **start** (gretap or TAP + TZSP listener) and removes it on stop. Capture is pinned to `tps0` in `etc/interface` when the tap exists; otherwise it stays on `ovs_eth0`.
 
-```
-enabled=1
-router_ip=192.168.1.1
-local_ip=
-ifname=tps0
-```
-
-Empty `local_ip` uses the IPv4 `ip route get` picks toward `router_ip`. `start-stop-status` creates `tps0` (`type gretap`) on **start** when `enabled=1` and removes it on stop. Capture is pinned to `tps0` in `etc/interface` when the tap exists; otherwise it stays on `ovs_eth0`.
-
-`gretap` needs **root** (or `CAP_NET_ADMIN`). Package Center start as the package user may skip tunnel create; `sudo synopkg restart ThreatPrevention` after `setcap` on `suricata` is the usual path. Apply does not create the tap by itself.
+The tap needs **root** (or `CAP_NET_ADMIN`). Package Center start as the package user may skip create; `sudo synopkg restart ThreatPrevention` after `setcap` on `suricata` is the usual path. Apply does not create the tap by itself.
 
 ### DSM firewall (required)
 
-Control Panel → **Security → Firewall**: allow **GRE** (IP protocol **47**) **from the router LAN IP** (`192.168.1.1`) to this NAS. Without that, `tps0` stays quiet.
+Control Panel → **Security → Firewall**, from the **router LAN IP** only:
 
-Do not add a generic “allow GRE from WAN” or from Any.
+| Router | Allow |
+| --- | --- |
+| OpenWrt | **GRE** (IP protocol **47**) |
+| MikroTik | **UDP 37008** |
+
+Without that rule, `tps0` stays quiet. Do not allow GRE or TZSP from WAN or Any.
 
 After install, confirm:
 
@@ -69,7 +76,7 @@ After install, confirm:
 ip link show tps0
 cat /var/packages/ThreatPrevention/etc/interface
 getcap /var/packages/ThreatPrevention/target/bin/suricata
-grep -E "af-packet|tps0|gretap" /var/packages/ThreatPrevention/var/log/suricata.log | tail
+grep -E "af-packet|tps0|gretap|tzsp" /var/packages/ThreatPrevention/var/log/suricata.log /var/packages/ThreatPrevention/var/log/tzsp.log 2>/dev/null | tail
 ```
 
 General → Monitored Interfaces should show **one** enabled capture device (`tps0`), not `tps0` plus LAN 1.
@@ -128,9 +135,40 @@ nft list chain inet fw4 tps_mirror
 
 ---
 
+## MikroTik RouterOS
+
+Copy from the NAS:
+
+`/var/packages/ThreatPrevention/target/etc/mikrotik/`
+
+| File | Role |
+| --- | --- |
+| `README.txt` | Operator steps (for `cat` on the router) |
+| `apply-tps-mirror.rsc` | FORWARD `sniff-tzsp` to the NAS (UDP 37008) |
+
+Edit `NasIp`, `WanIf`, and `LanIf` in the `.rsc`, upload it, then:
+
+```
+/import file-name=apply-tps-mirror.rsc
+```
+
+`WanIf` must be the **L3** WAN name (`pppoe-out1` when using PPPoE, not the underlying ethernet). `LanIf` is usually `bridge`.
+
+**Fasttrack:** connections that hit `fasttrack-connection` never reach mangle, so the NAS sees nothing. Disable that filter rule (or stop fasttracking the flows you care about) and watch CPU.
+
+Confirm:
+
+```
+/ip firewall mangle print stats where comment~"tps-mirror"
+```
+
+Hardware **switch-chip port mirroring** to a spare NAS NIC is an alternative that does not use TZSP. Pin that NIC as the capture source if you go that way; this package still listens on one AF_PACKET interface.
+
+---
+
 ## Bandwidth and MTU
 
-Every WAN byte is copied again as GRE on the LAN toward the NAS. Outer GRE is larger than 1500; the kernel may fragment the outer packet. Inner frames on `tps0` should remain intact. Suricata `checksum-checks: no` on AF_PACKET because copies can fail offload checksums.
+Every WAN byte is copied again on the LAN toward the NAS (GRE or TZSP). Outer GRE is larger than 1500; the kernel may fragment the outer packet. Inner frames on `tps0` should remain intact. Suricata `checksum-checks: no` on AF_PACKET because copies can fail offload checksums. TZSP on a small RouterBOARD can peg CPU once fasttrack is off.
 
 ---
 
@@ -148,6 +186,13 @@ uci commit network
 /etc/init.d/firewall reload
 ```
 
+**MikroTik:**
+
+```
+/ip firewall mangle remove [find comment~"tps-mirror"]
+/ip firewall filter enable [find action=fasttrack-connection]
+```
+
 ---
 
 ## Troubleshooting
@@ -155,8 +200,9 @@ uci commit network
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |
 | `tps0` missing after Apply | Tap is created only at package start; `CAP_NET_ADMIN` missing | `setcap` on `suricata`, then `synopkg restart ThreatPrevention` |
-| `tps0` UP but no LAN client alerts | DSM Firewall blocking GRE, or OpenWrt WAN ifname is not the L3 device | Allow proto 47 from the router LAN IP; set `WAN_IF` and rerun the script |
+| `tps0` UP but no LAN client alerts | DSM Firewall blocking GRE/TZSP; OpenWrt WAN ifname not L3; MikroTik fasttrack | Allow proto 47 (OpenWrt) or UDP 37008 (MikroTik) from the router LAN IP; set `WAN_IF` / `WanIf`; disable fasttrack |
+| Loop or huge LAN load | Copy hooked on INPUT/OUTPUT, or GRE/TZSP allowed to bounce | Keep **forward**-only copy; do not allow GRE or UDP 37008 from WAN |
+| MikroTik counters increment, NAS silent | TZSP listener not running, or wrong `encap` | Settings → **MikroTik**, Apply, restart package; check `var/log/tzsp.log` |
 | Capture on `tps0` **and** LAN 1 | Dual pin | Monitored Interfaces should be `tps0` only; restart after Apply |
 | `Operation not permitted` on capture | No file capabilities on the new ELF | Post-install `setcap` — [spk-deploy-and-update.md](spk-deploy-and-update.md) |
 | nft chain missing | fw4 did not pick up `/etc/nftables.d/` | Confirm the file exists and `firewall reload`; WAN/LAN ifnames must match `iifname`/`oifname` |
-| Loop or huge LAN load | Copy hooked on INPUT/OUTPUT, or GRE allowed to bounce | Keep the **forward**-only include; do not mirror GRE; do not allow GRE from WAN |

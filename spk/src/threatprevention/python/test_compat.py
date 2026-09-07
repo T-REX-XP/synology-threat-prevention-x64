@@ -416,6 +416,18 @@ check(not bad_copy["success"], "mirror copy rejects bad router_ip")
 copied = handle("SYNO.TPS.Settings.Mirror", "set", {"capture_mode": "copy", "router_ip": "192.168.1.1"}, conn)
 check(copied["success"] and copied["data"]["capture_mode"] == "copy", "mirror copy set")
 check(copied["data"]["enabled"] is True and copied["data"]["ifname"] == "tps0", "mirror copy flags")
+check(copied["data"]["encap"] == "gretap" and copied["data"]["router_kind"] == "openwrt", "mirror default openwrt gretap")
+mt = handle("SYNO.TPS.Settings.Mirror", "set", {
+    "capture_mode": "copy", "router_ip": "192.168.1.1", "router_kind": "mikrotik",
+}, conn)
+check(mt["success"] and mt["data"]["encap"] == "tzsp" and mt["data"]["router_kind"] == "mikrotik", "mirror mikrotik tzsp")
+check(mt["data"]["tzsp_port"] == 37008, "mirror tzsp port")
+from tzsp_tap import parse_tzsp  # noqa: E402
+eth = b"\x00" * 6 + b"\x11" * 6 + b"\x08\x00" + b"\x45\x00"
+tzsp = bytes([1, 0, 0, 1, 1]) + eth
+check(parse_tzsp(tzsp) == eth, "tzsp ethernet payload")
+check(parse_tzsp(b"\x00\x00") is None, "tzsp rejects junk")
+check(parse_tzsp(bytes([1, 0, 0, 18, 1]) + eth) is None, "tzsp rejects non-ethernet encap")
 iface_pin = open(os.path.join(os.environ["TPS_PKGETC"], "interface")).read().strip()
 check(iface_pin == "tps0", "copy mode pins tps0")
 lan = handle("SYNO.TPS.Settings.Mirror", "set", {"capture_mode": "lan"}, conn)

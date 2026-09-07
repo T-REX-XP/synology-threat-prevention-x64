@@ -224,6 +224,8 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			return {
 				capture_mode: mode === "copy" ? "copy" : "lan",
 				enabled: mode === "copy",
+				router_kind: this.radioInputValue(panel, "router_kind") || "openwrt",
+				encap: (this.radioInputValue(panel, "router_kind") === "mikrotik") ? "tzsp" : "gretap",
 				router_ip: String(val("router_ip", "") || "").replace(/^\s+|\s+$/g, ""),
 				local_ip: String(val("local_ip", "") || "").replace(/^\s+|\s+$/g, ""),
 				ifname: String(val("ifname", "tps0") || "tps0").replace(/^\s+|\s+$/g, "") || "tps0"
@@ -274,9 +276,14 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			}
 			var sensor = this.namedField(panel, "enable_sensor");
 			var sensorOn = !sensor || !sensor.getValue || !!sensor.getValue();
-			/* Copy-only: Router IP, optional NAS IP. */
+			var kind = this.radioInputValue(panel, "router_kind") || "openwrt";
 			me.setCmpEnabled(me.namedField(panel, "router_ip"), copy);
-			me.setCmpEnabled(me.namedField(panel, "local_ip"), copy);
+			me.setCmpEnabled(me.namedField(panel, "local_ip"), copy && kind !== "mikrotik");
+			if (form.findFields) {
+				Ext.each(form.findFields("router_kind") || [], function (fld) {
+					me.setCmpEnabled(fld, copy);
+				});
+			}
 			var rip = me.namedField(panel, "router_ip");
 			if (rip) {
 				rip.allowBlank = !copy;
@@ -299,16 +306,20 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			if (!form || !form.setValues) { return; }
 			form.setValues({
 				capture_mode: data.capture_mode || (data.enabled ? "copy" : "lan"),
+				router_kind: data.router_kind || (data.encap === "tzsp" ? "mikrotik" : "openwrt"),
 				router_ip: data.router_ip || "",
 				local_ip: data.local_ip || "",
 				ifname: data.ifname || "tps0"
 			});
 			var copy = (data.capture_mode || (data.enabled ? "copy" : "lan")) === "copy";
+			var kind = data.router_kind || (data.encap === "tzsp" ? "mikrotik" : "openwrt");
 			var hint = form.findField("mirror_hint");
 			if (hint && hint.setValue) {
-				var msg = "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router. See Help: Router traffic copy.";
+				var msg = (kind === "mikrotik")
+					? "MikroTik: import etc/mikrotik/apply-tps-mirror.rsc (TZSP UDP 37008). Allow that UDP from the router in DSM Firewall. Disable fasttrack or copies stay empty. See Help: Router traffic copy."
+					: "OpenWrt: run etc/openwrt/apply-tps-mirror.sh. Allow GRE (protocol 47) from the router in DSM Firewall. See Help: Router traffic copy.";
 				if (copy && !data.tap_present) {
-					msg += " tps0 is not up yet — Apply, then restart Threat Prevention if the tunnel is missing.";
+					msg += " tps0 is not up yet — Apply, then restart Threat Prevention if the tap is missing.";
 				}
 				hint.setValue(msg);
 			}
@@ -326,7 +337,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			var me = this;
 			function onMode(fld, on) {
 				if (on === false) { return; }
-				me.syncCaptureMode(panel, fld && fld.inputValue);
+				me.syncCaptureMode(panel, fld && fld.name === "capture_mode" ? fld.inputValue : undefined);
 				me.prepareGeneralForm(panel);
 			}
 			return {
@@ -348,7 +359,19 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					},
 					{
 						xtype: "syno_radio", name: "capture_mode", inputValue: "copy",
-						boxLabel: "Receive a traffic copy from the router — LAN↔WAN (OpenWrt GRE)",
+						boxLabel: "Receive a traffic copy from the router — LAN↔WAN",
+						listeners: { check: onMode }
+					},
+					{
+						xtype: "syno_radio", name: "router_kind", inputValue: "openwrt", checked: true,
+						indent: 1, disabled: true,
+						boxLabel: "OpenWrt — GRE tap (nft dup onto gretap)",
+						listeners: { check: onMode }
+					},
+					{
+						xtype: "syno_radio", name: "router_kind", inputValue: "mikrotik",
+						indent: 1, disabled: true,
+						boxLabel: "MikroTik — TZSP stream (UDP 37008)",
 						listeners: { check: onMode }
 					},
 					{ xtype: "hidden", name: "ifname", value: "tps0" },
@@ -362,7 +385,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					},
 					{
 						xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
-						value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router. Restart the package after Apply so tps0 can be created. Full steps: Help → Router traffic copy, or /var/packages/ThreatPrevention/target/etc/openwrt/README.txt."
+						value: "OpenWrt: apply-tps-mirror.sh and DSM Firewall GRE (protocol 47). MikroTik: apply-tps-mirror.rsc and DSM Firewall UDP 37008. Restart the package after Apply so tps0 can be created. Full steps: Help → Router traffic copy."
 					}
 				]
 			};
@@ -483,7 +506,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				"enable_sensor", "enable_prevention", "enable_auto_export_events_during_postupgrade",
 				"network_security_mode", "auto_update", "weekday", "hour", "minute",
 				"use_code", "code", "update_status", "last_updated",
-				"capture_mode", "router_ip", "local_ip", "ifname"
+				"capture_mode", "router_kind", "router_ip", "local_ip", "ifname"
 			], function (name) { snap(me.findNamed(panel, name) || form.findField(name)); });
 			if (form.findFields) {
 				Ext.each(form.findFields("network_security_mode") || [], snap);
@@ -659,7 +682,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						var form = this.getForm && this.getForm();
 						var dirtyMirror = false;
 						var hasMirrorSet = false;
-						Ext.each(["capture_mode", "router_ip", "local_ip", "ifname"], function (name) {
+						Ext.each(["capture_mode", "router_kind", "router_ip", "local_ip", "ifname"], function (name) {
 							var fld = form && form.findField && form.findField(name);
 							if (fld && fld.isDirty && fld.isDirty()) { dirtyMirror = true; }
 						});

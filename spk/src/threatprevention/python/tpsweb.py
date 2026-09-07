@@ -365,7 +365,14 @@ def kv_peek(key, default=""):
 
 
 def read_mirror_conf():
-    out = {"enabled": False, "router_ip": "192.168.1.1", "local_ip": "", "ifname": "tps0"}
+    out = {
+        "enabled": False,
+        "router_ip": "192.168.1.1",
+        "local_ip": "",
+        "ifname": "tps0",
+        "encap": "gretap",
+        "router_kind": "openwrt",
+    }
     if not os.path.isfile(MIRROR_CONF):
         return out
     try:
@@ -381,11 +388,22 @@ def read_mirror_conf():
             key, val = key.strip(), val.strip()
             if key == "enabled":
                 out["enabled"] = _truth(val)
-            elif key in ("router_ip", "local_ip", "ifname") and val:
+            elif key in ("router_ip", "local_ip", "ifname", "encap", "router_kind") and val:
                 out[key] = val
     if not out.get("ifname"):
         out["ifname"] = "tps0"
+    kind, encap = _normalize_mirror_kind(out.get("router_kind"), out.get("encap"))
+    out["router_kind"] = kind
+    out["encap"] = encap
     return out
+
+
+def _normalize_mirror_kind(kind=None, encap=None):
+    text = "%s %s" % (kind or "", encap or "")
+    text = text.lower()
+    if any(x in text for x in ("mikrotik", "tzsp", "ros", "routeros")):
+        return "mikrotik", "tzsp"
+    return "openwrt", "gretap"
 
 
 _IPV4_RE = re.compile(
@@ -431,17 +449,21 @@ def write_mirror_conf(data):
     ifname = str(data.get("ifname") or "tps0").strip() or "tps0"
     if not re.match(r"^[A-Za-z0-9_.-]{1,15}$", ifname):
         ifname = "tps0"
+    kind, encap = _normalize_mirror_kind(data.get("router_kind"), data.get("encap"))
     if enabled and not _ipv4_ok(router_ip):
         return "router_ip"
     if local_ip and not _ipv4_ok(local_ip):
         return "local_ip"
     os.makedirs(PKGETC, exist_ok=True)
     lines = [
-        "# Copy LAN↔WAN traffic from the OpenWrt router into a local gretap for Suricata.",
+        "# Copy LAN↔WAN traffic from the gateway into local tps0 for Suricata.",
+        "# encap=gretap (OpenWrt GRE) or encap=tzsp (MikroTik sniff-tzsp).",
         "# 1 = capture on tps0 (created at package start). 0 = capture on the NAS LAN NIC (ovs_eth0).",
         "enabled=%s" % ("1" if enabled else "0"),
+        "router_kind=%s" % kind,
+        "encap=%s" % encap,
         "router_ip=%s" % router_ip,
-        "# Empty local_ip: pick the IPv4 used to reach router_ip.",
+        "# Empty local_ip: pick the IPv4 used to reach router_ip (gretap only).",
         "local_ip=%s" % local_ip,
         "ifname=%s" % ifname,
     ]
@@ -463,6 +485,9 @@ def mirror_status():
         "router_ip": m.get("router_ip") or "192.168.1.1",
         "local_ip": m.get("local_ip") or "",
         "ifname": ifname,
+        "encap": m.get("encap") or "gretap",
+        "router_kind": m.get("router_kind") or "openwrt",
+        "tzsp_port": 37008,
         "tap_present": os.path.exists("/sys/class/net/" + ifname),
     }
 

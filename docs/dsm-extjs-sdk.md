@@ -206,7 +206,7 @@ i18n:
 - `this.helper.T("section","key")` — package `ui/texts/<lang>/strings`
 - `_T("common","colon")` / `_T("common","add")` / `_T("common","enabled")` — DSM core strings
 
-Help: [`ui/helptoc.conf`](../unpacked/package/ui/helptoc.conf) + `ui/help/<lang>/`. Search keywords: [`ui/index.conf`](../unpacked/package/ui/index.conf). DSM Help Center only lists a package after `conf/resource` `indexdb.help-index` (and `app-index`) plus `pkgindexer_add` on start — see [`dsm-help.sh`](../spk/src/threatprevention/scripts/dsm-help.sh). Official SRM topics stay; pack prepends community pages `threatprevention_dsm.html` (IDS / setcap) and `threatprevention_router.html` (OpenWrt GRE copy). Operator copy of the router steps also ships in `target/etc/openwrt/README.txt`. Canonical write-up: [router-traffic-copy.md](router-traffic-copy.md).
+Help: [`ui/helptoc.conf`](../unpacked/package/ui/helptoc.conf) + `ui/help/<lang>/`. Search keywords: [`ui/index.conf`](../unpacked/package/ui/index.conf). DSM Help Center only lists a package after `conf/resource` `indexdb.help-index` (and `app-index`) plus `pkgindexer_add` on start — see [`dsm-help.sh`](../spk/src/threatprevention/scripts/dsm-help.sh). Official SRM topics stay; pack prepends community pages `threatprevention_dsm.html` (IDS / setcap) and `threatprevention_router.html` (OpenWrt GRE or MikroTik TZSP copy). Operator copy of the router steps also ships in `target/etc/openwrt/` and `target/etc/mikrotik/`. Canonical write-up: [router-traffic-copy.md](router-traffic-copy.md).
 
 ---
 

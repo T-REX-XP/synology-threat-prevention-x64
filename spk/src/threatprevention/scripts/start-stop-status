@@ -4,7 +4,7 @@ PKGVAR="/var/packages/ThreatPrevention/var"
 PKGETC="/var/packages/ThreatPrevention/etc"
 PIDFILE="${PKGVAR}/suricata.pid"
 INGEST_PID="${PKGVAR}/ingest.pid"
-TPSWEB_PID="${PKGVAR}/tpsweb.pid"
+TZSP_PID="${PKGVAR}/tzsp.pid"
 BIN="${PKGDEST}/bin/suricata"
 YAML="${PKGDEST}/etc/suricata/suricata.yaml"
 LOGDIR="${PKGVAR}/log"
@@ -119,14 +119,61 @@ ensure_gretap() {
 	return 1
 }
 
+ensure_tzsp_tap() {
+	ensure_mirror_conf
+	enabled="$(mirror_kv enabled 0)"
+	case "${enabled}" in
+		1|yes|true|on) ;;
+		*) return 1 ;;
+	esac
+	ifname="$(mirror_kv ifname tps0)"
+	[ -n "${ifname}" ] || ifname="tps0"
+	modprobe tun 2>/dev/null || true
+	if ! ip link show "${ifname}" >/dev/null 2>&1; then
+		ip tuntap add dev "${ifname}" mode tap 2>/dev/null || true
+	fi
+	if ! ip link show "${ifname}" >/dev/null 2>&1; then
+		echo "tzsp tap ${ifname} create failed; capture stays on LAN NIC" >&2
+		return 1
+	fi
+	ip link set "${ifname}" up 2>/dev/null || true
+	pin_iface "${ifname}"
+	if [ -x "${PYTHON}" ] || command -v "${PYTHON}" >/dev/null 2>&1; then
+		if ! alive "${TZSP_PID}"; then
+			PYTHONPATH="${PYDIR}" "${PYTHON}" "${PYDIR}/tzsp_tap.py" "${ifname}" \
+				>>"${LOGDIR}/tzsp.log" 2>&1 &
+			echo $! > "${TZSP_PID}"
+			echo "tzsp tap ${ifname} listening UDP ${TZSP_PORT:-37008}" >&2
+		fi
+	else
+		echo "python3 missing; tzsp tap not started" >&2
+		return 1
+	fi
+	return 0
+}
+
+ensure_capture_tap() {
+	ensure_mirror_conf
+	encap="$(mirror_kv encap gretap)"
+	kind="$(mirror_kv router_kind openwrt)"
+	case "${encap}${kind}" in
+		*tzsp*|*mikrotik*)
+			ensure_tzsp_tap
+			return $?
+			;;
+	esac
+	ensure_gretap
+}
+
 destroy_gretap() {
 	ensure_mirror_conf
 	ifname="$(mirror_kv ifname tps0)"
 	[ -n "${ifname}" ] || ifname="tps0"
+	kill_pidfile "${TZSP_PID}"
 	if ip link show "${ifname}" >/dev/null 2>&1; then
 		ip link set "${ifname}" down 2>/dev/null || true
 		ip link del "${ifname}" 2>/dev/null || true
-		echo "gretap ${ifname} removed" >&2
+		echo "capture tap ${ifname} removed" >&2
 	fi
 }
 
@@ -195,7 +242,7 @@ helpers_ok() {
 
 start() {
 	mkdir -p "${LOGDIR}" "${PKGVAR}" "${PKGETC}" "${PKGVAR}/export"
-	ensure_gretap || true
+	ensure_capture_tap || true
 	ifname="$(mirror_kv ifname tps0)"
 	cur="$(read_iface_file || true)"
 	if [ -n "${ifname}" ] && [ "${cur}" = "${ifname}" ] && ! ip link show "${ifname}" >/dev/null 2>&1; then

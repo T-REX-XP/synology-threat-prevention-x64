@@ -66,8 +66,9 @@ cp -a "${ROOT}/unpacked/package/etc/suricata/threshold.config" "${STAGING}/packa
 cp -a "${SRC}/package/etc/sensor/sensor.conf" "${STAGING}/package/etc/sensor/sensor.conf"
 cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/suricata/suricata.yaml"
 cp -a "${SRC}/package/etc/mirror.conf" "${STAGING}/package/etc/mirror.conf"
-mkdir -p "${STAGING}/package/etc/openwrt"
+mkdir -p "${STAGING}/package/etc/openwrt" "${STAGING}/package/etc/mikrotik"
 cp -a "${SRC}/package/etc/openwrt/." "${STAGING}/package/etc/openwrt/"
+cp -a "${SRC}/package/etc/mikrotik/." "${STAGING}/package/etc/mikrotik/"
 chmod +x "${STAGING}/package/etc/openwrt/apply-tps-mirror.sh" 2>/dev/null || true
 mkdir -p "${STAGING}/package/etc/nginx"
 cp -a "${SRC}/package/etc/nginx/dsm-tpsweb.conf" "${STAGING}/package/etc/nginx/dsm-tpsweb.conf"
@@ -190,7 +191,7 @@ idx = json.load(open(idx_path, encoding="utf-8"))
 keys = list(idx.get("keywords") or [])
 for extra in (
     "suricata", "ids", "gretap", "emerging threats",
-    "gre", "openwrt", "traffic copy", "protocol 47", "nftables",
+    "gre", "openwrt", "mikrotik", "tzsp", "traffic copy", "protocol 47", "nftables",
 ):
     if extra not in keys:
         keys.append(extra)

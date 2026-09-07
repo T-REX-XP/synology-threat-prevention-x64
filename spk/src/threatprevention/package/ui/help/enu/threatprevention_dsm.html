@@ -37,7 +37,7 @@
 <p>In <b>Settings</b> &gt; <b>General</b>:</p>
 <ul>
 	<li><b>Listen on NAS LAN interfaces</b> — Suricata listens on the NAS interfaces (typically the OVS LAN bridge <code>ovs_eth0</code>). Only traffic to or from this NAS is inspected.</li>
-	<li><b>Receive a traffic copy from the router</b> — OpenWrt GRE-copies LAN↔WAN onto local <code>tps0</code>. Enter the router LAN IPv4. Allow GRE (IP protocol 47) from that router in DSM Firewall. Apply, then restart this package so the gretap is created. Full steps: <b>Router traffic copy</b>.</li>
+	<li><b>Receive a traffic copy from the router</b> — OpenWrt GRE-copies or MikroTik TZSP-copies LAN↔WAN onto local <code>tps0</code>. Enter the router LAN IPv4 and pick OpenWrt or MikroTik. Allow GRE (protocol 47) or UDP 37008 from that router in DSM Firewall. Apply, then restart this package so the tap is created. Full steps: <b>Router traffic copy</b>.</li>
 </ul>
 <p>Monitored Interfaces should show <b>one</b> enabled capture device. In copy mode that is <code>tps0</code>, not <code>tps0</code> plus LAN 1.</p>
 

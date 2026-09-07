@@ -120,7 +120,7 @@ These are the places the shim fights the official app instead of meeting the con
 
 **JSLoad prepend.** Do not register the bridge as its own `ui/config` module. Pack-time concat is the supported way to run before `Ext.define` of TPS classes. Chart stubs as a separate `type:lib` is also correct.
 
-**IDS topology.** The NAS is not the gateway. LAN listen vs OpenWrt GRE copy is a real product choice. Keep `mirror.conf` + `start-stop-status` gretap. Stop creating tunnels from tpsweb as the package user. Operator docs: [router-traffic-copy.md](router-traffic-copy.md), DSM Help **Router traffic copy**, `target/etc/openwrt/README.txt`.
+**IDS topology.** The NAS is not the gateway. LAN listen vs OpenWrt GRE / MikroTik TZSP copy is a real product choice. Keep `mirror.conf` + `start-stop-status` tap create. Stop creating tunnels from tpsweb as the package user. Operator docs: [router-traffic-copy.md](router-traffic-copy.md), DSM Help **Router traffic copy**, `target/etc/openwrt/` and `target/etc/mikrotik/`.
 
 ---
 
