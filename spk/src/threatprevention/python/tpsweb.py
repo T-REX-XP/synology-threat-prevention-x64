@@ -19,10 +19,14 @@ from compat import (
     official_devices,
     official_event,
     official_event_statistic,
+    official_map,
     official_policy_list,
     official_sensor,
     official_signature_classes,
+    official_source,
+    official_storage,
     official_trends,
+    official_update_status,
     official_variables,
     parse_event_id,
     severity_name,
@@ -31,6 +35,7 @@ from compat import (
 )
 from compiler import compile_rules, import_rules, reload_suricata
 from paths import (
+    EXPORT_DIR,
     IFACE_FILE,
     PKGDEST,
     PKGETC,
@@ -57,6 +62,8 @@ from store import (
 STOP = False
 EVENT_TASKS = {}
 EVENT_TASK_SEQ = 0
+JOBS = {}
+JOB_SEQ = 0
 
 
 def _stop(signum, frame):
@@ -109,8 +116,11 @@ def read_sensor():
     cfg["enable_auto_export_events_during_postupgrade"] = _truth(
         cfg.get("enable_auto_export_events_during_postupgrade", False)
     )
+    ui = kv_peek("engine_ui_status")
     st, pid = engine_status()
-    return official_sensor(cfg, st, pid, cfg.get("interface_list") or "")
+    if ui:
+        st = ui
+    return official_sensor(cfg, st, pid, cfg.get("interface_list") or "", list_ifaces())
 
 
 def write_sensor(data):
@@ -148,6 +158,63 @@ def _truth(v):
     if isinstance(v, bool):
         return v
     return str(v).lower() in ("1", "true", "yes", "on")
+
+
+def kv_peek(key, default=""):
+    try:
+        conn = connect()
+        try:
+            return kv_get(conn, key, default)
+        finally:
+            conn.close()
+    except Exception:
+        return default
+
+
+def list_ifaces():
+    names = []
+    sysnet = "/sys/class/net"
+    if os.path.isdir(sysnet):
+        for name in sorted(os.listdir(sysnet)):
+            if name in ("lo", "sit0", "ovs-system") or name.startswith(("veth", "docker", "br-", "tun", "tap")):
+                continue
+            names.append(name)
+        return names
+    try:
+        out = subprocess.check_output(["ip", "-o", "link", "show"], stderr=subprocess.DEVNULL, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return names
+    for line in out.decode("utf-8", "replace").splitlines():
+        parts = line.split(":", 2)
+        if len(parts) < 2:
+            continue
+        name = parts[1].strip().split("@", 1)[0]
+        if name in ("lo", "sit0", "ovs-system") or name.startswith(("veth", "docker", "br-")):
+            continue
+        names.append(name)
+    return names
+
+
+def start_job(initial=None):
+    global JOB_SEQ
+    JOB_SEQ += 1
+    tid = str(JOB_SEQ)
+    JOBS[tid] = dict(initial or {"status": "running"})
+    while len(JOBS) > 32:
+        JOBS.pop(next(iter(JOBS)))
+    return tid
+
+
+def job_get(tid):
+    return JOBS.get(str(tid or ""))
+
+
+def ensure_export_dir():
+    try:
+        os.makedirs(EXPORT_DIR, exist_ok=True)
+    except OSError:
+        pass
+    return EXPORT_DIR
 
 
 def event_row(r, conn=None):
@@ -200,9 +267,9 @@ def handle(api, method, params, conn):
     if api == "SYNO.TPS.Event.Statistic" and method == "get":
         return event_stat(conn, params)
     if api == "SYNO.TPS.Event.Map" and method == "list":
-        return ok({"events": [], "location": []})
+        return ok(official_map(conn, params.get("date_range")))
     if api == "SYNO.TPS.Event.ExportFolder" and method == "get":
-        return ok({"export_folder": ""})
+        return ok({"export_folder": ensure_export_dir()})
     if api == "SYNO.TPS.Sensor" and method == "get":
         return ok(read_sensor())
     if api == "SYNO.TPS.Sensor" and method == "set":
@@ -612,76 +679,131 @@ def settings_update(conn, api, method, p):
             return ok({})
     if api == "SYNO.TPS.Settings.Update.Source":
         if method == "get":
-            return ok({"source": kv_get(conn, "update_source", "et-open"), "code": kv_get(conn, "etpro_code", "")})
+            return ok(official_source(kv_get(conn, "update_source", "et-open"), kv_get(conn, "etpro_code", "")))
         if method == "set":
-            kv_set(conn, "update_source", p.get("source") or "et-open")
+            use = str(p.get("use_code") or p.get("source") or "et-open")
+            if use in ("etPro", "et-pro", "etpro"):
+                kv_set(conn, "update_source", "et-pro")
+            else:
+                kv_set(conn, "update_source", "et-open")
             if "code" in p:
                 kv_set(conn, "etpro_code", p.get("code") or "")
             conn.commit()
             return ok({})
     if api == "SYNO.TPS.Settings.Update":
         if method == "status":
-            return ok({
-                "status": kv_get(conn, "update_status", "up_to_date"),
-                "last_updated": kv_get(conn, "last_updated", ""),
-                "remote_version": kv_get(conn, "remote_version", ""),
-            })
+            job = job_get(p.get("task_id"))
+            status = (job or {}).get("status") or kv_get(conn, "update_status", "up_to_date")
+            return ok(official_update_status(
+                status,
+                kv_get(conn, "last_updated", ""),
+                kv_get(conn, "remote_version", ""),
+                str(p.get("task_id") or ""),
+            ))
         if method == "start_check":
+            tid = start_job({"status": "checking"})
             kv_set(conn, "update_status", "checking")
             conn.commit()
-            kv_set(conn, "update_status", "up_to_date")
-            conn.commit()
-            return ok({"status": "up_to_date"})
+
+            def _check():
+                c = connect()
+                try:
+                    kv_set(c, "update_status", "up_to_date")
+                    c.commit()
+                    JOBS[tid]["status"] = "up_to_date"
+                finally:
+                    c.close()
+
+            threading.Thread(target=_check, daemon=True).start()
+            return ok({"task_id": tid, "status": "checking"})
         if method == "start_update":
+            tid = start_job({"status": "updating"})
             kv_set(conn, "update_status", "updating")
+            kv_set(conn, "engine_ui_status", "updating_signature")
             conn.commit()
 
             def _run():
                 c = connect()
                 try:
+                    kv_set(c, "engine_ui_status", "updating_signature")
+                    c.commit()
                     rc = subprocess.call(["/bin/sh", UPDATE_SCRIPT], timeout=600)
                     if rc == 0:
+                        kv_set(c, "engine_ui_status", "build_signature_database")
+                        c.commit()
                         import_rules(c)
                         compile_rules(c)
                         reload_suricata()
                         kv_set(c, "update_status", "up_to_date")
                         kv_set(c, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
+                        JOBS[tid]["status"] = "up_to_date"
                     else:
                         kv_set(c, "update_status", "connect_error")
+                        JOBS[tid]["status"] = "connect_error"
+                    kv_set(c, "engine_ui_status", "")
                     c.commit()
                 except Exception:
                     kv_set(c, "update_status", "connect_error")
+                    kv_set(c, "engine_ui_status", "")
+                    JOBS[tid]["status"] = "connect_error"
                     c.commit()
                 finally:
                     c.close()
 
             threading.Thread(target=_run, daemon=True).start()
-            return ok({"status": "updating"})
+            return ok({"task_id": tid, "status": "updating"})
     return err(102)
+
+
+def _storage_limit(p):
+    raw = p.get("limit") or p.get("db_size") or 500
+    if raw in ("db_size_500mb", "500"):
+        return 500
+    if raw in ("db_size_1gb", "1024"):
+        return 1024
+    if raw in ("db_size_2gb", "2048"):
+        return 2048
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return 500
+    return n if n in (500, 1024, 2048) else 500
 
 
 def settings_storage(conn, method, p):
     db = os.path.join(PKGVAR, "tps.db")
     size = os.path.getsize(db) if os.path.isfile(db) else 0
+    limit = int(kv_get(conn, "storage_limit_mb", "500") or 500)
     if method == "get":
-        return ok({
-            "db_size": size,
-            "limit": int(kv_get(conn, "storage_limit_mb", "500") or 500),
-            "clear_percentage": 80,
-            "status_clear_log": kv_get(conn, "clear_status", "idle"),
-        })
+        return ok(official_storage(size, limit, kv_get(conn, "clear_status", "idle")))
     if method == "set":
-        lim = int(p.get("limit") or 500)
-        if lim not in (500, 1024, 2048):
-            lim = 500
-        kv_set(conn, "storage_limit_mb", str(lim))
+        kv_set(conn, "storage_limit_mb", str(_storage_limit(p)))
         conn.commit()
         return ok({})
     if method in ("clear_log", "start_clear_log"):
-        clear_events(conn)
-        return ok({"status": "cleared"})
+        tid = start_job({"status": "clearing", "clear_percentage": 0})
+        kv_set(conn, "clear_status", "clearing")
+        conn.commit()
+
+        def _clear():
+            c = connect()
+            try:
+                JOBS[tid]["clear_percentage"] = 10
+                clear_events(c)
+                JOBS[tid]["status"] = "cleared"
+                JOBS[tid]["clear_percentage"] = 100
+            except Exception:
+                JOBS[tid]["status"] = "idle"
+            finally:
+                c.close()
+
+        threading.Thread(target=_clear, daemon=True).start()
+        return ok({"task_id": tid, "status": "clearing", "data": {"status": "clearing", "clear_percentage": 0}})
     if method == "status_clear_log":
-        return ok({"status": kv_get(conn, "clear_status", "idle")})
+        job = job_get(p.get("task_id")) or {}
+        status = job.get("status") or kv_get(conn, "clear_status", "idle")
+        percent = job.get("clear_percentage", 100 if status == "cleared" else 0)
+        return ok({"status": status, "clear_percentage": percent, "data": {"status": status, "clear_percentage": percent}})
     return err(102)
 
 
@@ -702,6 +824,12 @@ def devices(conn, method, p):
                     )
         conn.commit()
     if method == "list":
+        conn.execute(
+            """UPDATE device SET loading_score = COALESCE((
+                 SELECT COUNT(*) FROM event e WHERE lower(e.mac_src)=lower(device.mac)
+               ), 0)"""
+        )
+        conn.commit()
         out = []
         for r in conn.execute("SELECT * FROM device ORDER BY device_name"):
             out.append({
@@ -856,6 +984,68 @@ def overview(conn):
     })
 
 
+def _schedule_due(conn, now):
+    if kv_get(conn, "auto_update") != "1":
+        return False
+    weekday = kv_get(conn, "update_weekday", "daily")
+    minute = kv_get(conn, "update_minute", "120")
+    last = kv_get(conn, "last_auto_update_slot", "")
+    lt = time.localtime(now)
+    if str(weekday) not in ("daily", "", "None"):
+        try:
+            want = int(weekday)
+        except ValueError:
+            want = None
+        # Official UI uses Sunday=0; Python tm_wday is Monday=0.
+        sun0 = (lt.tm_wday + 1) % 7
+        if want is not None and want not in (sun0, lt.tm_wday):
+            return False
+    if str(minute) == "hourly":
+        slot = time.strftime("%Y%m%d%H", lt)
+    else:
+        try:
+            target = int(minute)
+        except ValueError:
+            target = 120
+        now_min = lt.tm_hour * 60 + lt.tm_min
+        if now_min < target or now_min >= target + 2:
+            return False
+        slot = time.strftime("%Y%m%d", lt) + ":" + str(target)
+    if last == slot:
+        return False
+    kv_set(conn, "last_auto_update_slot", slot)
+    conn.commit()
+    return True
+
+
+def scheduler_loop():
+    while not STOP:
+        time.sleep(30)
+        if STOP:
+            return
+        conn = None
+        try:
+            conn = connect()
+            if _schedule_due(conn, time.time()):
+                kv_set(conn, "update_status", "updating")
+                conn.commit()
+                rc = subprocess.call(["/bin/sh", UPDATE_SCRIPT], timeout=600)
+                if rc == 0:
+                    import_rules(conn)
+                    compile_rules(conn)
+                    reload_suricata()
+                    kv_set(conn, "update_status", "up_to_date")
+                    kv_set(conn, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
+                else:
+                    kv_set(conn, "update_status", "connect_error")
+                conn.commit()
+        except Exception:
+            pass
+        finally:
+            if conn is not None:
+                conn.close()
+
+
 def authorized(handler):
     # 3rdparty UI is admin-gated. Require a DSM session cookie or local peer.
     addr = getattr(handler, "client_address", None)
@@ -1007,6 +1197,8 @@ def run():
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
     init_db()
+    ensure_export_dir()
+    threading.Thread(target=scheduler_loop, daemon=True).start()
     tcp = ThreadingHTTPServer(("0.0.0.0", TPSWEB_PORT), Handler)
     threads = [threading.Thread(target=tcp.serve_forever, daemon=True)]
     try:

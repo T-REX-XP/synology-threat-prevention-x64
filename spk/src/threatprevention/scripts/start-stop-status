@@ -63,7 +63,7 @@ unlink_webapi() {
 }
 
 start_helpers() {
-	mkdir -p "${PKGVAR}" "${PKGETC}"
+	mkdir -p "${PKGVAR}" "${PKGETC}" "${PKGVAR}/export"
 	link_webapi
 	if [ ! -f "${PKGETC}/sensor.conf" ] && [ -f "${PKGDEST}/etc/sensor/sensor.conf" ]; then
 		cp -f "${PKGDEST}/etc/sensor/sensor.conf" "${PKGETC}/sensor.conf"

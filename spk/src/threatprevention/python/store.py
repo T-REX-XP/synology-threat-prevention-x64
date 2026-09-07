@@ -186,6 +186,8 @@ DEFAULTS = {
     "clear_status": "idle",
     "event_offset": "0",
     "default_detect": "1",
+    "engine_ui_status": "",
+    "last_auto_update_slot": "",
 }
 
 

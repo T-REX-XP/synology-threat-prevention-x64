@@ -9,7 +9,7 @@
 			"appWindow": "SYNO.SDS.ThreatPrevention.MainWindow",
 			"title": "Threat Prevention",
 			"formatedTitle": "Threat Prevention",
-			"desc": "Suricata 8 IDS — ExtJS desktop app",
+			"desc": "Suricata 8 IDS — community webpack SPA",
 			"icon": "images/threatprevention_{0}.png",
 			"grantPrivilege": "admin",
 			"depend": ["SYNO.SDS.ThreatPrevention.MainWindow"]

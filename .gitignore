@@ -1,2 +1,4 @@
 artifact/*
 build/*
+ui/node_modules/
+ui/dist/

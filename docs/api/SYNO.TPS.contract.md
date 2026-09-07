@@ -68,11 +68,11 @@ Params: `date_range` (`7days` / `30days` / `all`). Data: `total`, `high`, `mediu
 
 ## SYNO.TPS.Event.Map (v1 list)
 
-Stub until GeoIP: `{ "events": [] }`.
+`{ "days7", "days30", "all_logs" }` each with `location[]` (`lat`, `lng`, `country`, `ip_src`, `signature`, `priority`, `count`) plus `begin` / `end`. Empty `location` until GeoIP exists.
 
 ## SYNO.TPS.Event.ExportFolder (v1 get)
 
-`{ "export_folder": "" }`.
+`{ "export_folder": "/var/packages/ThreatPrevention/var/export" }`.
 
 ## SYNO.TPS.Sensor (v1 get / set)
 
@@ -114,7 +114,7 @@ Actions: `alert`, `drop`, `pass`, `disable` (maps to official strings Alert / Dr
 
 ## SYNO.TPS.Settings.Update.Source (v1 get / set)
 
-`source`: `et-open` | `et-pro`. `code`: ET Pro oinkcode.
+`source`: `et-open` | `et-pro`. `code`: ET Pro oinkcode. Also `use_code` (`etOpen` / `etPro`) and `support_etpro`.
 
 ## SYNO.TPS.Settings.Storage (v1)
 

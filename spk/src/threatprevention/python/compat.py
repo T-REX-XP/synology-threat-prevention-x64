@@ -144,6 +144,7 @@ def official_event(row, conn, detail=False):
         "sig_class_id": row["sig_class_id"],
         "sig_class_name": class_name,
         "severity": sev,
+        "severity_num": 1 if sev == "high" else (2 if sev == "medium" else 3),
         "action": action,
         "ip_src": ip_src,
         "ip_dst": ip_dst,
@@ -225,14 +226,44 @@ def _looks_hex(text):
         return False
 
 
-def official_sensor(cfg, status, pid, iface):
+def official_sensor(cfg, status, pid, iface, live=None):
+    enabled = set()
     ifaces = []
     raw = cfg.get("interface_list") or iface or ""
     if isinstance(raw, list):
-        ifaces = raw
+        for item in raw:
+            if not isinstance(item, dict):
+                name = str(item)
+                ifaces.append({"if_id": name, "ifname": name, "enabled": True})
+                enabled.add(name)
+                continue
+            name = item.get("if_id") or item.get("ifname") or ""
+            if not name:
+                continue
+            on = item.get("enabled", True)
+            if on in (False, 0, "0", "false", "no"):
+                on = False
+            else:
+                on = True
+            ifaces.append({"if_id": name, "ifname": name, "enabled": on})
+            if on:
+                enabled.add(name)
     else:
         for part in str(raw).replace(",", " ").split():
             ifaces.append({"if_id": part, "ifname": part, "enabled": True})
+            enabled.add(part)
+    seen = {x["if_id"] for x in ifaces}
+    for name in live or []:
+        if name and name not in seen:
+            ifaces.append({"if_id": name, "ifname": name, "enabled": name in enabled})
+            seen.add(name)
+    if not ifaces and iface:
+        ifaces.append({"if_id": str(iface), "ifname": str(iface), "enabled": True})
+        enabled.add(str(iface))
+    if ifaces and not enabled:
+        prefer = str(iface or "").split()[0]
+        pick = next((x for x in ifaces if x["if_id"] in (prefer, "ovs_eth0")), ifaces[0])
+        pick["enabled"] = True
     if status == "running":
         eng = "engine_start"
     elif status in ("starting", "engine_init"):
@@ -250,6 +281,7 @@ def official_sensor(cfg, status, pid, iface):
         ),
         "network_security_mode": cfg.get("network_security_mode") or "availability",
         "default_detect": cfg.get("default_detect", True),
+        "interface": (next((x["if_id"] for x in ifaces if x.get("enabled")), "") or (ifaces[0]["if_id"] if ifaces else "")),
         "interface_list": ifaces,
         "interfaceList": ifaces,
         "config_exist": exist,
@@ -454,6 +486,70 @@ def official_trends(conn, days=7):
         "trends": points,
         "points": points,
     }
+
+
+def official_map(conn, date_range=None):
+    """Event.Map.list: days7 / days30 / all_logs with location[] (empty without GeoIP)."""
+    now = int(time.time())
+    wanted = date_range
+    if isinstance(wanted, str):
+        wanted = [wanted]
+    if not wanted:
+        wanted = ["7days", "30days", "all"]
+
+    def bucket(since):
+        begin = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since or 0)) if since else "1970-01-01 00:00:00"
+        return {
+            "begin": begin,
+            "end": now_str(),
+            "location": [],
+            "events": [],
+        }
+
+    days7 = bucket(now - 7 * 86400)
+    days30 = bucket(now - 30 * 86400)
+    all_logs = bucket(0)
+    out = {"days7": days7, "days30": days30, "all_logs": all_logs, "location": [], "events": []}
+    if "7days" in wanted or "7day" in wanted:
+        out["location"] = days7["location"]
+    return out
+
+
+def official_source(source, code):
+    src = (source or "et-open").lower().replace("_", "-")
+    pro = src in ("et-pro", "etpro", "et_pro")
+    return {
+        "source": "et-pro" if pro else "et-open",
+        "code": code or "",
+        "use_code": "etPro" if pro else "etOpen",
+        "support_etpro": True,
+    }
+
+
+def official_storage(size_bytes, limit_mb, status, percent=100):
+    key = {500: "db_size_500mb", 1024: "db_size_1gb", 2048: "db_size_2gb"}.get(int(limit_mb or 500), "db_size_500mb")
+    return {
+        "db_size": key,
+        "db_size_bytes": int(size_bytes or 0),
+        "limit": int(limit_mb or 500),
+        "clear_percentage": int(percent),
+        "status_clear_log": status or "idle",
+        "status": status or "idle",
+    }
+
+
+def official_update_status(status, last_updated="", remote_version="", task_id=""):
+    inner = {
+        "status": status or "up_to_date",
+        "last_updated": last_updated or "",
+        "remote_version": remote_version or "",
+    }
+    if task_id:
+        inner["task_id"] = task_id
+    # Overview poll reads a.data.status (nested) and a.status (flat).
+    out = dict(inner)
+    out["data"] = dict(inner)
+    return out
 
 
 def official_devices(rows):

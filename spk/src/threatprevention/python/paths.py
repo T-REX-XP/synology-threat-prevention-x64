@@ -22,3 +22,4 @@ if not os.path.isfile(UPDATE_SCRIPT):
 SURICATASC = os.path.join(PKGDEST, "bin", "suricatasc")
 SURICATA_SOCKET = os.path.join(PKGVAR, "suricata.socket")
 TPSWEB_PORT = int(os.environ.get("TPS_PORT", "19557"))
+EXPORT_DIR = os.path.join(PKGVAR, "export")

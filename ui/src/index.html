@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Threat Prevention</title>
-<link rel="stylesheet" href="app.css">
 </head>
 <body>
 <div class="app">
@@ -111,19 +111,33 @@
         <h2>General</h2>
         <label class="row"><input type="checkbox" id="set-enable"> Enable Threat Prevention (IDS capture)</label>
         <label class="row"><input type="checkbox" id="set-prev"> Drop detected packets (stored only; NFQUEUE is not auto-wired)</label>
-        <label class="row">Interface <input id="set-iface" placeholder="ovs_eth0"></label>
         <label class="row">When busy
           <select id="set-mode">
             <option value="availability">Network stability priority</option>
             <option value="security">Security priority</option>
           </select>
         </label>
+        <p class="muted">Capture uses the first enabled interface. Others are listed only.</p>
+        <div id="set-ifaces"></div>
         <button class="btn primary" id="set-save-sensor">Save sensor</button>
       </div>
       <div class="card">
         <h2>Signature update</h2>
         <p class="muted" id="set-upd"></p>
         <label class="row"><input type="checkbox" id="set-auto"> Automatically update signatures</label>
+        <label class="row">Weekday
+          <select id="set-weekday">
+            <option value="daily">Every day</option>
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3">Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+          </select>
+        </label>
+        <label class="row">Hour <input id="set-hour" type="number" min="0" max="23" value="2" style="width:5em"></label>
         <label class="row">Source
           <select id="set-src"><option value="et-open">ET Open</option><option value="et-pro">ET Pro</option></select>
         </label>
@@ -134,7 +148,7 @@
       <div class="card">
         <h2>Device</h2>
         <table>
-          <thead><tr><th>Name</th><th>MAC</th><th>Status</th><th>Protected</th></tr></thead>
+          <thead><tr><th>Name</th><th>MAC</th><th>Status</th><th>Loading</th><th>Protected</th></tr></thead>
           <tbody id="set-dev"></tbody>
         </table>
       </div>
@@ -163,12 +177,12 @@
       <div class="card">
         <h2>Backup &amp; Restore</h2>
         <p class="muted">JSON export of policies and settings (not the official .dss format).</p>
+        <p class="muted" id="set-export"></p>
         <button class="btn" id="set-backup">Back Up</button>
         <label class="row">Restore <input type="file" id="set-restore" accept="application/json"></label>
       </div>
     </section>
   </div>
 </div>
-<script src="app.js"></script>
 </body>
 </html>

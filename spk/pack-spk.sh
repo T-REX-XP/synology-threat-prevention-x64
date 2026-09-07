@@ -38,6 +38,7 @@ cp -a "${ENGINE}/ldd.txt" "${STAGING}/package/" 2>/dev/null || true
 info "Stage tps python (ingest / compiler / tpsweb)"
 mkdir -p "${STAGING}/package/lib/tps"
 cp -a "${SRC}/python/." "${STAGING}/package/lib/tps/"
+rm -f "${STAGING}/package/lib/tps/test_"*.py "${STAGING}/package/lib/tps/"*.pyc
 
 info "Strip linux/amd64 binaries (keep original engine tree unstripped)"
 if command -v docker >/dev/null 2>&1; then
@@ -61,48 +62,44 @@ cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/surica
 mkdir -p "${STAGING}/package/etc/nginx"
 cp -a "${SRC}/package/etc/nginx/dsm-tpsweb.conf" "${STAGING}/package/etc/nginx/dsm-tpsweb.conf"
 
-info "Stage official ExtJS UI (research PoC — not redistributable)"
-OFFICIAL_UI="${ROOT}/unpacked/package/ui"
-[ -f "${OFFICIAL_UI}/synoips.js" ] || die "Official UI missing at ${OFFICIAL_UI}/synoips.js"
+info "Build community webpack UI"
+command -v npm >/dev/null 2>&1 || die "npm is required to pack the UI (ui/)"
+(
+  cd "${ROOT}/ui"
+  if [ -f package-lock.json ]; then
+    npm ci
+  else
+    npm install
+  fi
+  npm run build
+)
+[ -f "${ROOT}/ui/dist/index.html" ] || die "webpack did not write ui/dist/index.html"
+
+info "Stage community UI (webpack dist + ExtJS iframe shell)"
 rm -rf "${STAGING}/package/ui"
-mkdir -p "${STAGING}/package/ui"
-cp -a "${OFFICIAL_UI}/." "${STAGING}/package/ui/"
-# One JS file only. A second config module (tps-bridge.js) makes DSM JSLoad
-# a cycle: synoips.js ↔ tps-bridge.js, and AppLaunch dies with "loop detected".
-{
-  printf '%s\n' "/* tps-bridge inlined — do not add tps-bridge.js to ui/config */"
-  cat "${SRC}/package/ui/tps-bridge.js"
-  printf '\n'
-  cat "${STAGING}/package/ui/synoips.js"
-} > "${STAGING}/package/ui/synoips.js.new"
-mv "${STAGING}/package/ui/synoips.js.new" "${STAGING}/package/ui/synoips.js"
-rm -f "${STAGING}/package/ui/tps-bridge.js"
-python3 - "${STAGING}/package/ui/config" <<'PY'
-import json, sys
-path = sys.argv[1]
-cfg = json.load(open(path, encoding="utf-8"))
-cfg.pop("tps-bridge.js", None)
-app = cfg["synoips.js"]["SYNO.SDS.TPS.Application"]
-app["depend"] = [d for d in (app.get("depend") or []) if d != "SYNO.SDS.TPS.Bridge"]
-cfg["synoips.js"].pop("SYNO.SDS.ThreatPrevention.Application", None)
-json.dump(cfg, open(path, "w", encoding="utf-8"), indent=2)
-print("ui/config modules:", list(cfg))
-print("apps:", [k for k, v in cfg["synoips.js"].items() if isinstance(v, dict) and v.get("type") == "app"])
-print("official depend:", app.get("depend"))
-PY
-# DSM tile sizes official tree may omit
-if command -v sips >/dev/null 2>&1 && [ -f "${STAGING}/package/ui/images/IDS_IPS_256.png" ]; then
-  for sz in 16 32; do
-    if [ ! -f "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" ]; then
-      sips -z "${sz}" "${sz}" "${STAGING}/package/ui/images/IDS_IPS_256.png" \
-        --out "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" >/dev/null
+mkdir -p "${STAGING}/package/ui/images"
+cp -a "${ROOT}/ui/dist/." "${STAGING}/package/ui/"
+cp -a "${SRC}/package/ui/threatprevention.js" "${STAGING}/package/ui/threatprevention.js"
+cp -a "${SRC}/package/ui/config" "${STAGING}/package/ui/config"
+# Tile icons from the official SPK artwork (sizes DSM asks for)
+ICON256="${ORIG_SPK}/PACKAGE_ICON_256.PNG"
+OFF_IMG="${ROOT}/unpacked/package/ui/images"
+if [ -f "${OFF_IMG}/IDS_IPS_256.png" ]; then
+  ICON256="${OFF_IMG}/IDS_IPS_256.png"
+  for sz in 16 32 48 64 72 256; do
+    if [ -f "${OFF_IMG}/IDS_IPS_${sz}.png" ]; then
+      cp -a "${OFF_IMG}/IDS_IPS_${sz}.png" "${STAGING}/package/ui/images/threatprevention_${sz}.png"
     fi
   done
 fi
-
-info "Stage SYNO.TPS.lib (Info listing only; aarch64 .so are not packed)"
-mkdir -p "${STAGING}/package/webapi"
-cp -a "${ROOT}/unpacked/package/webapi/SYNO.TPS.lib" "${STAGING}/package/webapi/SYNO.TPS.lib"
+if command -v sips >/dev/null 2>&1 && [ -f "${ICON256}" ]; then
+  for sz in 16 32 48 64 72 256; do
+    if [ ! -f "${STAGING}/package/ui/images/threatprevention_${sz}.png" ]; then
+      sips -z "${sz}" "${sz}" "${ICON256}" \
+        --out "${STAGING}/package/ui/images/threatprevention_${sz}.png" >/dev/null
+    fi
+  done
+fi
 
 info "Compute extractsize"
 EXTRACT_KB="$(du -sk "${STAGING}/package" | awk '{print $1}')"
