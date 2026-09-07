@@ -12,5 +12,15 @@
 				}
 			]
 		}
+	},
+	"data-share": {
+		"shares": [
+			{
+				"name": "ThreatPrevention",
+				"permission": {
+					"rw": ["ThreatPrevention"]
+				}
+			}
+		]
 	}
 }

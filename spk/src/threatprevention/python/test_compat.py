@@ -30,7 +30,15 @@ from feeds import add_feed, feed_url_ok, list_feeds  # noqa: E402
 from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
-from tpsweb import _parse_multipart, fetch_osm_tile, handle, read_gmaps_key, write_update_source  # noqa: E402
+from tpsweb import (  # noqa: E402
+    _parse_multipart,
+    ensure_export_dir,
+    fetch_osm_tile,
+    filestation_path_for,
+    handle,
+    read_gmaps_key,
+    write_update_source,
+)
 
 
 def check(cond, msg):
@@ -248,6 +256,20 @@ check(iface_pin == "tps0", "copy mode pins tps0")
 lan = handle("SYNO.TPS.Settings.Mirror", "set", {"capture_mode": "lan"}, conn)
 check(lan["success"] and lan["data"]["capture_mode"] == "lan", "mirror lan set")
 check(lan["data"]["enabled"] is False, "lan disables copy")
+check(filestation_path_for("/volume1/@appdata/ThreatPrevention/export") == "", "hide @appdata from File Station")
+check(filestation_path_for("/volume1/ThreatPrevention") == "/ThreatPrevention", "volume share maps to FS path")
+share_root = tempfile.mkdtemp(prefix="tps-share-")
+os.environ["TPS_PKGSHARES"] = tempfile.mkdtemp(prefix="tps-shares-")
+os.makedirs(os.environ["TPS_PKGSHARES"], exist_ok=True)
+os.symlink(share_root, os.path.join(os.environ["TPS_PKGSHARES"], "ThreatPrevention"))
+import importlib
+import paths as paths_mod
+import tpsweb as tpsweb_mod
+importlib.reload(paths_mod)
+importlib.reload(tpsweb_mod)
+check(tpsweb_mod.ensure_export_dir() == "/ThreatPrevention", "export folder is File Station share path")
+exp = tpsweb_mod.handle("SYNO.TPS.Event.ExportFolder", "get", {}, conn)
+check(exp["success"] and exp["data"]["export_folder"] == "/ThreatPrevention", "ExportFolder API share path")
 check(fetch_osm_tile("nope", 0, 0) is None, "osm tile rejects junk")
 check(fetch_osm_tile(2, 0, 99) is None, "osm tile rejects out-of-range y")
 print("ok")

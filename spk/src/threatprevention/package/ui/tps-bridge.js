@@ -364,26 +364,19 @@ SYNO.SDS.TPS.Bridge = {
 		(document.head || document.getElementsByTagName("head")[0] || document.body).appendChild(el);
 	},
 	injectGridComboCss: function () {
-		/* Official RuleGrid actionRenderer paints a fake combo with
-		   x-form-trigger + syno-ux-combobox-trigger. DSM 7's combo_trigger.png
-		   is a 24x72 sprite (default / hover / click). The fake <img> has no
-		   height, so the cell shows two frames. The Ext 3 spacer GIF path
-		   (/scripts/ext-3/...) is also gone on DSM 7. */
+		/* DSM 7 EditorGrid marks combo cells syno-ux-triggerfield and draws
+		   combo_trigger.png on ::after. Official SRM actionRenderer also
+		   injects an <img> trigger, so two glyphs stack into a "mask". Hide
+		   the fake img and leave DSM's ::after. */
 		if (document.getElementById("tps-grid-combo-css")) { return; }
 		var css = [
-			".x-grid3-cell .x-form-field-trigger-wrap,",
-			".x-grid3-cell .tps-grid-combo { position: relative; height: 24px; line-height: 22px; overflow: hidden; padding-right: 26px; }",
-			".x-grid3-cell .tps-grid-combo-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
-			".x-grid3-cell .x-form-trigger.syno-ux-combobox-trigger,",
-			".x-grid3-cell .tps-grid-combo-trigger {",
-			"  position: absolute !important; top: 0 !important; right: 0 !important;",
-			"  width: 24px !important; height: 24px !important; border: 0 !important;",
-			"  background-repeat: no-repeat !important; background-position: 0 0 !important;",
-			"  background-color: transparent !important; box-shadow: none !important;",
-			"  box-sizing: border-box !important;",
-			"}",
-			".x-grid3-viewport .x-small-editor .x-form-trigger.syno-ux-combobox-trigger {",
-			"  height: 24px !important; background-position: 0 0 !important;",
+			".syno-ux-editorgridpanel .x-grid3-cell.syno-ux-triggerfield img.x-form-trigger,",
+			".syno-ux-gridpanel .x-grid3-cell.syno-ux-triggerfield img.x-form-trigger,",
+			".syno-ux-editorgridpanel .x-grid3-cell .tps-grid-combo-trigger,",
+			".syno-ux-gridpanel .x-grid3-cell .tps-grid-combo-trigger { display: none !important; }",
+			".syno-ux-editorgridpanel .x-grid3-cell.syno-ux-triggerfield .tps-grid-combo,",
+			".syno-ux-gridpanel .x-grid3-cell.syno-ux-triggerfield .tps-grid-combo {",
+			"  height: auto; padding: 0; overflow: visible; border: 0; background: transparent;",
 			"}"
 		].join("\n");
 		var el = document.createElement("style");
@@ -405,13 +398,7 @@ SYNO.SDS.TPS.Bridge = {
 			P.prototype._tpsActionCombo = true;
 			P.prototype.actionRenderer = function (c) {
 				var label = this.helper.T("ruleset", "action_" + String(c || "alert").toLowerCase());
-				return String.format(
-					'<div class="x-form-field-wrap x-form-field-trigger-wrap tps-grid-combo">' +
-					'<div class="tps-grid-combo-text">{0}</div>' +
-					'<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="" ' +
-					'class="x-form-trigger x-form-arrow-trigger syno-ux-combobox-trigger tps-grid-combo-trigger"></div>',
-					Ext.util.Format.htmlEncode(label)
-				);
+				return Ext.util.Format.htmlEncode(label);
 			};
 			return true;
 		}
@@ -1136,37 +1123,61 @@ SYNO.SDS.TPS.Bridge = {
 	},
 	radioInputValue: function (panel, name) {
 		/* syno_radio.getGroupValue walks this.el.up(...) and throws while
-		   the General panel is still constructing (el is not there yet). */
-		var form = panel && panel.getForm && panel.getForm();
+		   the General panel is still constructing (el is not there yet).
+		   findField often returns only the first radio in the group. */
 		var list = [];
-		if (form && form.findFields) {
-			try { list = form.findFields(name) || []; } catch (e) { list = []; }
-		}
-		if (!list.length && form && form.findField) {
-			var one = form.findField(name);
-			if (one) { list = [one]; }
-		}
-		if (!list.length && panel && panel.findBy) {
+		if (panel && panel.findBy) {
 			try {
 				list = panel.findBy(function (c) { return c && c.name === name; }) || [];
-			} catch (e2) { list = []; }
+			} catch (e) { list = []; }
 		}
-		var i, c, v;
+		if (!list.length) {
+			var form = panel && panel.getForm && panel.getForm();
+			if (form && form.findFields) {
+				try { list = form.findFields(name) || []; } catch (e2) { list = []; }
+			}
+			if (!list.length && form && form.findField) {
+				var one = form.findField(name);
+				if (one) { list = [one]; }
+			}
+		}
+		var i, c, v, checked;
 		for (i = 0; i < list.length; i++) {
 			c = list[i];
 			if (!c) { continue; }
+			checked = c.checked;
+			if (typeof c.isChecked === "function") {
+				try { checked = c.isChecked(); } catch (e3) {}
+			}
 			try {
-				v = (typeof c.getValue === "function") ? c.getValue() : c.checked;
-			} catch (e3) { continue; }
-			if (v === true || v === c.inputValue) {
+				v = (typeof c.getValue === "function") ? c.getValue() : checked;
+			} catch (e4) { v = checked; }
+			if (v === true || checked === true || v === c.inputValue) {
 				return c.inputValue != null ? c.inputValue : v;
 			}
 			if (typeof v === "string" && v) { return v; }
 		}
 		return null;
 	},
+	findByItemId: function (panel, id) {
+		if (!panel || !id) { return null; }
+		if (panel.find) {
+			try {
+				var found = panel.find("itemId", id);
+				if (found && found.length) { return found[0]; }
+			} catch (e) {}
+		}
+		if (panel.findBy) {
+			try {
+				var list = panel.findBy(function (c) { return c && c.itemId === id; });
+				if (list && list.length) { return list[0]; }
+			} catch (e2) {}
+		}
+		return null;
+	},
 	captureModeIsCopy: function (panel) {
-		return this.radioInputValue(panel, "capture_mode") === "copy";
+		var v = this.radioInputValue(panel, "capture_mode") || (panel && panel._tpsCaptureMode);
+		return v === "copy";
 	},
 	readMirrorValues: function (panel) {
 		var form = panel && panel.getForm && panel.getForm();
@@ -1176,7 +1187,7 @@ SYNO.SDS.TPS.Bridge = {
 			var v = fld.getValue();
 			return (v === null || v === undefined) ? fallback : v;
 		}
-		var mode = this.radioInputValue(panel, "capture_mode") || "lan";
+		var mode = this.radioInputValue(panel, "capture_mode") || (panel && panel._tpsCaptureMode) || "lan";
 		return {
 			capture_mode: mode === "copy" ? "copy" : "lan",
 			enabled: mode === "copy",
@@ -1185,13 +1196,31 @@ SYNO.SDS.TPS.Bridge = {
 			ifname: String(val("ifname", "tps0") || "tps0").replace(/^\s+|\s+$/g, "") || "tps0"
 		};
 	},
-	syncCaptureMode: function (panel) {
+	setSectionActive: function (cmp, on) {
+		if (!cmp) { return; }
+		if (cmp.setVisible) { cmp.setVisible(!!on); }
+		else if (on) { if (cmp.show) { cmp.show(); } }
+		else if (cmp.hide) { cmp.hide(); }
+		if (cmp.setDisabled) { cmp.setDisabled(!on); }
+	},
+	syncCaptureMode: function (panel, forced) {
 		if (!panel || !panel.getForm) { return; }
 		var form = panel.getForm();
 		if (!form) { return; }
-		var copy = this.captureModeIsCopy(panel);
+		var copy;
+		if (forced === "copy" || forced === "lan") {
+			copy = forced === "copy";
+			panel._tpsCaptureMode = forced;
+		} else {
+			copy = this.captureModeIsCopy(panel);
+			panel._tpsCaptureMode = copy ? "copy" : "lan";
+		}
 		var sensor = form.findField("enable_sensor");
 		var sensorOn = !sensor || !sensor.getValue || !!sensor.getValue();
+		var copySec = this.findByItemId(panel, "tps_copy_section");
+		var ifaceFs = this.findByItemId(panel, "tps_iface_fieldset") ||
+			(panel.interfaceGrid && panel.interfaceGrid.ownerCt);
+		this.setSectionActive(copySec, copy);
 		Ext.each(["router_ip", "local_ip"], function (name) {
 			var fld = form.findField(name);
 			if (!fld) { return; }
@@ -1201,9 +1230,15 @@ SYNO.SDS.TPS.Bridge = {
 				if (!copy && fld.clearInvalid) { fld.clearInvalid(); }
 			}
 		});
-		if (panel.interfaceGrid && panel.interfaceGrid.setDisabled) {
-			panel.interfaceGrid.setDisabled(!sensorOn || copy);
+		var ifacesOn = !!sensorOn && !copy;
+		if (ifaceFs) {
+			if (ifaceFs.setVisible) { ifaceFs.setVisible(true); }
+			if (ifaceFs.setDisabled) { ifaceFs.setDisabled(!ifacesOn); }
 		}
+		if (panel.interfaceGrid && panel.interfaceGrid.setDisabled) {
+			panel.interfaceGrid.setDisabled(!ifacesOn);
+		}
+		if (panel.doLayout) { panel.doLayout(); }
 	},
 	applyMirrorData: function (panel, data) {
 		if (!panel || !data) { return; }
@@ -1215,16 +1250,16 @@ SYNO.SDS.TPS.Bridge = {
 			local_ip: data.local_ip || "",
 			ifname: data.ifname || "tps0"
 		});
+		var copy = (data.capture_mode || (data.enabled ? "copy" : "lan")) === "copy";
 		var hint = form.findField("mirror_hint");
 		if (hint && hint.setValue) {
-			var copy = (data.capture_mode || (data.enabled ? "copy" : "lan")) === "copy";
 			var msg = "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router.";
 			if (copy && !data.tap_present) {
 				msg += " tps0 is not up yet — Apply, then restart Threat Prevention if the tunnel is missing.";
 			}
 			hint.setValue(msg);
 		}
-		this.syncCaptureMode(panel);
+		this.syncCaptureMode(panel, copy ? "copy" : "lan");
 	},
 	applyMirrorFromResult: function (panel, resp) {
 		var me = this;
@@ -1237,8 +1272,8 @@ SYNO.SDS.TPS.Bridge = {
 	captureModeFieldset: function (panel) {
 		var me = this;
 		function onMode(fld, on) {
-			if (!on || !panel || !panel.rendered) { return; }
-			me.syncCaptureMode(panel);
+			if (!on) { return; }
+			me.syncCaptureMode(panel, fld && fld.inputValue);
 			me.prepareGeneralForm(panel);
 		}
 		return {
@@ -1265,16 +1300,25 @@ SYNO.SDS.TPS.Bridge = {
 				},
 				{ xtype: "hidden", name: "ifname", value: "tps0" },
 				{
-					xtype: "syno_textfield", name: "router_ip", fieldLabel: "Router IP",
-					indent: 1, allowBlank: true, disabled: true, value: "192.168.1.1"
-				},
-				{
-					xtype: "syno_textfield", name: "local_ip", fieldLabel: "NAS IP (optional)",
-					indent: 1, allowBlank: true, disabled: true, emptyText: "auto"
-				},
-				{
-					xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
-					value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router."
+					xtype: "container",
+					itemId: "tps_copy_section",
+					layout: "form",
+					hidden: true,
+					hideMode: "display",
+					items: [
+						{
+							xtype: "syno_textfield", name: "router_ip", fieldLabel: "Router IP",
+							indent: 1, allowBlank: true, value: "192.168.1.1"
+						},
+						{
+							xtype: "syno_textfield", name: "local_ip", fieldLabel: "NAS IP (optional)",
+							indent: 1, allowBlank: true, emptyText: "auto"
+						},
+						{
+							xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
+							value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router."
+						}
+					]
 				}
 			]
 		};
@@ -1468,7 +1512,18 @@ SYNO.SDS.TPS.Bridge = {
 					if (cfg && Ext.isArray(cfg.items) && !this._tpsCaptureSpliced) {
 						this._tpsCaptureSpliced = true;
 						cfg.items = cfg.items.slice();
+						Ext.each(cfg.items, function (item) {
+							if (!item || !item.items) { return; }
+							var kids = item.items;
+							if (kids === this.interfaceGrid ||
+									(Ext.isArray(kids) && kids[0] === this.interfaceGrid)) {
+								item.itemId = "tps_iface_fieldset";
+							}
+						}, this);
 						cfg.items.splice(1, 0, me.captureModeFieldset(this));
+					}
+					if (cfg && cfg.listeners) {
+						cfg.listeners.afterrender = function () { me.syncCaptureMode(this); };
 					}
 					return cfg;
 				};

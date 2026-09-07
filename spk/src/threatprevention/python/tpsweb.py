@@ -58,6 +58,7 @@ from paths import (
     MIRROR_CONF,
     PKGDEST,
     PKGETC,
+    PKG_SHARES,
     PKGVAR,
     SENSOR_CONF,
     SOCK_PATH,
@@ -689,30 +690,60 @@ def job_get(tid):
     return JOBS.get(str(tid or ""))
 
 
+def _share_dirs():
+    """DSM 7 data-share symlinks: /var/packages/<pkg>/shares/<ShareName>."""
+    if not os.path.isdir(PKG_SHARES):
+        return []
+    try:
+        names = sorted(os.listdir(PKG_SHARES))
+    except OSError:
+        return []
+    out = []
+    for name in names:
+        if not name or name.startswith("."):
+            continue
+        out.append((name, os.path.join(PKG_SHARES, name)))
+    return out
+
+
+def filestation_path_for(real):
+    """File Station opendir uses /Share/sub, not /volume1/@appdata/..."""
+    real = os.path.realpath(real or "")
+    if not real:
+        return ""
+    for name, link in _share_dirs():
+        try:
+            target = os.path.realpath(link)
+        except OSError:
+            continue
+        if real == target or real.startswith(target + os.sep):
+            rest = real[len(target):].replace(os.sep, "/")
+            return "/" + name + rest
+    parts = [p for p in real.split(os.sep) if p]
+    if len(parts) >= 2 and parts[0].startswith("volume") and not parts[1].startswith("@"):
+        return "/" + "/".join(parts[1:])
+    return ""
+
+
 def ensure_export_dir():
+    """Writable export dir; return a File Station path AppLaunch can opendir."""
+    for _name, link in _share_dirs():
+        try:
+            os.makedirs(link, exist_ok=True)
+        except OSError:
+            pass
+        if os.path.isdir(link) and os.access(link, os.W_OK):
+            mapped = filestation_path_for(os.path.realpath(link))
+            if mapped:
+                return mapped
     try:
         os.makedirs(EXPORT_DIR, exist_ok=True)
     except OSError:
         pass
-    real = os.path.realpath(EXPORT_DIR)
-    for root in ("/volume1/homes", "/var/services/homes"):
-        if not os.path.isdir(root):
-            continue
-        try:
-            names = sorted(os.listdir(root))
-        except OSError:
-            continue
-        for name in names:
-            if name.startswith(".") or name.startswith("@"):
-                continue
-            dest = os.path.join(root, name, "ThreatPrevention")
-            try:
-                os.makedirs(dest, exist_ok=True)
-            except OSError:
-                continue
-            if os.access(dest, os.W_OK):
-                return os.path.realpath(dest)
-    return real
+    mapped = filestation_path_for(os.path.realpath(EXPORT_DIR))
+    if mapped:
+        return mapped
+    return "/ThreatPrevention"
 
 
 def event_row(r, conn=None):
