@@ -46,11 +46,16 @@ sensor = official_sensor(
 check(sensor["status"] == "engine_start", "sensor status")
 check(sensor["prevention_enforced"] is False and sensor["ips_mode"] == "ids", "ids only")
 check(sensor["interface"] == "ovs_eth0", "sensor interface")
-check(any(x["if_id"] == "eth0" for x in sensor["interface_list"]), "live iface merge")
+check(all(x["if_id"] != "eth0" for x in sensor["interface_list"]), "hide ovs-enslaved eth0 twin")
+check(any(x["if_id"] == "eth1" for x in official_sensor(
+    {"enable_sensor": True, "interface_list": [{"if_id": "ovs_eth0", "enabled": True}]},
+    "running", 1, "ovs_eth0", ["ovs_eth0", "eth1"],
+)["interface_list"]), "live iface merge keeps extra nics")
 
 empty = official_sensor({"enable_sensor": True, "interface_list": ""}, "running", 1, "", ["ovs_eth0", "eth0"])
 check(empty["interface"] == "ovs_eth0", "empty iface prefers ovs_eth0")
 check(any(x["if_id"] == "ovs_eth0" and x["enabled"] for x in empty["interface_list"]), "empty live enable")
+check(all(x["if_id"] != "eth0" for x in empty["interface_list"]), "empty live drops eth0 twin")
 check(all(x.get("status") for x in empty["interface_list"]), "iface link status")
 
 none = official_sensor({"enable_sensor": True, "interface_list": ""}, "running", 1, "", [])

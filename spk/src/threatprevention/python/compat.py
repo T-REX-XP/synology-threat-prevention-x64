@@ -271,6 +271,29 @@ def _iface_row(name, enabled=True, extra=None):
     return row
 
 
+def _ovs_phys_twin(name):
+    """Physical NIC that DSM's idToString aliases to the same LAN N as an OVS port."""
+    for prefix, twin in (("ovs_eth", "eth"), ("ovs_bond", "bond")):
+        if name.startswith(prefix):
+            return twin + name[len(prefix):]
+    return ""
+
+
+def _collapse_ovs_ifaces(ifaces):
+    """Drop ethN/bondN when ovs_ethN/ovs_bondN is also listed.
+
+    DSM Open vSwitch enslaves eth0 under ovs-system and exposes ovs_eth0 as
+    the L3 LAN port. Both map to "LAN 1" in SYNO.SDS.Utils.Network.idToString.
+    """
+    ids = {row.get("if_id") for row in ifaces}
+    drop = set()
+    for name in ids:
+        twin = _ovs_phys_twin(name)
+        if twin:
+            drop.add(twin)
+    return [row for row in ifaces if row.get("if_id") not in drop]
+
+
 def official_sensor(cfg, status, pid, iface, live=None):
     enabled = set()
     ifaces = []
@@ -311,6 +334,7 @@ def official_sensor(cfg, status, pid, iface, live=None):
         name = fallback[0] if fallback else "ovs_eth0"
         ifaces.append(_iface_row(name, True))
         enabled.add(name)
+    ifaces = _collapse_ovs_ifaces(ifaces)
     if ifaces and not enabled:
         parts = str(iface or "").split()
         prefer = parts[0] if parts else "ovs_eth0"

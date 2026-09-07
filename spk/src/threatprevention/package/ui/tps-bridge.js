@@ -197,6 +197,29 @@ SYNO.SDS.TPS.Bridge = {
 	isHosted: function (api) {
 		return this.isTps(api) || this.isCompat(api);
 	},
+	compoundHasHosted: function (compound) {
+		var hit = false;
+		Ext.each((compound && compound.params) || [], function (item) {
+			if (item && this.isHosted(item.api)) { hit = true; }
+		}, this);
+		return hit;
+	},
+	isPollingCallback: function (cb) {
+		if (!cb || typeof cb !== "function") { return false; }
+		var name = cb.name || cb.displayName || "";
+		if (String(name).toLowerCase().indexOf("polling") !== -1) { return true; }
+		function same(obj) {
+			if (!obj) { return false; }
+			return cb === obj.pollingCompoundCallack ||
+				cb === obj.pollingCompoundCallback ||
+				cb === obj.callback;
+		}
+		var Req = window.SYNO && SYNO.API && SYNO.API.Request;
+		if (same(Req && Req.Polling) || same(Req && Req.Polling && Req.Polling.prototype)) { return true; }
+		var Entry = window.SYNO && SYNO.Entry && SYNO.Entry.Request;
+		if (same(Entry && Entry.Polling) || same(Entry && Entry.Polling && Entry.Polling.prototype)) { return true; }
+		return false;
+	},
 	passthrough: function (item, cb, scope) {
 		Ext.Ajax.request({
 			url: "/webapi/entry.cgi",
@@ -220,6 +243,13 @@ SYNO.SDS.TPS.Bridge = {
 	dispatch: function (opts, fallback) {
 		if (!opts) { return fallback(); }
 		if (opts.compound && opts.compound.params) {
+			/* SYNO.API.Request is global. DSM desktop polling compounds also
+			   use it; stealing those and calling back (ok, {result}) crashes
+			   pollingCompoundCallack on data.reg_ref. Only hosted TPS compounds. */
+			if (!this.compoundHasHosted(opts.compound)) { return fallback(); }
+			if (this.isPollingCallback(opts.callback || opts.status_callback)) {
+				return fallback();
+			}
 			return this.compound(opts);
 		}
 		var api = opts.api || (opts.webapi && opts.webapi.api);
@@ -256,7 +286,19 @@ SYNO.SDS.TPS.Bridge = {
 			}
 			left -= 1;
 			if (!left && opts.callback) {
-				opts.callback.call(opts.scope || window, true, { result: out, has_fail: failed });
+				var payload = { result: out, has_fail: failed };
+				if (me.isPollingCallback(opts.callback)) {
+					opts.callback.call(opts.scope || window, {
+						success: true,
+						data: Ext.apply({
+							reg_ref: (opts.reg_ref || (opts.compound && opts.compound.reg_ref) || "tps"),
+							result: out,
+							has_fail: failed
+						}, payload)
+					});
+					return;
+				}
+				opts.callback.call(opts.scope || window, true, payload);
 			}
 		}
 		Ext.each(items, function (item, idx) {
@@ -348,6 +390,10 @@ SYNO.SDS.TPS.Bridge = {
 			if (!scope && cfg) { scope = cfg.scope || api.scope; }
 			if (!scope && opts) { scope = opts.scope; }
 			if (hostedCompound(compound)) {
+				if (me.isPollingCallback(cb) || me.isPollingCallback(opts && opts.callback) ||
+						me.isPollingCallback(cfg && cfg.callback)) {
+					return false;
+				}
 				me.compound({
 					compound: compound,
 					scope: scope,
@@ -863,6 +909,7 @@ SYNO.SDS.TPS.Bridge = {
 	},
 	prepareGeneralForm: function (panel) {
 		if (!panel || !panel.getForm) { return; }
+		var me = this;
 		var form = panel.getForm();
 		if (!form) { return; }
 		var use = form.findField("use_code");
@@ -882,14 +929,18 @@ SYNO.SDS.TPS.Bridge = {
 			var v = field.getValue();
 			if (v === "" || v === null || v === undefined) {
 				if (field.setValue) { field.setValue(fallback); }
+				me.snapFieldOriginal(field);
 				return;
 			}
 			if (!field.findRecord) { return; }
 			var vf = field.valueField || "value";
 			if (field.findRecord(vf, v)) { return; }
-			if (field.findRecord(vf, String(v))) { field.setValue(String(v)); return; }
-			var n = Number(v);
-			if (!isNaN(n) && field.findRecord(vf, n)) { field.setValue(n); }
+			if (field.findRecord(vf, String(v))) { field.setValue(String(v)); }
+			else {
+				var n = Number(v);
+				if (!isNaN(n) && field.findRecord(vf, n)) { field.setValue(n); }
+			}
+			me.snapFieldOriginal(field);
 		}
 		coerceCombo(form.findField("hour"), 2);
 		coerceCombo(form.findField("minute"), 0);
@@ -913,6 +964,41 @@ SYNO.SDS.TPS.Bridge = {
 				rec.set("enabled", true);
 				if (rec.commit) { rec.commit(); }
 			}
+		}
+	},
+	snapFieldOriginal: function (fld) {
+		if (!fld || typeof fld.getValue !== "function") { return; }
+		var v = fld.getValue();
+		fld.originalValue = v;
+		if (fld.startValue !== undefined) { fld.startValue = v; }
+		if (fld.wasDirty) { fld.wasDirty = false; }
+	},
+	clearGeneralDirty: function (panel, names) {
+		var form = panel && panel.getForm && panel.getForm();
+		if (!form) { return; }
+		var me = this;
+		function snap(fld) { me.snapFieldOriginal(fld); }
+		if (names) {
+			Ext.each(names, function (name) { snap(form.findField(name)); });
+			return;
+		}
+		if (form.items && form.items.each) {
+			form.items.each(snap);
+		}
+		Ext.each([
+			"enable_sensor", "enable_prevention", "enable_auto_export_events_during_postupgrade",
+			"network_security_mode", "auto_update", "weekday", "hour", "minute",
+			"use_code", "code", "update_status", "last_updated"
+		], function (name) { snap(form.findField(name)); });
+		if (form.findFields) {
+			Ext.each(form.findFields("network_security_mode") || [], snap);
+		}
+		var store = panel.interfaceStore;
+		if (store) {
+			store.each(function (rec) {
+				if (rec && rec.commit) { rec.commit(); }
+			});
+			if (store.modified) { store.modified = []; }
 		}
 	},
 	wrapGeneralFormValid: function (panel) {
@@ -966,11 +1052,44 @@ SYNO.SDS.TPS.Bridge = {
 			var origReturn = P.prototype.processReturnData;
 			if (origReturn) {
 				P.prototype.processReturnData = function () {
+					var self = this;
 					var ret = origReturn.apply(this, arguments);
 					me.prepareGeneralForm(this);
+					me.clearGeneralDirty(this);
+					window.setTimeout(function () { me.clearGeneralDirty(self); }, 0);
+					window.setTimeout(function () { me.clearGeneralDirty(self); }, 50);
 					return ret;
 				};
 			}
+			var origStatus = P.prototype.setUpdateStatus;
+			if (origStatus) {
+				P.prototype.setUpdateStatus = function () {
+					var ret = origStatus.apply(this, arguments);
+					me.clearGeneralDirty(this, ["update_status", "last_updated"]);
+					return ret;
+				};
+			}
+			var origLast = P.prototype.setLastUpdatedDate;
+			if (origLast) {
+				P.prototype.setLastUpdatedDate = function () {
+					var ret = origLast.apply(this, arguments);
+					me.clearGeneralDirty(this, ["last_updated"]);
+					return ret;
+				};
+			}
+			var origDirty = P.prototype.extendFormDirty;
+			P.prototype.extendFormDirty = function () {
+				if (origDirty) { origDirty.apply(this, arguments); }
+				var panel = this;
+				var form = this.getForm && this.getForm();
+				if (!form || !form.isDirty || form.isDirty._tpsClean) { return; }
+				var origIsDirty = form.isDirty;
+				form.isDirty = function () {
+					if (panel._tpsIgnoreDirty) { return false; }
+					return origIsDirty.apply(this, arguments);
+				};
+				form.isDirty._tpsClean = true;
+			};
 			if (Ext.ComponentMgr && Ext.ComponentMgr.all && Ext.ComponentMgr.all.each) {
 				Ext.ComponentMgr.all.each(function (c) {
 					if (c instanceof P) { me.wrapGeneralFormValid(c); }
@@ -1840,10 +1959,11 @@ SYNO.SDS.TPS.Bridge = {
 			if (me.isTps(api)) { return me.download(opts); }
 			return orig.apply(this, args);
 		});
-		if (SYNO.SDS.AppWindow && SYNO.SDS.AppWindow.prototype.pollReg && !SYNO.SDS.AppWindow.prototype.pollReg._tpsBridge) {
-			var origPoll = SYNO.SDS.AppWindow.prototype.pollReg;
-			var origUnreg = SYNO.SDS.AppWindow.prototype.pollUnreg;
-			SYNO.SDS.AppWindow.prototype.pollReg = function (opts) {
+		function wrapPollReg(cls) {
+			if (!cls || !cls.prototype || !cls.prototype.pollReg || cls.prototype.pollReg._tpsBridge) { return; }
+			var origPoll = cls.prototype.pollReg;
+			var origUnreg = cls.prototype.pollUnreg;
+			cls.prototype.pollReg = function (opts) {
 				var args = arguments;
 				var api = opts && opts.webapi && opts.webapi.api;
 				if (!me.isTps(api)) { return origPoll.apply(this, args); }
@@ -1861,9 +1981,9 @@ SYNO.SDS.TPS.Bridge = {
 				if (opts.immediate !== false) { tick(); }
 				return window.setInterval(tick, (opts.interval || 5) * 1000);
 			};
-			SYNO.SDS.AppWindow.prototype.pollReg._tpsBridge = true;
+			cls.prototype.pollReg._tpsBridge = true;
 			if (origUnreg && !origUnreg._tpsBridge) {
-				SYNO.SDS.AppWindow.prototype.pollUnreg = function (id) {
+				cls.prototype.pollUnreg = function (id) {
 					if (typeof id === "number") {
 						window.clearInterval(id);
 						return;
@@ -1871,9 +1991,11 @@ SYNO.SDS.TPS.Bridge = {
 					if (id) { window.clearInterval(id); }
 					try { return origUnreg.apply(this, arguments); } catch (e) { return; }
 				};
-				SYNO.SDS.AppWindow.prototype.pollUnreg._tpsBridge = true;
+				cls.prototype.pollUnreg._tpsBridge = true;
 			}
 		}
+		wrapPollReg(SYNO.SDS.AppWindow);
+		wrapPollReg(Ext.Component);
 		if (window.SYNO && SYNO.API && SYNO.API.Store && SYNO.API.Store.prototype && SYNO.API.Store.prototype.load && !SYNO.API.Store.prototype.load._tpsBridge) {
 			var origStoreLoad = SYNO.API.Store.prototype.load;
 			SYNO.API.Store.prototype.load = function (options) {

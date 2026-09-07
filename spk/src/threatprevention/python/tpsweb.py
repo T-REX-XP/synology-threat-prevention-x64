@@ -352,11 +352,18 @@ def kv_peek(key, default=""):
         return default
 
 
+def _iface_enslaved(name):
+    return os.path.lexists("/sys/class/net/%s/master" % name)
+
+
 def _skip_iface(name):
     if not name:
         return True
     skip = ("lo", "sit0", "ovs-system", "syno_ovs_bonds", "dummy0", "bonding_masters")
-    return name in skip or name.startswith(("veth", "docker", "br-", "tun", "tap", "gre", "sit", "ip6tnl"))
+    if name in skip or name.startswith(("veth", "docker", "br-", "tun", "tap", "gre", "sit", "ip6tnl")):
+        return True
+    # Physical NIC under OVS (eth0 → ovs-system); monitor ovs_eth0 instead.
+    return _iface_enslaved(name)
 
 
 def list_ifaces():
