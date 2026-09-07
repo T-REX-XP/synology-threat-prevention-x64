@@ -81,7 +81,17 @@ merged = {
             "type": "lib",
             "title": "TPS Suricata compatibility",
             "formatedTitle": "TPS Suricata compatibility",
-        }
+        },
+        "SYNO.SDS.ThreatPrevention.Application": {
+            "type": "app",
+            "appWindow": "SYNO.SDS.TPS.MainWindow",
+            "title": "Threat Prevention",
+            "formatedTitle": "Threat Prevention",
+            "icon": "images/IDS_IPS_{0}.png",
+            "allUsers": False,
+            "maxInstance": 1,
+            "depend": ["SYNO.SDS.TPS.Bridge", "SYNO.SDS.TPS.MainWindow"],
+        },
     }
 }
 merged.update(cfg)

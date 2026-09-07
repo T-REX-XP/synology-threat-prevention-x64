@@ -4,6 +4,13 @@
    x86_64 DSM. This original hook sends SYNO.TPS.* to tpsweb on :19557, which
    implements the official envelopes on top of vanilla Suricata 8. */
 Ext.namespace("SYNO.SDS.TPS");
+Ext.namespace("SYNO.SDS.ThreatPrevention");
+
+/* Existing Start Menu pins from 8.0.6-0010 launch this class. Point it at the official window. */
+Ext.define("SYNO.SDS.ThreatPrevention.Application", {
+	extend: "SYNO.SDS.AppInstance",
+	appWindowName: "SYNO.SDS.TPS.MainWindow"
+});
 
 SYNO.SDS.TPS.Bridge = {
 	base: function () {

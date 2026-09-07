@@ -1,6 +1,6 @@
 # Threat Prevention SPK — deploy and update
 
-Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0011`). Official ExtJS app + `tps-bridge.js` + `tpsweb` compatibility layer on port **19557**. Not a product. See [backend-replaceability.md](backend-replaceability.md).  
+Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0012`). Official ExtJS app + `tps-bridge.js` + `tpsweb` compatibility layer on port **19557**. Not a product. See [backend-replaceability.md](backend-replaceability.md).  
 SPK scripts under `spk/src/threatprevention/scripts/` are stubs except `postinst`, `start-stop-status`, and `update-rules.sh`. **Most of the work that makes capture actually run is admin-side:** DSM will not let an unsigned package declare `run-as: root` or file capabilities (`synopkg` error 319). `start-stop-status` tries `setcap` but it is a no-op when Package Center starts the unit as the package user.
 
 Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
@@ -80,7 +80,7 @@ echo ovs_eth0 | sudo tee /var/packages/ThreatPrevention/etc/interface
 sudo synopkg restart ThreatPrevention
 ```
 
-**Start Menu tile:** `INFO` has `dsmuidir="ui"` and `dsmappname="SYNO.SDS.TPS.Application"` (official window). After install, **log out of DSM and back in**. Use **HTTP DSM (:5000)** — HTTPS blocks the bridge to `http://<nas>:19557/` (mixed content). The official app never talks to `:19557` itself; `tps-bridge.js` intercepts `sendWebAPI`.
+**Start Menu tile:** `dsmappname="SYNO.SDS.TPS.Application"`. Pins left over from 0010 (`SYNO.SDS.ThreatPrevention.Application`) are aliased to the same official window; `postinst` deletes leftover `threatprevention.js` / `index.html`. After install, **log out of DSM and back in** (hard refresh is not enough). Use **HTTP DSM (:5000)** — HTTPS blocks the bridge to `http://<nas>:19557/` (mixed content).
 
 Optional but recommended — replace the 2021 Suricata-5 ET dump with a current Suricata 8 feed (do **not** convert the old files):
 

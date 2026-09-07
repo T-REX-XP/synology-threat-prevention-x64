@@ -6,6 +6,13 @@ RULES_TGZ="${PKGDEST}/etc/rules/emerging.rules.tar.gz"
 RULES_DIR="${PKGDEST}/etc/rules/suricata"
 
 mkdir -p "${PKGVAR}/log" "${PKGVAR}/rules" "${RULES_DIR}"
+# Upgrade leftover from 8.0.6-0010 community UI. DSM does not wipe extra files in target/ui.
+# Those files keep the Start Menu on the old ExtJS / HTML app.
+rm -f "${PKGDEST}/ui/threatprevention.js" \
+	"${PKGDEST}/ui/index.html" \
+	"${PKGDEST}/ui/app.js" \
+	"${PKGDEST}/ui/app.css" \
+	"${PKGDEST}/ui/status.html"
 if [ -f "${RULES_TGZ}" ] && [ ! -d "${RULES_DIR}/rules" ]; then
 	tar -xzf "${RULES_TGZ}" -C "${RULES_DIR}"
 	rm -f "${RULES_DIR}/rules/emerging-deleted.rules" \
