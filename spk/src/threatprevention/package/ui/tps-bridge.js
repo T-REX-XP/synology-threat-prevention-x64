@@ -248,12 +248,21 @@ SYNO.SDS.TPS.Bridge = {
 				failed = true;
 				out[idx].error = (raw && raw.error) || { code: 500 };
 			}
+			if (ok && items[idx].api === "SYNO.TPS.Notification" && items[idx].method === "set") {
+				var panel = opts.scope;
+				if (panel && panel.getForm && panel.getForm().findField("enable_telegram")) {
+					me.saveTelegramFrom(panel);
+				}
+			}
 			left -= 1;
 			if (!left && opts.callback) {
 				opts.callback.call(opts.scope || window, true, { result: out, has_fail: failed });
 			}
 		}
 		Ext.each(items, function (item, idx) {
+			if (item.api === "SYNO.TPS.Notification" && item.method === "set") {
+				me.stripTelegramParams({params: item.params});
+			}
 			if (me.isHosted(item.api)) {
 				me.call(item.api, item.method, item.version || 1, item.params || {}, function (ok, data, raw) {
 					done(idx, ok, data, raw);
@@ -432,22 +441,22 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		var tries = 0;
 		function attach() {
-			var Tab = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Settings && SYNO.SDS.TPS.Settings.TabPanel;
-			if (!Tab || !Tab.prototype) {
+			var S = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Settings;
+			if (!S || !S.TabPanel || !S.TabPanel.prototype || !S.NotificationPanel || !S.NotificationPanel.prototype) {
 				if (tries++ < 40) { window.setTimeout(attach, 100); }
 				return;
 			}
-			if (Tab.prototype._tpsExtras) { return; }
-			Tab.prototype._tpsExtras = true;
-			var origInit = Tab.prototype.initComponent;
-			var origCtor = Tab.prototype.constructor;
+			if (S.TabPanel.prototype._tpsExtras) { return; }
+			S.TabPanel.prototype._tpsExtras = true;
+			me.patchNotificationTelegram(S.NotificationPanel);
+			var origInit = S.TabPanel.prototype.initComponent;
 			function after(panel) {
 				if (!panel || !panel.on) { return; }
 				panel.on("afterrender", function () {
 					if (panel._tpsExtraAdded || !panel.add) { return; }
 					panel._tpsExtraAdded = true;
 					try {
-						panel.add(me.buildTelegramTab(), me.buildFeedsTab());
+						panel.add(me.buildFeedsTab());
 						if (panel.doLayout) { panel.doLayout(); }
 					} catch (e) {
 						if (window.console && console.error) { console.error("TPS extra tabs", e); }
@@ -455,14 +464,8 @@ SYNO.SDS.TPS.Bridge = {
 				}, panel, {single: true});
 			}
 			if (origInit) {
-				Tab.prototype.initComponent = function () {
+				S.TabPanel.prototype.initComponent = function () {
 					var ret = origInit.apply(this, arguments);
-					after(this);
-					return ret;
-				};
-			} else if (origCtor) {
-				Tab.prototype.constructor = function () {
-					var ret = origCtor.apply(this, arguments);
 					after(this);
 					return ret;
 				};
@@ -470,156 +473,229 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		attach();
 	},
-	buildTelegramTab: function () {
+	telegramNames: ["enable_telegram", "tg_token", "tg_chat_id", "min_interval_telegram", "telegram_follow_mail"],
+	patchNotificationTelegram: function (NP) {
 		var me = this;
-		var Check = Ext.form.Checkbox;
-		var Text = Ext.form.TextField;
-		var NumberField = Ext.form.NumberField;
-		var Panel = Ext.form.FormPanel || Ext.Panel;
-		var enable = new Check({boxLabel: "Enable Telegram alerts", name: "enable_telegram"});
-		var token = new Text({
-			fieldLabel: "Bot token",
-			name: "token",
-			inputType: "password",
-			width: 360,
-			emptyText: "leave blank to keep saved token"
-		});
-		var chat = new Text({fieldLabel: "Chat ID", name: "chat_id", width: 220});
-		var interval = new NumberField({
-			fieldLabel: "Min interval (sec)",
-			name: "min_interval_telegram",
-			value: 300,
-			width: 80,
-			allowDecimals: false,
-			minValue: 0
-		});
-		var follow = new Check({boxLabel: "Use same classes as email", name: "follow_mail", checked: true});
-		function load() {
-			me.call("SYNO.TPS.Settings.Telegram", "get", 1, {}, function (ok, data) {
-				if (!ok || !data) { return; }
-				enable.setValue(!!data.enable_telegram);
-				follow.setValue(data.follow_mail !== false);
-				if (interval.setValue) { interval.setValue(data.min_interval_telegram || 300); }
-				chat.setValue(data.chat_id || "");
-				token.setValue("");
-			});
+		if (NP.prototype._tpsTelegram) { return; }
+		NP.prototype._tpsTelegram = true;
+		var origFill = NP.prototype.fillConfig;
+		NP.prototype.fillConfig = function (a) {
+			var cfg = origFill.apply(this, arguments);
+			cfg.items = (cfg.items || []).concat([me.telegramFieldset(this)]);
+			return cfg;
+		};
+		var origActivate = NP.prototype.onActivate;
+		NP.prototype.onActivate = function () {
+			if (origActivate) { origActivate.apply(this, arguments); }
+			me.loadTelegramInto(this);
+		};
+		var origInit = NP.prototype.initComponent;
+		NP.prototype.initComponent = function () {
+			if (origInit) { origInit.apply(this, arguments); }
+			me.hookNotificationApply(this);
+		};
+		var origLoadSys = NP.prototype.loadSystemNotificationConfig;
+		if (origLoadSys) {
+			NP.prototype.loadSystemNotificationConfig = function () {
+				var panel = this;
+				origLoadSys.apply(this, arguments);
+				window.setTimeout(function () {
+					if (panel.el && panel.el.unmask) { panel.el.unmask(); }
+				}, 400);
+			};
 		}
-		var saveBtn = new Ext.Button({
-			text: "Apply",
-			handler: function () {
-				me.call("SYNO.TPS.Settings.Telegram", "set", 1, {
-					enable_telegram: enable.getValue(),
-					follow_mail: follow.getValue(),
-					min_interval_telegram: interval.getValue(),
-					token: token.getValue(),
-					chat_id: chat.getValue()
-				}, function (ok) {
-					if (ok) { token.setValue(""); load(); }
-					else if (Ext.Msg) { Ext.Msg.alert("Telegram", "Save failed"); }
-				});
-			}
-		});
-		var testBtn = new Ext.Button({
-			text: "Test",
-			handler: function () {
-				me.call("SYNO.TPS.Settings.Telegram", "test", 1, {
-					token: token.getValue(),
-					chat_id: chat.getValue()
-				}, function (ok) {
-					if (Ext.Msg) {
-						Ext.Msg.alert("Telegram", ok ? "Test message sent." : "Test failed. Check token and chat ID.");
-					}
-				});
-			}
-		});
-		return new Panel({
-			title: "Telegram",
-			itemId: "SYNO.SDS.TPS.Settings.TelegramPanel",
-			padding: 12,
-			autoScroll: true,
+	},
+	telegramFieldset: function (panel) {
+		var me = this;
+		return {
+			xtype: "syno_fieldset",
 			border: false,
+			itemId: "tps_telegram_fieldset",
 			items: [
-				{xtype: "label", html: "<p>Send alerts to a Telegram bot. Token stays in etc/telegram.conf (not in the package).</p>"},
-				enable, token, chat, interval, follow,
-				{xtype: "container", layout: "column", items: [saveBtn, {xtype: "box", width: 12}, testBtn]}
-			],
-			listeners: {activate: load}
+				{xtype: "syno_displayfield", value: '<font style="font-weight:bold;">Telegram</font>'},
+				{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot"},
+				{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, emptyText: "Unchanged if empty"},
+				{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1},
+				{xtype: "syno_numberfield", name: "min_interval_telegram", fieldLabel: "Minimum interval (minutes)", indent: 1, maxValue: 60 * 24, allowDecimals: false, minValue: 0},
+				{xtype: "syno_checkbox", name: "telegram_follow_mail", boxLabel: "Use the same classes as email", indent: 1},
+				{xtype: "syno_button", itemId: "btn_telegram_test", text: "Send test message", indent: 1, handler: function () { me.testTelegram(panel); }}
+			]
+		};
+	},
+	hookNotificationApply: function (panel) {
+		var me = this;
+		if (!panel || panel._tpsTgHook) { return; }
+		panel._tpsTgHook = true;
+		var origSend = panel.sendWebAPI;
+		if (!origSend) { return; }
+		panel.sendWebAPI = function (opts) {
+			opts = opts || {};
+			var api = (opts.webapi && opts.webapi.api) || opts.api;
+			var method = (opts.webapi && opts.webapi.method) || opts.method;
+			if (api === "SYNO.TPS.Notification" && method === "set") {
+				me.stripTelegramParams(opts);
+				me.saveTelegramFrom(panel);
+			}
+			return origSend.apply(this, arguments);
+		};
+	},
+	stripTelegramParams: function (opts) {
+		var me = this;
+		function drop(obj) {
+			if (!obj) { return; }
+			Ext.each(me.telegramNames, function (k) { delete obj[k]; });
+		}
+		drop(opts.params);
+		if (opts.webapi) { drop(opts.webapi.params); }
+	},
+	telegramFromForm: function (panel) {
+		var f = panel && panel.getForm && panel.getForm();
+		if (!f) { return {}; }
+		function val(name, fallback) {
+			var fld = f.findField(name);
+			if (!fld || !fld.getValue) { return fallback; }
+			return fld.getValue();
+		}
+		var minutes = Number(val("min_interval_telegram", 5));
+		if (!isFinite(minutes) || minutes < 0) { minutes = 5; }
+		return {
+			enable_telegram: !!val("enable_telegram", false),
+			follow_mail: val("telegram_follow_mail", true) !== false,
+			min_interval_telegram: Math.round(minutes * 60),
+			token: val("tg_token", "") || "",
+			chat_id: val("tg_chat_id", "") || ""
+		};
+	},
+	loadTelegramInto: function (panel) {
+		this.call("SYNO.TPS.Settings.Telegram", "get", 1, {}, function (ok, data) {
+			if (panel.el && panel.el.unmask) { panel.el.unmask(); }
+			if (!ok || !data) { return; }
+			var f = panel.getForm && panel.getForm();
+			if (!f) { return; }
+			function set(name, v) {
+				var fld = f.findField(name);
+				if (fld && fld.setValue) { fld.setValue(v); }
+			}
+			set("enable_telegram", !!data.enable_telegram);
+			set("telegram_follow_mail", data.follow_mail !== false);
+			set("tg_chat_id", data.chat_id || "");
+			set("tg_token", "");
+			var sec = Number(data.min_interval_telegram);
+			if (!isFinite(sec) || sec < 0) { sec = 300; }
+			set("min_interval_telegram", Math.round(sec / 60));
+		});
+	},
+	saveTelegramFrom: function (panel) {
+		this.call("SYNO.TPS.Settings.Telegram", "set", 1, this.telegramFromForm(panel), function (ok) {
+			var f = panel.getForm && panel.getForm();
+			var token = f && f.findField("tg_token");
+			if (ok && token && token.setValue) { token.setValue(""); }
+		});
+	},
+	testTelegram: function (panel) {
+		var p = this.telegramFromForm(panel);
+		this.call("SYNO.TPS.Settings.Telegram", "test", 1, {token: p.token, chat_id: p.chat_id}, function (ok) {
+			var win = panel.findAppWindow && panel.findAppWindow();
+			var box = win && win.getMsgBox && win.getMsgBox();
+			var msg = ok ? "Telegram test message sent." : "Telegram test failed. Check bot token and chat ID.";
+			if (box) { box.alert("", msg); return; }
+			if (Ext.Msg) { Ext.Msg.alert("Telegram", msg); }
 		});
 	},
 	buildFeedsTab: function () {
 		var me = this;
-		var Panel = Ext.form.FormPanel || Ext.Panel;
-		var store = new Ext.data.SimpleStore({
-			fields: ["id", "name", "url", "enabled"]
+		var Form = (window.SYNO && SYNO.SDS && SYNO.SDS.Utils && SYNO.SDS.Utils.FormPanel) || Ext.form.FormPanel || Ext.Panel;
+		var Grid = (window.SYNO && SYNO.ux && SYNO.ux.GridPanel) || Ext.grid.GridPanel;
+		var store = new Ext.data.JsonStore({
+			fields: [
+				{name: "id"}, {name: "name"}, {name: "url"},
+				{name: "enabled"}, {name: "enabled_label"}
+			]
 		});
 		function reload() {
 			me.call("SYNO.TPS.Settings.Feed", "list", 1, {}, function (ok, data) {
 				var rows = [];
 				Ext.each((ok && data && data.feeds) || [], function (f) {
-					rows.push([f.id, f.name, f.url, f.enabled ? "yes" : "no"]);
+					rows.push({
+						id: f.id,
+						name: f.name,
+						url: f.url,
+						enabled: !!f.enabled,
+						enabled_label: f.enabled ? (_T("common", "enabled") || "Enabled") : (_T("common", "disabled") || "Disabled")
+					});
 				});
 				store.loadData(rows);
 			});
 		}
-		var nameF = new Ext.form.TextField({fieldLabel: "Name", width: 160, emptyText: "letters, digits, ._-"});
-		var urlF = new Ext.form.TextField({fieldLabel: "HTTPS URL", width: 400});
-		var grid = new Ext.grid.GridPanel({
-			store: store,
-			height: 200,
-			autoExpandColumn: "url",
+		var cm = new Ext.grid.ColumnModel({
+			defaults: {editable: false, sortable: true, menuDisabled: true, align: "left"},
 			columns: [
 				{header: "Name", dataIndex: "name", width: 140},
-				{header: "URL", dataIndex: "url", width: 360, id: "url"},
-				{header: "On", dataIndex: "enabled", width: 50}
-			],
+				{header: "URL", dataIndex: "url", width: 420, id: "url"},
+				{header: "Status", dataIndex: "enabled_label", width: 100}
+			]
+		});
+		var grid = new Grid({
+			flex: 1,
+			cls: "device-grid-panel",
+			store: store,
+			colModel: cm,
+			autoExpandColumn: "url",
 			sm: new Ext.grid.RowSelectionModel({singleSelect: true})
 		});
-		function selectedId() {
-			var rec = grid.getSelectionModel().getSelected();
-			return rec ? rec.get("id") : 0;
+		function fieldVal(name) {
+			var panel = grid.ownerCt;
+			while (panel && !panel.getForm) { panel = panel.ownerCt; }
+			var f = panel && panel.getForm && panel.getForm();
+			var fld = f && f.findField(name);
+			return fld && fld.getValue ? fld.getValue() : "";
 		}
-		var addBtn = new Ext.Button({
-			text: "Add",
-			handler: function () {
-				me.call("SYNO.TPS.Settings.Feed", "add", 1, {
-					name: nameF.getValue(),
-					url: urlF.getValue(),
-					enabled: true
-				}, function (ok) {
-					if (!ok && Ext.Msg) { Ext.Msg.alert("Feeds", "Add failed. Use https and a simple name."); }
-					reload();
-				});
-			}
-		});
-		var toggleBtn = new Ext.Button({
-			text: "Enable / disable",
-			handler: function () {
-				var rec = grid.getSelectionModel().getSelected();
-				if (!rec) { return; }
-				me.call("SYNO.TPS.Settings.Feed", "update", 1, {
-					id: rec.get("id"),
-					enabled: rec.get("enabled") !== "yes"
-				}, function () { reload(); });
-			}
-		});
-		var delBtn = new Ext.Button({
-			text: "Remove",
-			handler: function () {
-				var id = selectedId();
-				if (!id) { return; }
-				me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: id}, function () { reload(); });
-			}
-		});
-		return new Panel({
-			title: "Rule feeds",
+		function selected() {
+			return grid.getSelectionModel().getSelected();
+		}
+		return new Form({
+			title: "Rule Feeds",
 			itemId: "SYNO.SDS.TPS.Settings.FeedPanel",
-			padding: 12,
-			autoScroll: true,
-			border: false,
+			padding: "0px 12px 0px 0px",
+			trackResetOnLoad: true,
+			useDefaultBtn: false,
+			layout: "vbox",
+			layoutConfig: {align: "stretch"},
+			defaults: {labelWidth: 120},
 			items: [
-				{xtype: "label", html: "<p>Extra rule URLs are added on top of ET Open/Pro (General tab). Apply Update Now after changes.</p>"},
-				grid, nameF, urlF,
-				{xtype: "container", layout: "column", items: [addBtn, {xtype: "box", width: 12}, toggleBtn, {xtype: "box", width: 12}, delBtn]}
+				{xtype: "syno_fieldset", border: false, items: [
+					{xtype: "syno_displayfield", value: "Extra HTTPS rule feeds are applied on top of ET Open/Pro on General. Run Update Now after changes."}
+				]},
+				grid,
+				{xtype: "syno_fieldset", border: false, items: [
+					{xtype: "syno_textfield", fieldLabel: "Name", name: "feed_name", width: 220},
+					{xtype: "syno_textfield", fieldLabel: "HTTPS URL", name: "feed_url", width: 420},
+					{xtype: "syno_compositefield", items: [
+						{xtype: "syno_button", text: _T("common", "add") || "Add", handler: function () {
+							me.call("SYNO.TPS.Settings.Feed", "add", 1, {
+								name: fieldVal("feed_name"),
+								url: fieldVal("feed_url"),
+								enabled: true
+							}, function (ok) {
+								if (!ok && Ext.Msg) { Ext.Msg.alert("", "Could not add feed. Use HTTPS and a name of letters, digits, ._-"); }
+								reload();
+							});
+						}},
+						{xtype: "syno_button", text: "Enable / Disable", handler: function () {
+							var rec = selected();
+							if (!rec) { return; }
+							me.call("SYNO.TPS.Settings.Feed", "update", 1, {
+								id: rec.get("id"),
+								enabled: !rec.get("enabled")
+							}, function () { reload(); });
+						}},
+						{xtype: "syno_button", text: _T("common", "delete") || "Delete", handler: function () {
+							var rec = selected();
+							if (!rec) { return; }
+							me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: rec.get("id")}, function () { reload(); });
+						}}
+					]}
+				]}
 			],
 			listeners: {activate: reload}
 		});
@@ -659,6 +735,60 @@ SYNO.SDS.TPS.Bridge = {
 				obs.observe(el.dom, { childList: true });
 			};
 			P.prototype._tpsGmapObs = true;
+		}
+		attach();
+	},
+	patchOsmTiles: function () {
+		/* Official OSM ImageMapType loads tile.openstreetmap.org. DSM CSP img-src
+		   has no OSM host; proxy tiles through same-origin /webman/tps-api. */
+		var tries = 0;
+		function attach() {
+			var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic && SYNO.SDS.TPS.Statistic.MapPanel;
+			if (!P || !P.prototype || !P.prototype.initMap) {
+				if (tries++ < 40) { window.setTimeout(attach, 100); }
+				return;
+			}
+			if (P.prototype._tpsOsm) { return; }
+			var orig = P.prototype.initMap;
+			P.prototype.initMap = function () {
+				orig.apply(this, arguments);
+				if (!this.gmap || !window.google || !google.maps || !google.maps.ImageMapType) { return; }
+				this.gmap.mapTypes.set("OSM", new google.maps.ImageMapType({
+					getTileUrl: function (coord, zoom) {
+						var n = Math.pow(2, zoom), x = coord.x, y = coord.y;
+						if (y < 0 || y >= n) { return null; }
+						if (x < 0 || x >= n) { x = ((x % n) + n) % n; }
+						return "/webman/tps-api?api=SYNO.TPS.Settings.Map&method=tile&version=1&z=" +
+							zoom + "&x=" + x + "&y=" + y;
+					},
+					tileSize: new google.maps.Size(256, 256),
+					name: "OpenStreetMap",
+					maxZoom: 18
+				}));
+			};
+			P.prototype._tpsOsm = true;
+		}
+		attach();
+	},
+	patchLogStorage: function () {
+		var tries = 0;
+		function attach() {
+			var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Settings &&
+				SYNO.SDS.TPS.Settings.LogStoragePanel;
+			if (!P || !P.prototype || !P.prototype.processReturnData) {
+				if (tries++ < 40) { window.setTimeout(attach, 100); }
+				return;
+			}
+			if (P.prototype._tpsStorage) { return; }
+			var orig = P.prototype.processReturnData;
+			P.prototype.processReturnData = function (d, b) {
+				b = b || {};
+				Ext.each(b.result || [], function (e) {
+					if (e && !e.data) { e.data = {}; }
+				});
+				return orig.apply(this, arguments);
+			};
+			P.prototype._tpsStorage = true;
 		}
 		attach();
 	},
@@ -951,7 +1081,9 @@ SYNO.SDS.TPS.Bridge = {
 		me.patchMapSeverity();
 		me.patchGmapsKey();
 		me.patchGmapObserver();
+		me.patchOsmTiles();
 		me.patchDeviceCellClick();
+		me.patchLogStorage();
 		me.injectSettingsTabs();
 		me.hookPolling();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {

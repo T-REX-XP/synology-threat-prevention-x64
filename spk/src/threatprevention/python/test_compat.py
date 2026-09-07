@@ -28,7 +28,7 @@ from feeds import add_feed, feed_url_ok, list_feeds  # noqa: E402
 from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
-from tpsweb import _parse_multipart, handle, read_gmaps_key, write_update_source  # noqa: E402
+from tpsweb import _parse_multipart, fetch_osm_tile, handle, read_gmaps_key, write_update_source  # noqa: E402
 
 
 def check(cond, msg):
@@ -166,4 +166,6 @@ for dev in usb["data"]["devices"]:
 sdb = handle("SYNO.Core.SystemDB", "get", {}, conn)
 check(sdb["success"] and "systemdb_shares" in sdb["data"], "systemdb share")
 check(systemdb_get()["systemdb_shares"] == (usb_list()["devices"][0]["partitions"][0]["share_name"] if usb_list()["devices"] else ""), "systemdb matches first usb share")
+check(fetch_osm_tile("nope", 0, 0) is None, "osm tile rejects junk")
+check(fetch_osm_tile(2, 0, 99) is None, "osm tile rejects out-of-range y")
 print("ok")
