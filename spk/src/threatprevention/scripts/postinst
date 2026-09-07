@@ -22,6 +22,16 @@ if [ -f "${RULES_TGZ}" ] && [ ! -d "${RULES_DIR}/rules" ]; then
 	cp -f "${PKGDEST}/etc/rules/classification.config" "${RULES_DIR}/" 2>/dev/null || true
 	cp -f "${PKGDEST}/etc/rules/reference.config" "${RULES_DIR}/" 2>/dev/null || true
 fi
+PKGETC="/var/packages/ThreatPrevention/etc"
+mkdir -p "${PKGETC}/geoip"
+if [ ! -f "${PKGETC}/geoip/GeoIP.dat" ]; then
+	for src in /usr/share/GeoIP/GeoIP.dat /usr/share/GeoIP/GeoLiteCountry.dat /usr/share/geoip/GeoIP.dat; do
+		if [ -f "${src}" ]; then
+			ln -sfn "${src}" "${PKGETC}/geoip/GeoIP.dat"
+			break
+		fi
+	done
+fi
 if [ ! -s "${PKGVAR}/rules/suricata.rules" ] && [ -d "${RULES_DIR}/rules" ]; then
 	cat "${RULES_DIR}/rules/"*.rules > "${PKGVAR}/rules/suricata.rules" 2>/dev/null || true
 	cp -f "${PKGVAR}/rules/suricata.rules" "${PKGVAR}/rules/catalog.rules" 2>/dev/null || true

@@ -141,7 +141,7 @@ Busy/concerned devices from event counts. `limit`, `offset`, `order`.
 
 ## SYNO.TPS.Notification.Filter (v1 list / set)
 
-`{ "notification_filters": [ { "name", "severity", "action" } ] }`.
+`{ "notification_filters": [ { "name", "description", "severity", "enable_mail", "enable_sms", "enable_push" } ] }`. `set` upserts modified rows only. DSM `synodsmnotify` if present; no SMTP.
 
 ## SYNO.TPS.Backup (v1 backup / restore)
 

@@ -228,6 +228,17 @@ def run():
                 continue
             try:
                 if insert_alert(conn, obj):
+                    try:
+                        from notify import maybe_notify
+                        alert = obj.get("alert") or {}
+                        maybe_notify(
+                            conn,
+                            alert.get("category") or alert.get("classtype") or "",
+                            alert.get("signature") or "",
+                            alert.get("severity") or 3,
+                        )
+                    except Exception:
+                        pass
                     conn.commit()
             except Exception:
                 conn.rollback()

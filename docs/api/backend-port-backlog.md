@@ -24,34 +24,34 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 | T2 | Package start vs root-owned `etc/interface` | done (0023) | start succeeds if tpsweb is up |
 | T3 | `SYNO.API.Request.Polling.List` | coded (0024) | wrapping `Request` wiped `.Polling`; SignatureUpdater.check crashed |
 | T4 | `sendWebAPI` / `pollReg` on bare `Ext.Component` | coded (0024) | SignatureUpdater uses `new Ext.Component()` |
-| T5 | Confirm 0024 installed + logout | **open** | user still on 0023 when `pollList` crashed |
+| T5 | Confirm 0024 installed + logout | done (0027) | Polling + Ext.Component hooks shipped; 0026/0027 also patch Overview/Map HTML |
 
 ## P1 — official envelopes that still lie
 
 | ID | API.method | Gap | Work |
 | --- | --- | --- | --- |
-| T10 | `Signature.Policy.add` / `update` | returns `{compiled}` not `{need_force:false}` | overwrite confirm never works; always treat as success |
-| T11 | `Signature.Policy.add` / `update` | `old_sid` / `force` / CIDR filters | persist `policy_filter` with ip_src/ip_dst |
-| T12 | `Signature.Rule.list` | `references`, `encode`, `msg`; Store `baseParams.name` = class name | parse rule metadata; filter by class |
-| T13 | `Settings.Update.start_check` | always flips to `up_to_date` | actually query ET index / `suricata-update check-versions` |
-| T14 | `Settings.Update.status` | nested `data.status` / `last_updated` | verify pollReg path from Component |
-| T15 | `Event.ExportFolder.get` | string under `@appdata`, File Station `opendir` may refuse | realpath share the admin can open |
-| T16 | `Device.list` | ARP only; no NSM names; `mesh_re` | join passthrough `SYNO.Core.Network.NSM.Device` in compound |
-| T17 | `Statistic.Device.list` | Store root `devices` + `loading` | match official fields |
-| T18 | Compound `result[]` | Settings / Policy / Storage / Sensor+NSM | re-test each panel after T3/T4 |
-| T19 | `Backup.restore` | JSON only | accept upload field the Ext dialog sends |
+| T10 | `Signature.Policy.add` / `update` | `{need_force}` | done (0025) |
+| T11 | `Signature.Policy.add` / `update` | `old_sid` / `force` / CIDR | done (0025) |
+| T12 | `Signature.Rule.list` | `msg`/`encode`/`references` | done (0025) |
+| T13 | `Settings.Update.start_check` | probe ET | done (0025) |
+| T14 | `Settings.Update.status` | nested `data.status` | done (0025) |
+| T15 | `Event.ExportFolder.get` | File Station path | done (0025); skip `@eaDir` |
+| T16 | `Device.list` | ARP + `mesh_re:false` | done (0025); NSM names via Core passthrough |
+| T17 | `Statistic.Device.list` | `devices` + `loading` | done (0025) |
+| T18 | Compound `result[]` | Settings / Policy / Storage | coded; re-test on 0027 UI |
+| T19 | `Backup.restore` | `dss_file` upload | coded (0028); JSON only, not official `.dss` |
 
 ## P2 — real data behind working shapes
 
 | ID | API.method | Gap | Work |
 | --- | --- | --- | --- |
-| T20 | `Event.Statistic.get` | `botnet_*`, `country_src` empty | GeoIP + optional botnet list |
-| T21 | `Event.Map.list` | empty `location[]` | GeoIP on `ip_src`; Maps key is optional — [google-maps.md](../google-maps.md) |
-| T22 | `Event.get` | L3/L4 from eve when present | already hex payload; fill tcp/udp/icmp consistently |
-| T23 | `Notification` / `Filter` | persist only | optional: call DSM notify APIs if configured |
-| T24 | `Sensor.set` prevention / `security` | stored, not enforced | document IDS-only; do not fake drop counts |
-| T25 | `Settings.Update.Source` ET Pro | stores code, no licensed feed | wire `suricata-update enable-source et/pro` when code set |
-| T26 | `Settings.Storage` USB max | depends on Core.SystemDB + USB.list passthrough | verify compound on HTTPS |
+| T20 | `Event.Statistic.get` | `botnet_*` / `country_src` | coded (0028): GeoIP.dat + trojan/C2 classtypes |
+| T21 | `Event.Map.list` | `location[]` | coded (0028): GeoIP on public `ip_src`; Maps key still optional — [google-maps.md](../google-maps.md) |
+| T22 | `Event.get` | L3/L4 | coded (0028): synthesize IPv4/6 + proto fields when iphdr missing |
+| T23 | `Notification` / `Filter` | persist + DSM notify | done (0029): upsert modified rows; `synodsmnotify` / `notify.log` |
+| T24 | `Sensor.set` prevention / `security` | stored, not enforced | done (0029): `prevention_enforced:false`, `ips_mode:ids`; no NFQUEUE |
+| T25 | `Settings.Update.Source` ET Pro | licensed feed | done (0029): sidecar + `update-rules.sh`; missing code → `etpro_error` |
+| T26 | `Settings.Storage` USB max | Core compound | done (0029): empty USB/SystemDB shapes; `logStorageMaxLimit` fallback |
 
 ## P3 — out of scope unless asked
 
@@ -65,14 +65,12 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 
 ## Suggested order
 
-1. Install **0024** (or next) so `Polling.List` exists — T5.
-2. T10–T12 so Policy / Ruleset do not surprise the official dialogs.
-3. T13–T14 so Overview updater stops looping `start_check`.
-4. T16–T18 so Settings + Concerned Devices match NSM.
-5. T20–T21 only if the Map / country pies are required for the PoC demo.
-6. Leave P3 alone.
+1. Install **0030** (Maps key hook + GeoIP symlink + 0029 notify/ET Pro/USB).
+2. Drop a GeoIP Country `.dat` if Map / country pies should show pins (LAN-only events stay empty).
+3. ET Pro needs a real oinkcode in Settings; empty code returns `etpro_error`.
+4. Leave P3 alone (no NFQUEUE, no official `.dss`, no SMTP).
 
-## Counts (2026-09-07, tree 8.0.6-0024)
+## Counts (2026-09-07, tree 8.0.6-0029)
 
 - 21 `SYNO.TPS.*` APIs, 42 `.lib` methods — all have a tpsweb `handle()` branch.
 - 9 DSM-core / Entry.Request calls — passthrough only.

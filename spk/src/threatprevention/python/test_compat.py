@@ -12,15 +12,21 @@ os.environ.setdefault("TPS_PKGDEST", os.environ["TPS_PKGVAR"])
 
 from compat import (  # noqa: E402
     classify_update,
+    official_event,
     official_map,
     official_policy_write,
     official_sensor,
     official_source,
+    official_stat_bucket,
     official_storage,
     official_update_status,
 )
 from compiler import parse_header, parse_refs  # noqa: E402
+from geoip import is_public_ipv4, lookup as geoip_lookup  # noqa: E402
 from ingest import payload_hex  # noqa: E402
+from notify import list_filters, maybe_notify, upsert_filters  # noqa: E402
+from store import init_db, kv_set  # noqa: E402
+from tpsweb import _parse_multipart, handle, read_gmaps_key, write_update_source  # noqa: E402
 
 
 def check(cond, msg):
@@ -36,6 +42,7 @@ sensor = official_sensor(
     ["ovs_eth0", "eth0"],
 )
 check(sensor["status"] == "engine_start", "sensor status")
+check(sensor["prevention_enforced"] is False and sensor["ips_mode"] == "ids", "ids only")
 check(sensor["interface"] == "ovs_eth0", "sensor interface")
 check(any(x["if_id"] == "eth0" for x in sensor["interface_list"]), "live iface merge")
 
@@ -48,6 +55,7 @@ check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_c
 
 stor = official_storage(1234, 1024, "idle")
 check(stor["db_size"] == "db_size_1gb" and stor["db_size_bytes"] == 1234, "storage db_size")
+check("logStorageMaxLimit" in stor, "usb max key")
 
 upd = official_update_status("updating", "2026-09-07 12:00:00", "", "9")
 check(upd["status"] == "updating" and upd["data"]["status"] == "updating", "update nested status")
@@ -57,6 +65,56 @@ mp = official_map(None, ["7days", "30days"])
 check("days7" in mp and "location" in mp["days7"], "map buckets")
 
 check(payload_hex({"payload": "YWI="}) == "6162", "eve payload base64->hex")
+check(not is_public_ipv4("10.0.0.1") and not is_public_ipv4("192.168.1.1"), "private ipv4")
+check(is_public_ipv4("8.8.8.8"), "public ipv4")
+check(geoip_lookup("192.168.1.1") is None, "lan has no pin")
+
+conn = init_db()
+cur = conn.execute(
+    "INSERT INTO event(timestamp, ts_epoch, sig_name, ip_src_str, ip_dst_str, ip_proto) "
+    "VALUES (?,?,?,?,?,?)",
+    ("2026-01-01 00:00:00", 1, "l3-fallback", "8.8.8.8", "1.1.1.1", 6),
+)
+conn.commit()
+row = conn.execute("SELECT * FROM event WHERE cid=?", (cur.lastrowid,)).fetchone()
+ev = official_event(row, conn, detail=True)
+check(ev["ip_ver"] == 4 and ev["tcp_seq"] == 0, "event get L3/L4 fallback")
+bucket = official_stat_bucket(conn, 0)
+check("country_src" in bucket and "botnet_ip_src" in bucket, "stat geo/botnet keys")
+check(bucket["country_src"] == [] or isinstance(bucket["country_src"], list), "country_src list")
+
+boundary = "----x"
+body = (
+    "--%s\r\nContent-Disposition: form-data; name=\"api\"\r\n\r\nSYNO.TPS.Backup\r\n"
+    "--%s\r\nContent-Disposition: form-data; name=\"dss_file\"; filename=\"x.json\"\r\n"
+    "Content-Type: application/json\r\n\r\n{\"kv\":[]}\r\n"
+    "--%s--\r\n" % (boundary, boundary, boundary)
+).encode()
+fields, files = _parse_multipart(body, "multipart/form-data; boundary=" + boundary)
+check(fields.get("api") == "SYNO.TPS.Backup", "multipart field")
+check(b"kv" in files.get("dss_file", b""), "multipart dss_file")
+
+upsert_filters(conn, [{"name": "trojan-activity", "enable_mail": True}])
+upsert_filters(conn, [{"name": "misc-activity", "enable_sms": True}])
+saved = {x["name"]: x for x in list_filters(conn)}
+check(saved["trojan-activity"]["enable_mail"] is True, "filter upsert mail")
+check(saved["misc-activity"]["enable_sms"] is True, "filter keep prior")
+kv_set(conn, "enable_notification", "1")
+kv_set(conn, "enable_mail", "1")
+conn.commit()
+check(maybe_notify(conn, "no-such-class", "x") is False, "notify unknown class skipped")
+check(maybe_notify(conn, "trojan-activity", "sid test") is True, "notify writes log")
+
+write_update_source("et-pro", "secret")
+check(open(os.path.join(os.environ["TPS_PKGETC"], "update-source")).read().strip() == "et-pro", "et-pro sidecar")
+check(open(os.path.join(os.environ["TPS_PKGETC"], "etpro.code")).read().strip() == "secret", "etpro code file")
+write_update_source("et-open", "")
+check(not os.path.isfile(os.path.join(os.environ["TPS_PKGETC"], "etpro.code")), "et-open clears code")
+check(read_gmaps_key() == "", "no gmaps key by default")
+open(os.path.join(os.environ["TPS_PKGETC"], "gmaps.key"), "w").write("AIzaSyTestKey123\n")
+check(read_gmaps_key() == "AIzaSyTestKey123", "gmaps key file")
+mapped = handle("SYNO.TPS.Settings.Map", "get", {}, conn)
+check(mapped["success"] and mapped["data"]["key"] == "AIzaSyTestKey123", "settings.map get")
 
 check(official_policy_write(False) == {"need_force": False}, "policy write ok")
 check(official_policy_write(True)["need_force"] is True, "policy need_force")

@@ -27,6 +27,7 @@ from compat import (
     official_signature_classes,
     official_source,
     official_storage,
+    usb_max_label,
     official_trends,
     official_update_status,
     official_variables,
@@ -37,8 +38,10 @@ from compat import (
     to_epoch,
 )
 from compiler import compile_rules, import_rules, parse_header, parse_refs, reload_suricata
+from notify import list_filters, upsert_filters
 from paths import (
     EXPORT_DIR,
+    GMAPS_KEY,
     IFACE_FILE,
     PKGDEST,
     PKGETC,
@@ -265,6 +268,7 @@ def write_sensor(data):
     ]
     with open(SENSOR_CONF, "w") as fh:
         fh.write("\n".join(lines) + "\n")
+    # persist the checkbox; capture stays AF_PACKET IDS (no NFQUEUE).
 
 
 def _truth(v):
@@ -308,13 +312,40 @@ def list_ifaces():
     return names
 
 
-def probe_rule_update(last_updated=""):
-    """HEAD ET Open tarball. Returns (reachable, remote_newer)."""
-    urls = (
-        "https://rules.emergingthreats.net/open/suricata-8.0.6/emerging.rules.tar.gz",
-        "https://rules.emergingthreats.net/open/suricata-8.0/emerging.rules.tar.gz",
-        "https://rules.emergingthreats.net/open/suricata/emerging.rules.tar.gz",
-    )
+def write_update_source(source, code=""):
+    """Sidecar files update-rules.sh reads (no sqlite in the shell script)."""
+    os.makedirs(PKGETC, exist_ok=True)
+    src = "et-pro" if str(source).lower() in ("et-pro", "etpro", "et_pro") else "et-open"
+    with open(os.path.join(PKGETC, "update-source"), "w") as fh:
+        fh.write(src + "\n")
+    path = os.path.join(PKGETC, "etpro.code")
+    if src == "et-pro" and code:
+        with open(path, "w") as fh:
+            fh.write(str(code).strip() + "\n")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    elif os.path.isfile(path) and src != "et-pro":
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def probe_rule_update(last_updated="", source="et-open", code=""):
+    """HEAD ET Open or ET Pro tarball. Returns (reachable, remote_newer)."""
+    if str(source).lower() in ("et-pro", "etpro") and code:
+        urls = (
+            "https://rules.emergingthreatspro.com/%s/suricata-8.0/etpro.rules.tar.gz" % code,
+            "https://rules.emergingthreatspro.com/%s/suricata/etpro.rules.tar.gz" % code,
+        )
+    else:
+        urls = (
+            "https://rules.emergingthreats.net/open/suricata-8.0.6/emerging.rules.tar.gz",
+            "https://rules.emergingthreats.net/open/suricata-8.0/emerging.rules.tar.gz",
+            "https://rules.emergingthreats.net/open/suricata/emerging.rules.tar.gz",
+        )
     try:
         from urllib.request import Request, urlopen
     except ImportError:
@@ -488,7 +519,22 @@ def handle(api, method, params, conn):
         return backup_api(conn, method, params)
     if api == "SYNO.TPS.Overview" and method == "get":
         return overview(conn)
+    if api == "SYNO.TPS.Settings.Map" and method == "get":
+        return ok({"key": read_gmaps_key()})
     return err(101)
+
+
+def read_gmaps_key():
+    path = GMAPS_KEY
+    if not os.path.isfile(path):
+        return ""
+    try:
+        raw = open(path, encoding="utf-8", errors="replace").read().strip()
+    except OSError:
+        return ""
+    if not raw or raw.startswith("#") or " " in raw or len(raw) < 8:
+        return ""
+    return raw.splitlines()[0].strip()
 
 
 def event_list(conn, p):
@@ -997,6 +1043,10 @@ def settings_update(conn, api, method, p):
             if "code" in p:
                 kv_set(conn, "etpro_code", p.get("code") or "")
             conn.commit()
+            write_update_source(
+                kv_get(conn, "update_source", "et-open"),
+                kv_get(conn, "etpro_code", ""),
+            )
             return ok({})
     if api == "SYNO.TPS.Settings.Update":
         if method == "status":
@@ -1016,10 +1066,17 @@ def settings_update(conn, api, method, p):
             def _check():
                 c = connect()
                 try:
+                    src = kv_get(c, "update_source", "et-open")
+                    code = kv_get(c, "etpro_code", "")
+                    if src == "et-pro" and not code:
+                        kv_set(c, "update_status", "etpro_error")
+                        JOBS[tid]["status"] = "etpro_error"
+                        c.commit()
+                        return
                     marker = os.path.join(PKGVAR, "rules", ".from-suricata-update")
                     last = kv_get(c, "last_updated", "")
                     ever = os.path.isfile(marker) or bool(last)
-                    reachable, newer = probe_rule_update(last)
+                    reachable, newer = probe_rule_update(last, src, code)
                     status = classify_update(ever, reachable, newer)
                     kv_set(c, "update_status", status)
                     c.commit()
@@ -1042,6 +1099,15 @@ def settings_update(conn, api, method, p):
             def _run():
                 c = connect()
                 try:
+                    src = kv_get(c, "update_source", "et-open")
+                    code = kv_get(c, "etpro_code", "")
+                    write_update_source(src, code)
+                    if src == "et-pro" and not code:
+                        kv_set(c, "update_status", "etpro_error")
+                        kv_set(c, "engine_ui_status", "")
+                        JOBS[tid]["status"] = "etpro_error"
+                        c.commit()
+                        return
                     kv_set(c, "engine_ui_status", "updating_signature")
                     c.commit()
                     rc = subprocess.call(["/bin/sh", UPDATE_SCRIPT], timeout=600)
@@ -1054,6 +1120,9 @@ def settings_update(conn, api, method, p):
                         kv_set(c, "update_status", "up_to_date")
                         kv_set(c, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
                         JOBS[tid]["status"] = "up_to_date"
+                    elif rc == 2:
+                        kv_set(c, "update_status", "etpro_error")
+                        JOBS[tid]["status"] = "etpro_error"
                     else:
                         kv_set(c, "update_status", "connect_error")
                         JOBS[tid]["status"] = "connect_error"
@@ -1092,7 +1161,7 @@ def settings_storage(conn, method, p):
     size = os.path.getsize(db) if os.path.isfile(db) else 0
     limit = int(kv_get(conn, "storage_limit_mb", "500") or 500)
     if method == "get":
-        return ok(official_storage(size, limit, kv_get(conn, "clear_status", "idle")))
+        return ok(official_storage(size, limit, kv_get(conn, "clear_status", "idle"), usb_max=usb_max_label()))
     if method == "set":
         kv_set(conn, "storage_limit_mb", str(_storage_limit(p)))
         conn.commit()
@@ -1262,39 +1331,9 @@ def notification(conn, method, p):
 
 def notification_filter(conn, method, p):
     if method == "list":
-        rows = [dict(r) for r in conn.execute("SELECT * FROM notification_filter")]
-        if not rows:
-            for r in conn.execute("SELECT sig_class_name, sig_class_description, sig_priority FROM sig_class ORDER BY sig_priority, sig_class_name"):
-                rows.append({
-                    "name": r["sig_class_name"],
-                    "description": r["sig_class_description"] or r["sig_class_name"],
-                    "severity": int(r["sig_priority"] or 3),
-                    "enable_mail": False,
-                    "enable_sms": False,
-                    "enable_push": False,
-                    "action": "",
-                })
-        else:
-            out = []
-            for r in rows:
-                out.append({
-                    "name": r.get("name") or "",
-                    "description": r.get("description") or r.get("name") or "",
-                    "severity": int(r.get("severity") or 3),
-                    "enable_mail": _truth(r.get("enable_mail") or r.get("action") == "mail"),
-                    "enable_sms": _truth(r.get("enable_sms")),
-                    "enable_push": _truth(r.get("enable_push")),
-                    "action": r.get("action") or "",
-                })
-            rows = out
-        return ok({"notification_filters": rows})
+        return ok({"notification_filters": list_filters(conn)})
     if method == "set":
-        conn.execute("DELETE FROM notification_filter")
-        for item in p.get("notification_filters") or []:
-            conn.execute(
-                "INSERT INTO notification_filter(name, severity, action) VALUES (?,?,?)",
-                (item.get("name") or "", int(item.get("severity") or 0), item.get("action") or ""),
-            )
+        upsert_filters(conn, p.get("notification_filters") or [])
         conn.commit()
         return ok({})
     return err(102)
@@ -1304,14 +1343,48 @@ def backup_api(conn, method, p):
     if method == "backup":
         return ok({"json": backup_json(conn), "format": "json"})
     if method == "restore":
-        raw = p.get("json") or p.get("data") or ""
-        if not raw:
+        raw = p.get("json") or p.get("data") or p.get("dss_file") or ""
+        if isinstance(raw, bytes):
+            try:
+                raw = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                return err(100)
+        raw = (raw or "").strip()
+        if not raw or raw[0] not in "{[":
             return err(100)
         restore_json(conn, raw)
         compile_rules(conn)
         reload_suricata()
         return ok({})
     return err(102)
+
+
+def _parse_multipart(body, ctype):
+    import re
+    fields, files = {}, {}
+    match = re.search(r"boundary=([^;]+)", ctype or "", re.I)
+    if not match:
+        return fields, files
+    boundary = match.group(1).strip().strip('"')
+    sep = b"--" + boundary.encode("ascii", "replace")
+    for part in body.split(sep):
+        part = part.strip(b"\r\n")
+        if not part or part == b"--":
+            continue
+        head, _, data = part.partition(b"\r\n\r\n")
+        if data.endswith(b"--"):
+            data = data[:-2]
+        data = data.rstrip(b"\r\n")
+        header = head.decode("utf-8", "replace")
+        name_m = re.search(r'name="([^"]+)"', header)
+        if not name_m:
+            continue
+        name = name_m.group(1)
+        if "filename=" in header:
+            files[name] = data
+        else:
+            fields[name] = data.decode("utf-8", "replace")
+    return fields, files
 
 
 def overview(conn):
@@ -1450,7 +1523,13 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
         if body:
             ctype = self.headers.get("Content-Type") or ""
-            if "json" in ctype:
+            if "multipart/form-data" in ctype:
+                fields, files = _parse_multipart(body, ctype)
+                for k, v in fields.items():
+                    qs[k] = [v]
+                for k, v in files.items():
+                    qs[k] = [v]
+            elif "json" in ctype:
                 try:
                     extra = json.loads(body.decode("utf-8") or "{}")
                     for k, v in extra.items():

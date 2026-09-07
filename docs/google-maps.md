@@ -25,7 +25,7 @@ Map severity chips (`getSeverityIcons`) are HTML in a `syno_displayfield`. DSM 7
 | `Google Maps JavaScript API warning: NoApiKeys` | Official URL has no key. Expected. Map tiles stay blank or watermarked. |
 | `GET …/mapsjs/gen_204?csp_test=true net::ERR_BLOCKED_BY_CLIENT` | Browser extension (uBlock, privacy/ad block) dropped Google’s telemetry/CSP probe. Not a DSM or tpsweb failure. |
 | `loaded directly without loading=async` | Google’s loader hint. Harmless. |
-| Empty map / no event pins | `Event.Map.list` `location[]` is empty until GeoIP (backlog T21). A key only buys tiles, not coordinates. |
+| Empty map / no event pins | `Event.Map.list` `location[]` is empty until GeoIP (backlog T21). A key only buys tiles. Pins need a `GeoIP.dat` and **public** `ip_src` (LAN stays empty). Drop the file at `/var/packages/ThreatPrevention/etc/geoip/GeoIP.dat` or use DSM `/usr/share/GeoIP/GeoIP.dat`. |
 
 `ERR_BLOCKED_BY_CLIENT` is the **browser**, not nginx or CSP. Allow `maps.googleapis.com` on the DSM host, or use a private window without blockers.
 
@@ -41,10 +41,10 @@ Google does not publish an unrestricted demo key. Do not paste a leaked or third
    - API restriction: Maps JavaScript API only.
 3. The Cloud project needs billing. There is a monthly free credit; it is not unlimited.
 
-The official JS still has no place to enter the key. A PoC hook (not shipped yet) would be: keep the key **off git**, e.g. `/var/packages/ThreatPrevention/etc/gmaps.key`, and have `tps-bridge.js` rewrite `GoogleMapLoader.prototype.GMAP_API_URL` to append `&key=…`. Do not pack a key into the SPK.
+The official JS still has no place to enter the key. From **0030** the bridge rewrites `GoogleMapLoader.GMAP_API_URL` when `/var/packages/ThreatPrevention/etc/gmaps.key` exists (one line, no spaces). The key stays **off git** and is **not** packed in the SPK. Reload the Threat Prevention window after dropping the file.
 
 ## Related
 
-- Pins / country pies: [backend-port-backlog.md](api/backend-port-backlog.md) T20–T21 (P2 GeoIP).
+- Pins / country pies: [backend-port-backlog.md](api/backend-port-backlog.md) T20–T21. From 0028, `location[]` and `country_src` fill when a GeoIP Country `.dat` is present and `ip_src` is public.
 - Official contract: [official-app-surface.md](api/official-app-surface.md).
 - Deploy console table: [spk-deploy-and-update.md](spk-deploy-and-update.md).

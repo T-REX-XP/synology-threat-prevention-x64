@@ -11,6 +11,7 @@ import os
 import time
 
 from paths import IFACE_FILE, SENSOR_CONF
+from geoip import BOTNET_CLASSES, lookup as geoip_lookup
 
 
 POLICY_TYPE_CLASS = 1
@@ -215,6 +216,23 @@ def official_event(row, conn, detail=False):
     raw = (payload["data_payload"] if payload else "") or ""
     data["data_payload"] = raw
     data["payload"] = raw if _looks_hex(raw) else raw.encode("utf-8", "replace").hex()
+    if not iph:
+        data["ip_ver"] = 6 if ":" in ip_src else 4
+        data.setdefault("ip_hlen", 5 if data["ip_ver"] == 4 else 10)
+        data.setdefault("ip_tos", 0)
+        data.setdefault("ip_len", 0)
+        data.setdefault("ip_id", 0)
+        data.setdefault("ip_flags", 0)
+        data.setdefault("ip_off", 0)
+        data.setdefault("ip_ttl", 0)
+        data.setdefault("ip_csum", 0)
+    if not tcp and str(data.get("ip_proto")) == "6":
+        data.update({"tcp_seq": 0, "tcp_ack": 0, "tcp_off": 5, "tcp_res": 0,
+                     "tcp_flags": 0, "tcp_win": 0, "tcp_csum": 0, "tcp_urp": 0})
+    if not udp and str(data.get("ip_proto")) == "17":
+        data.update({"udp_len": 0, "udp_csum": 0})
+    if not icmp and str(data.get("ip_proto")) == "1":
+        data.update({"icmp_type": 0, "icmp_code": 0, "icmp_csum": 0, "icmp_id": 0, "icmp_seq": 0})
     return data
 
 
@@ -291,6 +309,9 @@ def official_sensor(cfg, status, pid, iface, live=None):
         "sensor_config_exist": exist,
         "status": eng,
         "pid": pid,
+        # Stored checkbox only. This PoC stays AF_PACKET IDS (no NFQUEUE).
+        "prevention_enforced": False,
+        "ips_mode": "ids",
     }
 
 
@@ -369,6 +390,32 @@ def official_policy_list(items):
     return {"list": out, "policy": out}
 
 
+def _botnet_ips(conn, where, args, column, key):
+    placeholders = ",".join("?" * len(BOTNET_CLASSES)) if BOTNET_CLASSES else "''"
+    sql = (
+        "SELECT e.%s AS ip, COUNT(*) n FROM event e "
+        "JOIN sig_class c ON c.sig_class_id=e.sig_class_id "
+        "WHERE " + where.replace("ts_epoch", "e.ts_epoch") +
+        " AND c.sig_class_name IN (" + placeholders + ") "
+        "GROUP BY e.%s ORDER BY n DESC LIMIT 10"
+    ) % (column, column)
+    rows = conn.execute(sql, list(args) + list(BOTNET_CLASSES))
+    return [{key: r["ip"], "ip": r["ip"], "count": r["n"]} for r in rows]
+
+
+def _country_src(conn, where, args):
+    counts = {}
+    for r in conn.execute("SELECT ip_src_str FROM event WHERE " + where, args):
+        geo = geoip_lookup(r["ip_src_str"])
+        if not geo or not geo.get("country"):
+            continue
+        code = geo["country"]
+        counts[code] = counts.get(code, 0) + 1
+    items = [{"country_src": k, "country": k, "count": v} for k, v in counts.items()]
+    items.sort(key=lambda x: -x["count"])
+    return items[:10]
+
+
 def official_stat_bucket(conn, since, until=None):
     args = []
     where = "1=1"
@@ -410,9 +457,9 @@ def official_stat_bucket(conn, since, until=None):
         "class_name": class_name,
         "ip_src": ip_src,
         "ip_dst": ip_dst,
-        "botnet_ip_src": [],
-        "botnet_ip_dst": [],
-        "country_src": [],
+        "botnet_ip_src": _botnet_ips(conn, where, args, "ip_src_str", "ip_src"),
+        "botnet_ip_dst": _botnet_ips(conn, where, args, "ip_dst_str", "ip_dst"),
+        "country_src": _country_src(conn, where, args),
         "total": sum(x["count"] for x in class_name) if class_name else 0,
         "high": 0,
         "medium": 0,
@@ -492,8 +539,42 @@ def official_trends(conn, days=7):
     }
 
 
+def _map_locations(conn, since):
+    args = []
+    where = "1=1"
+    if since:
+        where += " AND e.ts_epoch>=?"
+        args.append(since)
+    rows = conn.execute(
+        """SELECT e.ip_src_str, e.sig_name, e.impact_flag, c.sig_priority, COUNT(*) n
+           FROM event e LEFT JOIN sig_class c ON c.sig_class_id=e.sig_class_id
+           WHERE """ + where + """
+           GROUP BY e.ip_src_str, e.sig_name, e.impact_flag
+           ORDER BY n DESC LIMIT 200""",
+        args,
+    )
+    out = []
+    for r in rows:
+        geo = geoip_lookup(r["ip_src_str"])
+        if not geo or geo.get("lat") is None or geo.get("lng") is None:
+            continue
+        sev = severity_name(r["impact_flag"], r["sig_priority"] or 3)
+        prio = 1 if sev == "high" else (2 if sev == "medium" else 3)
+        out.append({
+            "lat": geo["lat"],
+            "lng": geo["lng"],
+            "country": geo["country"],
+            "ip_src": r["ip_src_str"],
+            "signature": r["sig_name"] or "",
+            "priority": prio,
+            "count": r["n"],
+            "encode": False,
+        })
+    return out
+
+
 def official_map(conn, date_range=None):
-    """Event.Map.list: days7 / days30 / all_logs with location[] (empty without GeoIP)."""
+    """Event.Map.list: days7 / days30 / all_logs with location[] (GeoIP when a .dat exists)."""
     now = int(time.time())
     wanted = date_range
     if isinstance(wanted, str):
@@ -503,19 +584,24 @@ def official_map(conn, date_range=None):
 
     def bucket(since):
         begin = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since or 0)) if since else "1970-01-01 00:00:00"
+        locs = _map_locations(conn, since) if conn is not None else []
         return {
             "begin": begin,
             "end": now_str(),
-            "location": [],
-            "events": [],
+            "location": locs,
+            "events": locs,
         }
 
     days7 = bucket(now - 7 * 86400)
     days30 = bucket(now - 30 * 86400)
     all_logs = bucket(0)
     out = {"days7": days7, "days30": days30, "all_logs": all_logs, "location": [], "events": []}
-    if "7days" in wanted or "7day" in wanted:
+    if any(x in wanted for x in ("7days", "7day", "days7")):
         out["location"] = days7["location"]
+    elif any(x in wanted for x in ("30days", "30day", "days30")):
+        out["location"] = days30["location"]
+    elif any(x in wanted for x in ("all", "all_logs")):
+        out["location"] = all_logs["location"]
     return out
 
 
@@ -530,7 +616,7 @@ def official_source(source, code):
     }
 
 
-def official_storage(size_bytes, limit_mb, status, percent=100):
+def official_storage(size_bytes, limit_mb, status, percent=100, usb_max=""):
     key = {500: "db_size_500mb", 1024: "db_size_1gb", 2048: "db_size_2gb"}.get(int(limit_mb or 500), "db_size_500mb")
     return {
         "db_size": key,
@@ -539,7 +625,32 @@ def official_storage(size_bytes, limit_mb, status, percent=100):
         "clear_percentage": int(percent),
         "status_clear_log": status or "idle",
         "status": status or "idle",
+        "logStorageMaxLimit": usb_max or "",
     }
+
+
+def usb_max_label():
+    """Best-effort USB volume size for Settings when Core.USB.list is empty."""
+    import glob
+    best = 0.0
+    roots = []
+    for pat in ("/volumeUSB*", "/volumeUSBshare*"):
+        roots.extend(glob.glob(pat))
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            st = os.statvfs(root)
+        except OSError:
+            continue
+        mb = (st.f_frsize * st.f_blocks) / (1024.0 * 1024.0)
+        if mb > best:
+            best = mb
+    if best >= 1024:
+        return "%.2f GB" % (best / 1024.0)
+    if best > 0:
+        return "%.2f MB" % best
+    return ""
 
 
 def official_policy_write(need_force=False):

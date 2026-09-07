@@ -183,6 +183,16 @@ SYNO.SDS.TPS.Bridge = {
 	isTps: function (api) {
 		return api && String(api).indexOf("SYNO.TPS.") === 0;
 	},
+	normalizeCore: function (api, ok, data) {
+		data = data || {};
+		if (api === "SYNO.Core.SystemDB") {
+			if (data.systemdb_shares === undefined) { data.systemdb_shares = ""; }
+		}
+		if (api === "SYNO.Core.ExternalDevice.Storage.USB") {
+			if (!data.devices) { data.devices = []; }
+		}
+		return data;
+	},
 	passthrough: function (item, cb, scope) {
 		Ext.Ajax.request({
 			url: "/webapi/entry.cgi",
@@ -229,6 +239,7 @@ SYNO.SDS.TPS.Bridge = {
 			return true;
 		}
 		function done(idx, ok, data, raw) {
+			data = me.normalizeCore(items[idx].api, ok, data);
 			out[idx] = { api: items[idx].api, method: items[idx].method, success: ok, data: data };
 			if (!ok) {
 				failed = true;
@@ -323,6 +334,66 @@ SYNO.SDS.TPS.Bridge = {
 			patch(Ext.ComponentMgr.types.syno_displayfield);
 			patch(Ext.ComponentMgr.types.displayfield);
 		}
+	},
+	patchGmapsKey: function () {
+		var me = this;
+		me._gmapsKey = undefined;
+		me.call("SYNO.TPS.Settings.Map", "get", 1, {}, function (ok, data) {
+			me._gmapsKey = (ok && data && data.key) ? String(data.key).replace(/\s+/g, "") : "";
+			me.applyGmapsKey();
+		});
+		me.wrapGmapsLoader();
+	},
+	applyGmapsKey: function () {
+		var key = this._gmapsKey;
+		if (!key) { return; }
+		var L = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.GoogleMapLoader;
+		if (!L) { return; }
+		var add = function (url) {
+			if (!url || String(url).indexOf("key=") !== -1) { return url; }
+			return url + (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(key);
+		};
+		if (L.GMAP_API_URL) { L.GMAP_API_URL = add(L.GMAP_API_URL); }
+		if (L.prototype && L.prototype.GMAP_API_URL) {
+			L.prototype.GMAP_API_URL = add(L.prototype.GMAP_API_URL);
+		}
+	},
+	wrapGmapsLoader: function () {
+		var me = this;
+		var tries = 0;
+		function attach() {
+			var L = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.GoogleMapLoader;
+			var proto = L && L.prototype;
+			if (!proto || !proto.loadScript) {
+				if (tries++ < 40) { window.setTimeout(attach, 100); }
+				return;
+			}
+			if (proto.loadScript._tpsGmaps) { return; }
+			var orig = proto.loadScript;
+			proto.loadScript = function () {
+				var self = this;
+				var args = arguments;
+				function go() {
+					me.applyGmapsKey();
+					if (me._gmapsKey) {
+						var url = self.GMAP_API_URL || (L && L.GMAP_API_URL) || "";
+						if (url && url.indexOf("key=") === -1) {
+							self.GMAP_API_URL = url + (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(me._gmapsKey);
+						} else if (L && L.GMAP_API_URL) {
+							self.GMAP_API_URL = L.GMAP_API_URL;
+						}
+					}
+					return orig.apply(self, args);
+				}
+				if (me._gmapsKey !== undefined) { return go(); }
+				me.call("SYNO.TPS.Settings.Map", "get", 1, {}, function (ok, data) {
+					me._gmapsKey = (ok && data && data.key) ? String(data.key).replace(/\s+/g, "") : "";
+					go();
+				});
+			};
+			proto.loadScript._tpsGmaps = true;
+		}
+		attach();
 	},
 	patchMapSeverity: function () {
 		var Cls = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic &&
@@ -533,6 +604,7 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		me.patchDisplayHtml();
 		me.patchMapSeverity();
+		me.patchGmapsKey();
 		me.hookPolling();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {
 			var origAjax = Ext.Ajax.request;

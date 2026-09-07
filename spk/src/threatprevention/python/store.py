@@ -210,6 +210,8 @@ def init_db(path=None):
         conn.execute("INSERT OR IGNORE INTO kv(k, v) VALUES (?, ?)", (k, v))
     conn.commit()
     seed_classes(conn)
+    from notify import migrate_filters
+    migrate_filters(conn)
     conn.commit()
     return conn
 
