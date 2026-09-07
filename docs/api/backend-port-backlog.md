@@ -4,7 +4,7 @@ What is still missing or wrong for the official ExtJS app against the Suricata 8
 
 Do **not** implement NFQUEUE / inline IPS unless asked. Do **not** restore a community webpack UI.
 
-Related: [official-app-surface.md](official-app-surface.md), [backend-replaceability.md](../backend-replaceability.md).
+Related: [official-app-surface.md](official-app-surface.md), [backend-replaceability.md](../backend-replaceability.md), [dsm-extjs-sdk.md](../dsm-extjs-sdk.md).
 
 ## Priority
 
@@ -52,8 +52,8 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 | T24 | `Sensor.set` prevention / `security` | stored, not enforced | done (0029): `prevention_enforced:false`, `ips_mode:ids`; no NFQUEUE |
 | T25 | `Settings.Update.Source` ET Pro | licensed feed | done (0029): sidecar + `update-rules.sh`; missing code → `etpro_error` |
 | T26 | `Settings.Storage` USB max | Core compound | done (0029): empty USB/SystemDB shapes; `logStorageMaxLimit` fallback |
-| T27 | Telegram notify | extra Settings tab | done (0031): `Settings.Telegram` + `etc/telegram.conf` |
-| T28 | Extra rule feeds | extra Settings tab | done (0031): `Settings.Feed` + `etc/feeds.json` (additive to ET) |
+| T27 | Telegram notify | Notification fieldset | done (0031+): `Settings.Telegram` + `etc/telegram.conf`; bridge injects `syno_*` fields on official Notify |
+| T28 | Extra rule feeds | extra Settings tab | done (0031+): `Settings.Feed` + `etc/feeds.json` (additive to ET); `TabPanel.add` |
 
 ## P3 — out of scope unless asked
 

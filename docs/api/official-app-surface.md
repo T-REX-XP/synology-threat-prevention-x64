@@ -110,3 +110,17 @@ Google Maps (`SYNO.SDS.TPS.Utils.GoogleMapLoader`) is not a WebAPI. Official URL
 `SYNO.SDS.Chart.LineChart` / `PieChart` / `CreateAxis` are **not** on DSM 7. Packed as `tps-chart.js` JSLoad module.
 
 `SYNO.API.Request.Polling.{List,Register,Unregister}` must stay on the `Request` namespace (do not replace `Request` with a bare function).
+
+## PoC-only APIs (bridge, not official `.lib`)
+
+Official `synoips.js` never calls these. [`tps-bridge.js`](../../spk/src/threatprevention/package/ui/tps-bridge.js) does, using the same `sendWebAPI` mixin. Host widget / JSLoad notes: [dsm-extjs-sdk.md](../dsm-extjs-sdk.md).
+
+| API | Method | Contract |
+| --- | --- | --- |
+| `Settings.Map` | `get` | `{key}` from `etc/gmaps.key` (not packed) |
+| `Settings.Map` | `tile` | GET `z,x,y` → OSM PNG via `/webman/tps-api` (DSM CSP `img-src`) |
+| `Settings.Telegram` | `get` | `{enable_telegram,follow_mail,min_interval_telegram,has_token,chat_id,token:""}` — never returns the bot token |
+| `Settings.Telegram` | `set` | kv + `etc/telegram.conf` (`TOKEN=`/`CHAT=`, `0600`) |
+| `Settings.Telegram` | `test` | `sendMessage`; `{sent:true}` or error 100/104 |
+| `Settings.Feed` | `list` | `{feeds:[{id,name,url,enabled}]}` |
+| `Settings.Feed` | `add`/`update`/`delete` | HTTPS (or RFC1918 HTTP); name `[A-Za-z0-9._-]+`, not `et-*`; writes `etc/feeds.json` |
