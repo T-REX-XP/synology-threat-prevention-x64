@@ -139,6 +139,14 @@ start() {
 		fi
 	fi
 	start_helpers
+	if [ "${suricata_ok}" -ne 1 ]; then
+		# -D sometimes exits before --pidfile is written; recover a live engine.
+		live="$(pgrep -f "${BIN}" | head -1 || true)"
+		if [ -n "${live}" ] && kill -0 "${live}" 2>/dev/null; then
+			echo "${live}" > "${PIDFILE}" 2>/dev/null || true
+			suricata_ok=1
+		fi
+	fi
 	if [ "${suricata_ok}" -eq 1 ]; then
 		write_status running "${IFACE}"
 	else

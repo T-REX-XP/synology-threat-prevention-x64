@@ -19,6 +19,7 @@ YAML_PATH = os.path.join(PKGDEST, "etc", "suricata", "suricata.yaml")
 UPDATE_SCRIPT = os.path.join(PKGDEST, "scripts", "update-rules.sh")
 if not os.path.isfile(UPDATE_SCRIPT):
     UPDATE_SCRIPT = "/var/packages/ThreatPrevention/scripts/update-rules.sh"
+SURICATA_BIN = os.path.join(PKGDEST, "bin", "suricata")
 SURICATASC = os.path.join(PKGDEST, "bin", "suricatasc")
 SURICATA_SOCKET = os.path.join(PKGVAR, "suricata.socket")
 TPSWEB_PORT = int(os.environ.get("TPS_PORT", "19557"))

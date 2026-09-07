@@ -13,6 +13,28 @@ REV_RE = re.compile(r"\brev\s*:\s*(\d+)\s*;", re.I)
 MSG_RE = re.compile(r'\bmsg\s*:\s*"([^"]*)"', re.I)
 CLASS_RE = re.compile(r"\bclasstype\s*:\s*([^;]+)\s*;", re.I)
 PROTO_RE = re.compile(r"^(?:alert|drop|pass|reject)\s+(\S+)", re.I)
+HEADER_RE = re.compile(
+    r"^(?:alert|drop|pass|reject)\s+\S+\s+(\S+)\s+(\S+)\s+->\s+(\S+)\s+(\S+)",
+    re.I,
+)
+REF_RE = re.compile(r"\breference\s*:\s*([^,;]+)\s*,\s*([^;]+)\s*;", re.I)
+
+
+def parse_refs(raw):
+    refs = []
+    for match in REF_RE.finditer(raw or ""):
+        refs.append({
+            "ref_system_name": match.group(1).strip().lower(),
+            "ref_tag": match.group(2).strip(),
+        })
+    return refs
+
+
+def parse_header(raw):
+    match = HEADER_RE.search((raw or "").lstrip("# ").lstrip())
+    if not match:
+        return "any", "any", "any", "any"
+    return match.group(1), match.group(2), match.group(3), match.group(4)
 
 
 def rule_sources():
@@ -78,15 +100,19 @@ def import_rules(conn=None):
                 )
                 cid = conn.execute("SELECT sig_class_id FROM sig_class WHERE sig_class_name=?", (rec["classtype"],)).fetchone()["sig_class_id"]
                 class_ids[rec["classtype"]] = cid
+            ip_src, port_src, ip_dst, port_dst = parse_header(rec["raw"])
+            refs = parse_refs(rec["raw"])
+            ref_text = ";".join("%s,%s" % (x["ref_system_name"], x["ref_tag"]) for x in refs)
             conn.execute(
                 """INSERT OR REPLACE INTO signature(
                     sig_sid, sig_rev, sig_name, sig_class_id, sig_default_action, sig_action,
                     sig_protocol, sig_ip_src, sig_ip_dst, sig_port_src, sig_port_dst,
                     sig_noalert, sig_ref, sig_raw_rule, sig_using)
-                    VALUES (?,?,?,?,?,?,?,'any','any','any','any',0,'',?,1)""",
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,1)""",
                 (
                     rec["sig_sid"], rec["sig_rev"], rec["sig_name"], cid,
-                    rec["action"], rec["action"], rec["sig_protocol"], rec["raw"],
+                    rec["action"], rec["action"], rec["sig_protocol"],
+                    ip_src, ip_dst, port_src, port_dst, ref_text, rec["raw"],
                 ),
             )
             seen += 1

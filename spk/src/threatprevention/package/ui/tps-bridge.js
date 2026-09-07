@@ -332,7 +332,10 @@ SYNO.SDS.TPS.Bridge = {
 			return 0;
 		};
 		Polling.Unregister = function (id) {
-			if (id) { window.clearInterval(id); }
+			if (typeof id === "number") {
+				window.clearInterval(id);
+				return;
+			}
 			if (origUnreg) {
 				try { return origUnreg.apply(this, arguments); } catch (e) { return; }
 			}
@@ -395,6 +398,10 @@ SYNO.SDS.TPS.Bridge = {
 			SYNO.SDS.AppWindow.prototype.pollReg._tpsBridge = true;
 			if (origUnreg && !origUnreg._tpsBridge) {
 				SYNO.SDS.AppWindow.prototype.pollUnreg = function (id) {
+					if (typeof id === "number") {
+						window.clearInterval(id);
+						return;
+					}
 					if (id) { window.clearInterval(id); }
 					try { return origUnreg.apply(this, arguments); } catch (e) { return; }
 				};

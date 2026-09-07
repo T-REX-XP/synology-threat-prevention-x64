@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """SYNO.TPS.* JSON API + static UI on TCP :19557 and a unix socket."""
+import base64
 import json
 import os
 import signal
@@ -21,6 +22,7 @@ from compat import (
     official_event_statistic,
     official_map,
     official_policy_list,
+    official_policy_write,
     official_sensor,
     official_signature_classes,
     official_source,
@@ -28,12 +30,13 @@ from compat import (
     official_trends,
     official_update_status,
     official_variables,
+    classify_update,
     parse_event_id,
     severity_name,
     severity_num,
     to_epoch,
 )
-from compiler import compile_rules, import_rules, reload_suricata
+from compiler import compile_rules, import_rules, parse_header, parse_refs, reload_suricata
 from paths import (
     EXPORT_DIR,
     IFACE_FILE,
@@ -42,6 +45,7 @@ from paths import (
     PKGVAR,
     SENSOR_CONF,
     SOCK_PATH,
+    SURICATA_BIN,
     SURICATA_PID,
     TPSWEB_PID,
     TPSWEB_PORT,
@@ -82,15 +86,108 @@ def err(code, extra=None):
     return body
 
 
+def _pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _find_suricata_pid():
+    proc = "/proc"
+    try:
+        names = os.listdir(proc)
+    except OSError:
+        return 0
+    for name in names:
+        if not name.isdigit():
+            continue
+        try:
+            cmd = open(os.path.join(proc, name, "cmdline"), "rb").read().replace(b"\x00", b" ")
+        except OSError:
+            continue
+        if b"/suricata" in cmd or cmd.startswith(b"suricata"):
+            return int(name)
+    return 0
+
+
 def engine_status():
     if os.path.isfile(SURICATA_PID):
         try:
             pid = int(open(SURICATA_PID).read().strip() or "0")
-            os.kill(pid, 0)
-            return "running", pid
+            if _pid_alive(pid):
+                return "running", pid
         except (ValueError, OSError):
             pass
+    pid = _find_suricata_pid()
+    if pid:
+        try:
+            with open(SURICATA_PID, "w") as fh:
+                fh.write("%s\n" % pid)
+        except OSError:
+            pass
+        return "running", pid
     return "stopped", 0
+
+
+def _capture_iface():
+    if os.path.isfile(IFACE_FILE):
+        try:
+            text = open(IFACE_FILE, encoding="utf-8", errors="replace").read().strip()
+            if text:
+                return text.split()[0]
+        except OSError:
+            pass
+    return "ovs_eth0"
+
+
+def start_engine():
+    st, _pid = engine_status()
+    if st == "running":
+        return True
+    if os.path.isfile(SURICATA_PID):
+        try:
+            os.remove(SURICATA_PID)
+        except OSError:
+            pass
+    if not os.path.isfile(SURICATA_BIN):
+        return False
+    iface = _capture_iface()
+    logdir = os.path.join(PKGVAR, "log")
+    try:
+        os.makedirs(logdir, exist_ok=True)
+    except OSError:
+        pass
+    cmd = [
+        SURICATA_BIN, "-c", YAML_PATH, "--pidfile", SURICATA_PID,
+        "-D", "-i", iface, "-l", logdir, "--set", "af-packet.0.interface=" + iface,
+    ]
+    try:
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    for _ in range(20):
+        time.sleep(0.5)
+        if engine_status()[0] == "running":
+            return True
+    return engine_status()[0] == "running"
+
+
+def stop_engine():
+    st, pid = engine_status()
+    if st == "running" and pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    if os.path.isfile(SURICATA_PID):
+        try:
+            os.remove(SURICATA_PID)
+        except OSError:
+            pass
 
 
 def read_sensor():
@@ -118,7 +215,18 @@ def read_sensor():
     )
     ui = kv_peek("engine_ui_status")
     st, pid = engine_status()
-    if ui:
+    if st == "running":
+        if ui:
+            try:
+                conn = connect()
+                try:
+                    kv_set(conn, "engine_ui_status", "")
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+    elif ui:
         st = ui
     return official_sensor(cfg, st, pid, cfg.get("interface_list") or "", list_ifaces())
 
@@ -199,6 +307,49 @@ def list_ifaces():
     return names
 
 
+def probe_rule_update(last_updated=""):
+    """HEAD ET Open tarball. Returns (reachable, remote_newer)."""
+    urls = (
+        "https://rules.emergingthreats.net/open/suricata-8.0.6/emerging.rules.tar.gz",
+        "https://rules.emergingthreats.net/open/suricata-8.0/emerging.rules.tar.gz",
+        "https://rules.emergingthreats.net/open/suricata/emerging.rules.tar.gz",
+    )
+    try:
+        from urllib.request import Request, urlopen
+    except ImportError:
+        return False, False
+    local = 0
+    if last_updated:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%a, %d %b %Y %H:%M:%S %Z"):
+            try:
+                local = int(time.mktime(time.strptime(last_updated, fmt)))
+                break
+            except ValueError:
+                continue
+    catalog = os.path.join(PKGVAR, "rules", "catalog.rules")
+    if not local and os.path.isfile(catalog):
+        try:
+            local = int(os.path.getmtime(catalog))
+        except OSError:
+            pass
+    for url in urls:
+        try:
+            req = Request(url, method="HEAD")
+            req.add_header("User-Agent", "ThreatPrevention-PoC")
+            with urlopen(req, timeout=20) as resp:
+                lm = resp.headers.get("Last-Modified") or ""
+            remote = 0
+            if lm:
+                try:
+                    remote = int(time.mktime(time.strptime(lm, "%a, %d %b %Y %H:%M:%S %Z")))
+                except ValueError:
+                    remote = 0
+            return True, bool(remote and local and remote > local + 60)
+        except Exception:
+            continue
+    return False, False
+
+
 def start_job(initial=None):
     global JOB_SEQ
     JOB_SEQ += 1
@@ -218,7 +369,25 @@ def ensure_export_dir():
         os.makedirs(EXPORT_DIR, exist_ok=True)
     except OSError:
         pass
-    return EXPORT_DIR
+    real = os.path.realpath(EXPORT_DIR)
+    for root in ("/volume1/homes", "/var/services/homes"):
+        if not os.path.isdir(root):
+            continue
+        try:
+            names = sorted(os.listdir(root))
+        except OSError:
+            continue
+        for name in names:
+            if name.startswith(".") or name.startswith("@"):
+                continue
+            dest = os.path.join(root, name, "ThreatPrevention")
+            try:
+                os.makedirs(dest, exist_ok=True)
+            except OSError:
+                continue
+            if os.access(dest, os.W_OK):
+                return os.path.realpath(dest)
+    return real
 
 
 def event_row(r, conn=None):
@@ -279,7 +448,16 @@ def handle(api, method, params, conn):
     if api == "SYNO.TPS.Sensor" and method == "set":
         write_sensor(params)
         kv_set(conn, "default_detect", "1" if _truth(params.get("default_detect", True)) else "0")
-        conn.commit()
+        if _truth(params.get("enable_sensor", True)):
+            kv_set(conn, "engine_ui_status", "engine_init")
+            conn.commit()
+            if not start_engine():
+                kv_set(conn, "engine_ui_status", "")
+                conn.commit()
+        else:
+            stop_engine()
+            kv_set(conn, "engine_ui_status", "")
+            conn.commit()
         return ok(read_sensor())
     if api == "SYNO.TPS.Sensor.Variables" and method == "get":
         return ok(sensor_vars())
@@ -508,24 +686,42 @@ def signature_rules(conn, p):
         + sql + " ORDER BY s.sig_sid LIMIT ? OFFSET ?",
         args + [limit, offset],
     ):
+        raw = r["sig_raw_rule"] or ""
+        ip_src, port_src, ip_dst, port_dst = parse_header(raw)
+        if (r["sig_ip_src"] or "") not in ("", "any"):
+            ip_src = r["sig_ip_src"]
+        if (r["sig_ip_dst"] or "") not in ("", "any"):
+            ip_dst = r["sig_ip_dst"]
+        if (r["sig_port_src"] or "") not in ("", "any"):
+            port_src = r["sig_port_src"]
+        if (r["sig_port_dst"] or "") not in ("", "any"):
+            port_dst = r["sig_port_dst"]
+        refs = parse_refs(raw)
+        if not refs and r["sig_ref"]:
+            for part in str(r["sig_ref"]).split(";"):
+                if "," not in part:
+                    continue
+                system, tag = part.split(",", 1)
+                refs.append({"ref_system_name": system.strip().lower(), "ref_tag": tag.strip()})
+        msg = r["sig_name"] or ""
         rules.append({
             "sig_sid": r["sig_sid"],
             "sid": r["sig_sid"],
             "sig_rev": r["sig_rev"],
-            "sig_name": r["sig_name"],
-            "name": r["sig_name"],
-            "msg": r["sig_name"],
-            "encode": False,
+            "sig_name": msg,
+            "name": msg,
+            "msg": base64.b64encode(msg.encode("utf-8")).decode("ascii"),
+            "encode": True,
             "action": r["eff"],
             "sig_class_id": r["sig_class_id"],
             "class_name": r["sig_class_name"],
             "sig_protocol": r["sig_protocol"],
             "ip_proto": r["sig_protocol"] or "ip",
-            "ip_src": r["sig_ip_src"] or "any",
-            "ip_dst": r["sig_ip_dst"] or "any",
-            "port_src": r["sig_port_src"] or "any",
-            "port_dst": r["sig_port_dst"] or "any",
-            "references": [],
+            "ip_src": ip_src or "any",
+            "ip_dst": ip_dst or "any",
+            "port_src": port_src or "any",
+            "port_dst": port_dst or "any",
+            "references": refs,
         })
     return ok({"rules": rules, "total": total})
 
@@ -567,12 +763,17 @@ def signature_policy(conn, method, p):
     if method in ("add", "set", "update"):
         if p.get("policy"):
             _apply_policy_batch(conn, p["policy"])
-        else:
-            _apply_policy_item(conn, p)
+            conn.commit()
+            compile_rules(conn)
+            reload_suricata()
+            return ok(official_policy_write(False))
+        need_force, applied = _policy_add_or_update(conn, method, p)
+        if not applied:
+            return ok(official_policy_write(True))
         conn.commit()
-        n = compile_rules(conn)
+        compile_rules(conn)
         reload_suricata()
-        return ok({"compiled": n})
+        return ok(official_policy_write(need_force))
     if method == "delete":
         if p.get("classes") or p.get("signatures"):
             for cls in p.get("classes") or []:
@@ -623,33 +824,104 @@ def _map_policy_action(action):
     return a or "alert"
 
 
+def _norm_ip(value):
+    text = str(value or "").strip()
+    if text.lower() in ("", "any", "0", "0.0.0.0"):
+        return ""
+    return text
+
+
+def _has_ip_filter(p):
+    return bool(_norm_ip(p.get("ip_src") or p.get("ip_src_str")) or _norm_ip(p.get("ip_dst") or p.get("ip_dst_str")))
+
+
+def _sig_meta(conn, sid):
+    row = conn.execute(
+        "SELECT sig_class_id, sig_name FROM signature WHERE sig_sid=?",
+        (int(sid or 0),),
+    ).fetchone()
+    if not row:
+        return 0, ""
+    return row["sig_class_id"], row["sig_name"] or ""
+
+
+def _policy_row_exists(conn, sid, ip_src, ip_dst):
+    if ip_src or ip_dst:
+        return bool(conn.execute(
+            "SELECT id FROM policy_filter WHERE raw_sid=? AND ip_src_str=? AND ip_dst_str=?",
+            (sid, ip_src, ip_dst),
+        ).fetchone())
+    if conn.execute("SELECT raw_sid FROM policy_signature WHERE raw_sid=?", (sid,)).fetchone():
+        return True
+    return bool(conn.execute("SELECT id FROM policy_filter WHERE raw_sid=?", (sid,)).fetchone())
+
+
+def _delete_policy_row(conn, sid, ip_src, ip_dst):
+    if ip_src or ip_dst:
+        conn.execute(
+            "DELETE FROM policy_filter WHERE raw_sid=? AND ip_src_str=? AND ip_dst_str=?",
+            (sid, ip_src, ip_dst),
+        )
+        return
+    conn.execute("DELETE FROM policy_signature WHERE raw_sid=?", (sid,))
+    conn.execute("DELETE FROM policy_filter WHERE raw_sid=?", (sid,))
+
+
+def _policy_add_or_update(conn, method, p):
+    sid = int(p.get("sid") or p.get("raw_sid") or p.get("sig_sid") or 0)
+    ip_src = _norm_ip(p.get("ip_src") or p.get("ip_src_str"))
+    ip_dst = _norm_ip(p.get("ip_dst") or p.get("ip_dst_str"))
+    force = _truth(p.get("force"))
+    old_sid = int(p.get("old_sid") or 0) if method == "update" else 0
+    old_ip_src = _norm_ip(p.get("old_ip_src")) if method == "update" else ""
+    old_ip_dst = _norm_ip(p.get("old_ip_dst")) if method == "update" else ""
+    same_as_old = method == "update" and sid == old_sid and ip_src == old_ip_src and ip_dst == old_ip_dst
+    conflict = _policy_row_exists(conn, sid, ip_src, ip_dst) and not same_as_old
+    if conflict and not force:
+        return True, False
+    if method == "update" and old_sid:
+        _delete_policy_row(conn, old_sid, old_ip_src, old_ip_dst)
+    if force:
+        _delete_policy_row(conn, sid, ip_src, ip_dst)
+    _apply_policy_item(conn, p)
+    return False, True
+
+
 def _apply_policy_item(conn, p):
-    typ = p.get("type") or ("filter" if p.get("ip_src_str") or p.get("ip_src") else ("signature" if p.get("raw_sid") or p.get("sid") else "class"))
     action = _map_policy_action(p.get("action") or "alert")
     comment = p.get("comment") or ""
-    if typ == "class" or p.get("class_name"):
+    sid = int(p.get("raw_sid") or p.get("sig_sid") or p.get("sid") or 0)
+    typ = p.get("type")
+    if typ in (None, "", 0):
+        if _has_ip_filter(p):
+            typ = "filter"
+        elif sid:
+            typ = "signature"
+        else:
+            typ = "class"
+    if typ in ("class", 1, "1") or (p.get("class_name") and not sid and typ != "filter"):
         cid = int(p.get("sig_class_id") or 0) or _class_id_by_name(conn, p.get("class_name") or p.get("name") or "")
         if cid:
             conn.execute("INSERT OR REPLACE INTO policy_class(sig_class_id, action, comment) VALUES (?,?,?)", (cid, action, comment))
         return
-    if typ == "signature" or (p.get("raw_sid") or p.get("sid")):
-        sid = int(p.get("raw_sid") or p.get("sig_sid") or p.get("sid") or 0)
+    cid, name = _sig_meta(conn, sid)
+    cid = int(p.get("sig_class_id") or 0) or cid
+    name = p.get("sig_name") or p.get("name") or name
+    if typ in ("filter", 3, "3") or _has_ip_filter(p):
+        ip_src = _norm_ip(p.get("ip_src_str") or p.get("ip_src"))
+        ip_dst = _norm_ip(p.get("ip_dst_str") or p.get("ip_dst"))
         conn.execute(
-            "INSERT OR REPLACE INTO policy_signature(raw_sid, sig_class_id, sig_name, action, comment) VALUES (?,?,?,?,?)",
-            (sid, int(p.get("sig_class_id") or 0), p.get("sig_name") or p.get("name") or "", action, comment),
+            """INSERT INTO policy_filter(raw_sid, filter_sid, filter_rev, sig_class_id, sig_name, action, ip_src, ip_dst, ip_src_str, ip_dst_str, comment)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                sid, 0, 0, cid, name, action,
+                ip_to_int(ip_src), ip_to_int(ip_dst), ip_src, ip_dst, comment,
+            ),
         )
         return
     conn.execute(
-        """INSERT INTO policy_filter(raw_sid, filter_sid, filter_rev, sig_class_id, sig_name, action, ip_src, ip_dst, ip_src_str, ip_dst_str, comment)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            int(p.get("raw_sid") or p.get("sid") or 0), 0, 0, int(p.get("sig_class_id") or 0),
-            p.get("sig_name") or p.get("name") or "", action,
-            ip_to_int(p.get("ip_src_str") or p.get("ip_src") or ""),
-            ip_to_int(p.get("ip_dst_str") or p.get("ip_dst") or ""),
-            str(p.get("ip_src_str") or p.get("ip_src") or ""),
-            str(p.get("ip_dst_str") or p.get("ip_dst") or ""), comment,
-        ),
+        "INSERT OR REPLACE INTO policy_signature(raw_sid, sig_class_id, sig_name, action, comment) VALUES (?,?,?,?,?)",
+        (sid, cid, name, action, comment),
     )
 
 
@@ -743,9 +1015,18 @@ def settings_update(conn, api, method, p):
             def _check():
                 c = connect()
                 try:
-                    kv_set(c, "update_status", "up_to_date")
+                    marker = os.path.join(PKGVAR, "rules", ".from-suricata-update")
+                    last = kv_get(c, "last_updated", "")
+                    ever = os.path.isfile(marker) or bool(last)
+                    reachable, newer = probe_rule_update(last)
+                    status = classify_update(ever, reachable, newer)
+                    kv_set(c, "update_status", status)
                     c.commit()
-                    JOBS[tid]["status"] = "up_to_date"
+                    JOBS[tid]["status"] = status
+                except Exception:
+                    kv_set(c, "update_status", "connect_error")
+                    JOBS[tid]["status"] = "connect_error"
+                    c.commit()
                 finally:
                     c.close()
 
@@ -915,7 +1196,9 @@ def stat_device(conn, method, p):
                 (int(time.time()) - 7 * 86400, int(p.get("limit") or 20)),
             )
         ]
-        return ok({"devices": rows})
+        return ok({"devices": [
+            dict(r, name=r["device_name"], loading=r.get("count") or 0) for r in rows
+        ]})
     if method == "get":
         ip = p.get("ip") or ""
         n = conn.execute("SELECT COUNT(*) n FROM event WHERE ip_src_str=?", (ip,)).fetchone()["n"]

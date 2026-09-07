@@ -542,6 +542,21 @@ def official_storage(size_bytes, limit_mb, status, percent=100):
     }
 
 
+def official_policy_write(need_force=False):
+    return {"need_force": bool(need_force)}
+
+
+def classify_update(ever_updated, reachable, remote_newer):
+    """Official updater statuses the ExtJS poll stops on."""
+    if not ever_updated:
+        return "new_version"
+    if not reachable:
+        return "connect_error"
+    if remote_newer:
+        return "new_version"
+    return "up_to_date"
+
+
 def official_update_status(status, last_updated="", remote_version="", task_id=""):
     inner = {
         "status": status or "up_to_date",
@@ -563,9 +578,12 @@ def official_devices(rows, default_detect=True):
             "mac": r.get("mac") or "",
             "device_name": r.get("device_name") or r.get("mac") or "",
             "detect": bool(r.get("detect", True)),
+            "name": r.get("device_name") or r.get("mac") or "",
+            "hostname": r.get("hostname") or r.get("device_name") or "",
             "loading": r.get("loading_score") if r.get("loading_score") is not None else r.get("loading") or 0,
             "loading_score": r.get("loading_score") or 0,
             "online": bool(r.get("online")),
+            "is_online": bool(r.get("online")),
             "mesh_re": False,
         })
     return {
