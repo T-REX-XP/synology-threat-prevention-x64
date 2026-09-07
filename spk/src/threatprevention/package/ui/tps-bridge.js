@@ -321,23 +321,77 @@ SYNO.SDS.TPS.Bridge = {
 		var sep = field.labelSeparator;
 		if (sep === undefined || sep === null) { sep = ""; }
 		var markup = html + sep;
-		var el = field.labelEl;
-		if (!el && field.el && field.el.down) {
-			el = field.el.down("label.x-form-item-label") ||
-				field.el.down(".x-form-item-label") ||
-				field.el.down("label");
+		var node = null;
+		try {
+			node = this.findOfficialLabelNode(field);
+		} catch (e) {
+			node = null;
 		}
-		if (!el && field.itemCt && field.itemCt.down) {
-			el = field.itemCt.down("label.x-form-item-label") ||
-				field.itemCt.down(".x-form-item-label") ||
-				field.itemCt.down("label");
+		if (node) { node.innerHTML = markup; }
+	},
+	findOfficialLabelNode: function (field) {
+		/* Ext 3.4 Element.up → findParentNode does this.dom.parentNode with no
+		   null check. PercentageField afterrender can run while el exists as an
+		   Element wrapper but el.dom is still unset (or already cleared). */
+		function nodeOf(x) {
+			if (!x) { return null; }
+			if (x.nodeType === 1) { return x; }
+			return (x.dom && x.dom.nodeType === 1) ? x.dom : null;
 		}
-		if (!el && field.el && field.el.up) {
-			var item = field.el.up(".x-form-item");
-			el = item && item.down && (item.down("label.x-form-item-label") ||
-				item.down(".x-form-item-label") || item.down("label"));
+		function firstLabel(root) {
+			var n = nodeOf(root);
+			if (!n || !n.querySelector) { return null; }
+			return n.querySelector("label.x-form-item-label") ||
+				n.querySelector(".x-form-item-label") ||
+				n.querySelector("label");
 		}
-		if (el && el.dom) { el.dom.innerHTML = markup; }
+		function closestFormItem(el) {
+			var p = nodeOf(el);
+			while (p && p.nodeType === 1) {
+				var cn = " " + (p.className || "") + " ";
+				if (cn.indexOf(" x-form-item ") !== -1) { return p; }
+				p = p.parentNode;
+			}
+			return null;
+		}
+		function fromAnchor(el) {
+			var start = nodeOf(el), p, sib, hit;
+			if (!start) { return null; }
+			hit = firstLabel(closestFormItem(start));
+			if (hit) { return hit; }
+			sib = start.previousSibling;
+			while (sib) {
+				if (sib.nodeType === 1 && (sib.tagName === "LABEL" ||
+						(sib.className && String(sib.className).indexOf("label") !== -1))) {
+					return sib;
+				}
+				sib = sib.previousSibling;
+			}
+			p = start.parentNode;
+			return firstLabel(p) || firstLabel(p && p.parentNode);
+		}
+		var found = nodeOf(field.labelEl);
+		if (found && found.tagName === "LABEL") { return found; }
+		found = firstLabel(field.labelEl) || firstLabel(field.itemCt) ||
+			firstLabel(field.container);
+		if (found) { return found; }
+		var id = field.id;
+		if (id && document.getElementById) {
+			found = document.getElementById(id + "-labelEl");
+			if (found) { return found; }
+			found = document.getElementById("x-form-el-" + id);
+			if (found) {
+				found = firstLabel(closestFormItem(found) || found.parentNode) ||
+					firstLabel(found);
+				if (found) { return found; }
+			}
+			try {
+				found = document.querySelector('label[for="' + String(id).replace(/\\/g, "").replace(/"/g, "") + '"]');
+				if (found) { return found; }
+			} catch (e) { /* ignore bad id */ }
+		}
+		return fromAnchor(field.el) || fromAnchor(field.container) ||
+			fromAnchor(field.getEl && field.getEl());
 	},
 	patchDisplayHtml: function () {
 		/* Official Overview injects <a class="pathlink"> into syno_displayfield.
@@ -491,8 +545,18 @@ SYNO.SDS.TPS.Bridge = {
 		};
 		var origInit = NP.prototype.initComponent;
 		NP.prototype.initComponent = function () {
+			var panel = this;
 			if (origInit) { origInit.apply(this, arguments); }
 			me.hookNotificationApply(this);
+			this.on("afterrender", function () { me.clearTelegramDirty(panel); }, this, {single: true});
+		};
+		var origProc = NP.prototype.processReturnData ||
+			(NP.superclass && NP.superclass.processReturnData);
+		NP.prototype.processReturnData = function () {
+			var ret;
+			if (origProc) { ret = origProc.apply(this, arguments); }
+			me.loadTelegramInto(this);
+			return ret;
 		};
 		var origLoadSys = NP.prototype.loadSystemNotificationConfig;
 		if (origLoadSys) {
@@ -514,7 +578,7 @@ SYNO.SDS.TPS.Bridge = {
 			items: [
 				{xtype: "syno_displayfield", value: '<font style="font-weight:bold;">Telegram</font>'},
 				{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot"},
-				{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, emptyText: "Unchanged if empty"},
+				{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1},
 				{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1},
 				{xtype: "syno_numberfield", name: "min_interval_telegram", fieldLabel: "Minimum interval (minutes)", indent: 1, maxValue: 60 * 24, allowDecimals: false, minValue: 0},
 				{xtype: "syno_checkbox", name: "telegram_follow_mail", boxLabel: "Use the same classes as email", indent: 1},
@@ -566,10 +630,26 @@ SYNO.SDS.TPS.Bridge = {
 			chat_id: val("tg_chat_id", "") || ""
 		};
 	},
+	clearTelegramDirty: function (panel) {
+		var f = panel && panel.getForm && panel.getForm();
+		if (!f) { return; }
+		Ext.each(this.telegramNames, function (name) {
+			var fld = f.findField(name);
+			if (!fld) { return; }
+			var v = fld.getValue ? fld.getValue() : fld.value;
+			fld.originalValue = v;
+			if (fld.startValue !== undefined) { fld.startValue = v; }
+			if (fld.wasDirty) { fld.wasDirty = false; }
+		});
+	},
 	loadTelegramInto: function (panel) {
+		var me = this;
 		this.call("SYNO.TPS.Settings.Telegram", "get", 1, {}, function (ok, data) {
 			if (panel.el && panel.el.unmask) { panel.el.unmask(); }
-			if (!ok || !data) { return; }
+			if (!ok || !data) {
+				me.clearTelegramDirty(panel);
+				return;
+			}
 			var f = panel.getForm && panel.getForm();
 			if (!f) { return; }
 			function set(name, v) {
@@ -583,13 +663,16 @@ SYNO.SDS.TPS.Bridge = {
 			var sec = Number(data.min_interval_telegram);
 			if (!isFinite(sec) || sec < 0) { sec = 300; }
 			set("min_interval_telegram", Math.round(sec / 60));
+			me.clearTelegramDirty(panel);
 		});
 	},
 	saveTelegramFrom: function (panel) {
+		var me = this;
 		this.call("SYNO.TPS.Settings.Telegram", "set", 1, this.telegramFromForm(panel), function (ok) {
 			var f = panel.getForm && panel.getForm();
 			var token = f && f.findField("tg_token");
 			if (ok && token && token.setValue) { token.setValue(""); }
+			me.clearTelegramDirty(panel);
 		});
 	},
 	testTelegram: function (panel) {
