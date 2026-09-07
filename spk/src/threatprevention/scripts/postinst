@@ -13,5 +13,10 @@ if [ -f "${RULES_TGZ}" ] && [ ! -d "${RULES_DIR}/rules" ]; then
 	cp -f "${PKGDEST}/etc/rules/syno-custom-events.rules" "${RULES_DIR}/rules/" 2>/dev/null || true
 	cp -f "${PKGDEST}/etc/rules/classification.config" "${RULES_DIR}/" 2>/dev/null || true
 	cp -f "${PKGDEST}/etc/rules/reference.config" "${RULES_DIR}/" 2>/dev/null || true
+	# Bootstrap a single rules file so yaml can switch to suricata-update output later.
+	mkdir -p "${PKGVAR}/rules"
+	if [ ! -s "${PKGVAR}/rules/suricata.rules" ]; then
+		cat "${RULES_DIR}/rules/"*.rules > "${PKGVAR}/rules/suricata.rules" 2>/dev/null || true
+	fi
 fi
 exit 0

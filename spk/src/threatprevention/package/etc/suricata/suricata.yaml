@@ -53,12 +53,10 @@ outputs:
       filename: fast.log
 
 af-packet:
-  - interface: eth0
-    cluster-id: 99
-    cluster-type: cluster_flow
+  - interface: ovs_eth0
     defrag: yes
     use-mmap: yes
-    tpacket-v3: yes
+    # DSM 7.4 SA6400 is Linux 5.10; PACKET_FANOUT (cluster_flow) is rejected.
 
 nfq:
   mode: accept
@@ -68,10 +66,9 @@ unix-command:
   enabled: yes
   filename: /var/packages/ThreatPrevention/var/suricata.socket
 
-default-rule-path: /var/packages/ThreatPrevention/target/etc/rules/suricata/rules
+default-rule-path: /var/packages/ThreatPrevention/var/rules
 rule-files:
-  - /var/packages/ThreatPrevention/target/etc/rules/syno-custom-events.rules
-  - "*.rules"
+  - suricata.rules
 
 classification-file: /var/packages/ThreatPrevention/target/etc/rules/classification.config
 reference-config-file: /var/packages/ThreatPrevention/target/etc/rules/reference.config

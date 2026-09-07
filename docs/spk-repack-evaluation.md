@@ -52,7 +52,16 @@ Codecs also decrypts official SPKs and patches `libsynoame-license.so`. **That p
 
 **Is not:** a drop-in clone of SRM Threat Prevention (no WebAPI, no ExtJS UI, no `synodb`, no NFQUEUE autowiring). Inline IPS still needs the NAS to be a gateway and extra nftables — the stock start script uses **AF_PACKET IDS** on the first non-loopback interface.
 
-**glibc:** binary was built on Ubuntu 24.04 (glibc 2.39). If `synopkg` installs but `suricata` fails with GLIBC_2.3x, rebuild against pkgscripts-ng / older libc.
+**glibc / libs (fixed in 8.0.6-0005):** Ubuntu 24.04 binary needs GLIBC 2.38/2.39; DSM 7.4 SA6400 has glibc 2.36 and no liblz4. The packer vendors Ubuntu libs plus `ld-linux` and sets an absolute rpath under `/var/packages/ThreatPrevention/target/lib`.
+
+**AF_PACKET:** unsigned DSM 7 packages cannot declare `run-as: root` or file capabilities in `conf/privilege` (error 319). After install, apply once as admin:
+
+```sh
+sudo setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep /var/packages/ThreatPrevention/target/bin/suricata
+sudo synopkg start ThreatPrevention
+```
+
+Default capture iface on SA6400 is `ovs_eth0` (eth0 is an OVS slave).
 
 ## Pack command
 

@@ -1,0 +1,13 @@
+{
+	".url": {
+		"SYNO.SDS.ThreatPrevention.Application": {
+			"type": "url",
+			"allUsers": false,
+			"title": "Threat Prevention",
+			"desc": "Suricata 8 IDS status and recent alerts",
+			"icon": "images/threatprevention_{0}.png",
+			"url": "/webman/3rdparty/ThreatPrevention/index.html",
+			"grantPrivilege": "admin"
+		}
+	}
+}

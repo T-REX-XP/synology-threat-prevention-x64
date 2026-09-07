@@ -7,12 +7,21 @@ YAML="${PKGDEST}/etc/suricata/suricata.yaml"
 LOGDIR="${PKGVAR}/log"
 
 pick_iface() {
-	# First non-loopback interface; override with /var/packages/ThreatPrevention/etc/interface
+	# Override: echo ovs_eth0 > /var/packages/ThreatPrevention/etc/interface
 	if [ -f /var/packages/ThreatPrevention/etc/interface ]; then
 		cat /var/packages/ThreatPrevention/etc/interface
 		return
 	fi
-	ip -o link show 2>/dev/null | awk -F': ' '$2 !~ /^(lo|docker|veth|br-|ovs-system)/ { print $2; exit }' | cut -d'@' -f1
+	# SA6400 / DSM OVS: eth0 is a slave; LAN is ovs_eth0.
+	if ip link show ovs_eth0 >/dev/null 2>&1; then
+		echo ovs_eth0
+		return
+	fi
+	ip -o link show 2>/dev/null | awk -F': ' '
+		$2 ~ /^(lo|sit0|docker|veth|br-|ovs-system)/ { next }
+		$0 ~ / master / { next }
+		{ print $2; exit }
+	' | cut -d'@' -f1
 }
 
 start() {
@@ -26,9 +35,36 @@ start() {
 		echo "no capture interface" >&2
 		return 1
 	fi
-	# IDS (af-packet). NFQUEUE IPS is not enabled in this unsigned package.
-	"${BIN}" -c "${YAML}" --pidfile "${PIDFILE}" -D -i "${IFACE}" \
-		-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}"
+	# Drop a leftover pid file from a failed start (Suricata refuses to run otherwise).
+	if [ -f "${PIDFILE}" ]; then
+		oldpid="$(cat "${PIDFILE}" 2>/dev/null || true)"
+		if [ -z "${oldpid}" ] || ! kill -0 "${oldpid}" 2>/dev/null; then
+			rm -f "${PIDFILE}"
+		fi
+	fi
+	echo "starting suricata on ${IFACE}" >&2
+	# IDS (af-packet). Capture needs file caps (unsigned SPK cannot declare run-as root).
+	if command -v setcap >/dev/null 2>&1; then
+		setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep "${BIN}" 2>/dev/null || true
+	fi
+	chmod 755 "${LOGDIR}" 2>/dev/null || true
+	chmod 644 "${LOGDIR}/eve.json" "${LOGDIR}/suricata.log" 2>/dev/null || true
+	if ! "${BIN}" -c "${YAML}" --pidfile "${PIDFILE}" -D -i "${IFACE}" \
+		-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}"; then
+		echo "suricata failed to start (see ${LOGDIR}/suricata.log)" >&2
+		write_status failed "${IFACE}"
+		return 1
+	fi
+	i=0
+	while [ "${i}" -lt 45 ]; do
+		if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+			return 0
+		fi
+		sleep 1
+		i=$((i + 1))
+	done
+	echo "suricata did not daemonize (see ${LOGDIR}/suricata.log)" >&2
+	return 1
 }
 
 stop() {
@@ -47,10 +83,9 @@ status() {
 }
 
 case "$1" in
-	start) start ;;
-	stop) stop ;;
+	start) start; exit $? ;;
+	stop) stop; exit $? ;;
 	status) status ;;
 	log) exit 1 ;;
 	*) exit 1 ;;
 esac
-exit 0
