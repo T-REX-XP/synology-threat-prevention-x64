@@ -42,17 +42,17 @@ Codecs also decrypts official SPKs and patches `libsynoame-license.so`. **That p
 | Keep | Drop |
 | --- | --- |
 | ET Open tarball, `signature.conf`, classification, thresholds, custom pass SID 1 | `bin/synosuricata`, `libsynotps`, `synotpsd`, all `SYNO.TPS.*.so` (aarch64) |
-| Package icons | ExtJS `ui/synoips.js` (copyright + SRM-only) |
+| Package icons; official UI for **research PoC only** (8.0.6-0011) | aarch64 `SYNO.TPS.*.so`, `synosuricata`, `libsynotps` |
 | Policy semantics | Upstart, USB swap, `core_pattern`, ECM/NSS AppArmor |
 | | `support_topology=router bridge`, `start_dep_services=pgsql` |
 
 ## What this first SPK is (and is not)
 
-**Start Menu:** DSM only shows a launcher when `INFO` has `dsmuidir="ui"` plus `package.tgz/ui/config`. 8.0.6-0009 is a native SPA (Overview, Events, Policy, Statistics, Settings) plus `tpsweb` on port 19557. See [native-app-plan.md](native-app-plan.md).
+**Start Menu / official app:** 8.0.6-0011 packs official ExtJS + a Suricata compatibility layer. Complexity write-up: [backend-replaceability.md](backend-replaceability.md).
 
 **Operator steps** (setcap after every install/upgrade, DSM logout for the tile, `update-rules.sh`): [spk-deploy-and-update.md](spk-deploy-and-update.md).
 
-**Is not:** official ExtJS / `synodb` / NFQUEUE autowiring. Inline IPS still needs the NAS to be a gateway. Default start is **AF_PACKET IDS**.
+**Is not:** a shippable product, PostgreSQL/`synotpsd` parity, or NFQUEUE IPS. Default start is **AF_PACKET IDS**. Official UI in the PoC SPK is research-only.
 
 **glibc / libs (fixed in 8.0.6-0005):** Ubuntu 24.04 binary needs GLIBC 2.38/2.39; DSM 7.4 SA6400 has glibc 2.36 and no liblz4. The packer vendors Ubuntu libs plus `ld-linux` and sets an absolute rpath under `/var/packages/ThreatPrevention/target/lib`.
 

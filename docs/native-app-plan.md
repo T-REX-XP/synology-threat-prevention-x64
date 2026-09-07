@@ -1,6 +1,6 @@
 # Native Threat Prevention desktop app
 
-Implemented in **8.0.6-0010**. Official `synoips.js` / `SYNO.TPS.*.so` are **not** shipped (copyright + aarch64/SRM-only).
+**8.0.6-0010** was the community ExtJS app. **8.0.6-0011** is the research PoC: official `synoips.js` packed from `unpacked/package/ui/` plus `tps-bridge.js` → tpsweb. Official `.so` modules are still aarch64 and are **not** packed. See [backend-replaceability.md](backend-replaceability.md).
 
 Start Menu is a DSM **ExtJS** `type: app` (`threatprevention.js` → `SYNO.SDS.AppWindow`) with the official tab names. It is original community code, not a copy of `synoips.js`. It calls `SYNO.TPS.*` on tpsweb `:19557`. Package Center Open uses `dsmappname` (the ExtJS window), not a standalone HTML URL.
 

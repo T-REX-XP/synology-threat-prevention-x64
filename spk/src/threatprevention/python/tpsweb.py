@@ -12,6 +12,21 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from compat import (
+    coerce_params,
+    flatten_keywords,
+    now_str,
+    official_devices,
+    official_event,
+    official_event_statistic,
+    official_policy_list,
+    official_sensor,
+    official_signature_classes,
+    official_trends,
+    official_variables,
+    parse_event_id,
+    severity_name,
+)
 from compiler import compile_rules, import_rules, reload_suricata
 from paths import (
     IFACE_FILE,
@@ -38,6 +53,8 @@ from store import (
 )
 
 STOP = False
+EVENT_TASKS = {}
+EVENT_TASK_SEQ = 0
 
 
 def _stop(signum, frame):
@@ -84,28 +101,40 @@ def read_sensor():
                 cfg[k.strip()] = v.strip()
     if os.path.isfile(IFACE_FILE):
         cfg["interface_list"] = open(IFACE_FILE).read().strip()
+    cfg["enable_sensor"] = _truth(cfg.get("enable_sensor", True))
+    cfg["enable_prevention"] = _truth(cfg.get("enable_prevention", False))
+    cfg["default_detect"] = _truth(cfg.get("default_detect", True))
+    cfg["enable_auto_export_events_during_postupgrade"] = _truth(
+        cfg.get("enable_auto_export_events_during_postupgrade", False)
+    )
     st, pid = engine_status()
-    return {
-        "enable_sensor": _truth(cfg.get("enable_sensor", True)),
-        "enable_prevention": _truth(cfg.get("enable_prevention", False)),
-        "interface_list": cfg.get("interface_list") or "",
-        "network_security_mode": cfg.get("network_security_mode") or "availability",
-        "default_detect": _truth(cfg.get("default_detect", True)),
-        "status": st,
-        "pid": pid,
-    }
+    return official_sensor(cfg, st, pid, cfg.get("interface_list") or "")
 
 
 def write_sensor(data):
     os.makedirs(PKGETC, exist_ok=True)
-    iface = (data.get("interface_list") or "").strip()
+    raw_iface = data.get("interface_list") or data.get("interfaceList") or ""
+    if isinstance(raw_iface, list):
+        names = []
+        for item in raw_iface:
+            if isinstance(item, dict):
+                if _truth(item.get("enabled", True)):
+                    names.append(item.get("if_id") or item.get("ifname") or "")
+            else:
+                names.append(str(item))
+        iface = " ".join(n for n in names if n)
+    else:
+        iface = str(raw_iface).strip()
     if iface:
         with open(IFACE_FILE, "w") as fh:
-            fh.write(iface + "\n")
+            fh.write(iface.split()[0] + "\n")
     lines = [
         "enable_sensor=%s" % ("yes" if _truth(data.get("enable_sensor", True)) else "no"),
         "enable_prevention=%s" % ("yes" if _truth(data.get("enable_prevention", False)) else "no"),
         "default_detect=%s" % ("yes" if _truth(data.get("default_detect", True)) else "no"),
+        "enable_auto_export_events_during_postupgrade=%s" % (
+            "yes" if _truth(data.get("enable_auto_export_events_during_postupgrade", False)) else "no"
+        ),
         "network_security_mode=%s" % (data.get("network_security_mode") or "availability"),
         "interface_list=%s" % iface,
     ]
@@ -157,19 +186,19 @@ def event_row(r, conn=None):
 
 
 def handle(api, method, params, conn):
+    params = coerce_params(params)
     if api == "SYNO.TPS.Event" and method == "list":
         return event_list(conn, params)
     if api == "SYNO.TPS.Event" and method == "get":
         return event_get(conn, params)
     if api == "SYNO.TPS.Event" and method == "list_status":
-        total = conn.execute("SELECT COUNT(*) n FROM event").fetchone()["n"]
-        return ok({"total": total, "status": "ready"})
+        return event_list_status(params)
     if api == "SYNO.TPS.Event.Offset" and method == "get":
-        return ok({"offset": int(kv_get(conn, "event_offset", "0") or 0)})
+        return event_offset(conn, params)
     if api == "SYNO.TPS.Event.Statistic" and method == "get":
         return event_stat(conn, params)
     if api == "SYNO.TPS.Event.Map" and method == "list":
-        return ok({"events": []})
+        return ok({"events": [], "location": []})
     if api == "SYNO.TPS.Event.ExportFolder" and method == "get":
         return ok({"export_folder": ""})
     if api == "SYNO.TPS.Sensor" and method == "get":
@@ -215,9 +244,10 @@ def event_list(conn, p):
     limit = min(int(p.get("limit", 50) or 50), 200)
     where = ["1=1"]
     args = []
-    if p.get("key_words"):
+    keywords = flatten_keywords(p.get("key_words"))
+    if keywords:
         where.append("(sig_name LIKE ? OR ip_src_str LIKE ? OR ip_dst_str LIKE ?)")
-        q = "%" + p["key_words"] + "%"
+        q = "%" + keywords + "%"
         args.extend([q, q, q])
     if p.get("sig_sid"):
         where.append("sig_sid=?")
@@ -249,25 +279,48 @@ def event_list(conn, p):
         "SELECT * " + sql + " ORDER BY ts_epoch DESC, cid DESC LIMIT ? OFFSET ?",
         args + [limit, offset],
     )
-    events = [event_row(r, conn) for r in rows]
+    events = [official_event(r, conn, detail=False) for r in rows]
     kv_set(conn, "event_offset", str(offset))
     conn.commit()
-    return ok({"events": events, "offset": offset, "total": total})
+    payload = {"events": events, "offset": offset, "total": total, "now": now_str()}
+    global EVENT_TASK_SEQ
+    EVENT_TASK_SEQ += 1
+    tid = str(EVENT_TASK_SEQ)
+    EVENT_TASKS[tid] = payload
+    while len(EVENT_TASKS) > 32:
+        EVENT_TASKS.pop(next(iter(EVENT_TASKS)))
+    payload = dict(payload)
+    payload["task_id"] = tid
+    return ok(payload)
+
+
+def event_list_status(p):
+    tid = str(p.get("task_id") or "")
+    data = EVENT_TASKS.get(tid)
+    if data is None:
+        return ok({"finish": True, "status": "ready", "total": 0, "data": {"events": [], "total": 0, "now": now_str()}})
+    return ok({"finish": True, "status": "ready", "total": data.get("total", 0), "data": data})
+
+
+def event_offset(conn, p):
+    cid = parse_event_id(p)
+    if cid:
+        row = conn.execute(
+            """SELECT COUNT(*) n FROM event
+               WHERE ts_epoch > (SELECT ts_epoch FROM event WHERE cid=?)
+                  OR (ts_epoch = (SELECT ts_epoch FROM event WHERE cid=?) AND cid > ?)""",
+            (cid, cid, cid),
+        ).fetchone()
+        return ok({"offset": int(row["n"] if row else 0)})
+    return ok({"offset": int(kv_get(conn, "event_offset", "0") or 0)})
 
 
 def event_get(conn, p):
-    cid = int(p.get("cid") or 0)
+    cid = parse_event_id(p)
     row = conn.execute("SELECT * FROM event WHERE cid=?", (cid,)).fetchone()
     if not row:
         return err(100)
-    data = event_row(row, conn)
-    for table, key in (("iphdr", "iphdr"), ("tcphdr", "tcphdr"), ("udphdr", "udphdr"), ("icmphdr", "icmphdr")):
-        extra = conn.execute("SELECT * FROM %s WHERE cid=?" % table, (cid,)).fetchone()
-        data[key] = dict(extra) if extra else {}
-    payload = conn.execute("SELECT data_payload FROM data WHERE cid=?", (cid,)).fetchone()
-    data["data_payload"] = payload["data_payload"] if payload else ""
-    data["references"] = []
-    return ok(data)
+    return ok(official_event(row, conn, detail=True))
 
 
 def event_stat(conn, p):
@@ -299,7 +352,9 @@ def event_stat(conn, p):
         "SELECT ip_src_str, COUNT(*) n FROM event WHERE " + where + " GROUP BY ip_src_str ORDER BY n DESC LIMIT 5", args)]
     top_dst = [{"ip": r["ip_dst_str"], "count": r["n"]} for r in conn.execute(
         "SELECT ip_dst_str, COUNT(*) n FROM event WHERE " + where + " GROUP BY ip_dst_str ORDER BY n DESC LIMIT 5", args)]
-    return ok({"total": total, "high": high, "medium": medium, "low": low, "top_class": top_class, "top_src": top_src, "top_dst": top_dst})
+    official = official_event_statistic(conn)
+    official.update({"total": total, "high": high, "medium": medium, "low": low, "top_class": top_class, "top_src": top_src, "top_dst": top_dst})
+    return ok(official)
 
 
 def sensor_vars():
@@ -325,7 +380,7 @@ def sensor_vars():
                     k, v = k.strip(), v.strip().strip('"')
                     if k and v and not k.startswith("#"):
                         out[k] = v
-    return out
+    return official_variables(out)
 
 
 def signature_classes(conn):
@@ -347,7 +402,7 @@ def signature_classes(conn):
             "enabled": r["sig_enabled_count"],
             "action": r["action"],
         })
-    return ok({"classes": rows})
+    return ok(official_signature_classes(rows))
 
 
 def signature_rules(conn, p):
@@ -377,8 +432,10 @@ def signature_rules(conn, p):
     ):
         rules.append({
             "sig_sid": r["sig_sid"],
+            "sid": r["sig_sid"],
             "sig_rev": r["sig_rev"],
             "sig_name": r["sig_name"],
+            "name": r["sig_name"],
             "action": r["eff"],
             "sig_class_id": r["sig_class_id"],
             "class_name": r["sig_class_name"],
@@ -413,51 +470,123 @@ def signature_policy(conn, method, p):
                 "ip_src_str": r["ip_src_str"], "ip_dst_str": r["ip_dst_str"],
                 "comment": r["comment"], "id": r["id"],
             })
-        return ok({"policy": items})
+        for rec in items:
+            if rec["type"] == "class":
+                rec["severity"] = severity_name(0, 2)
+            else:
+                rec["severity"] = "medium"
+        return ok(official_policy_list(items))
     if method == "get":
         return signature_policy(conn, "list", p)
     if method in ("add", "set", "update"):
-        typ = p.get("type") or ("filter" if p.get("ip_src_str") or p.get("ip_src") else ("signature" if p.get("raw_sid") else "class"))
-        action = p.get("action") or "alert"
-        comment = p.get("comment") or ""
-        if typ == "class":
-            cid = int(p.get("sig_class_id") or 0)
-            conn.execute("INSERT OR REPLACE INTO policy_class(sig_class_id, action, comment) VALUES (?,?,?)", (cid, action, comment))
-        elif typ == "signature":
-            sid = int(p.get("raw_sid") or p.get("sig_sid") or 0)
-            conn.execute(
-                "INSERT OR REPLACE INTO policy_signature(raw_sid, sig_class_id, sig_name, action, comment) VALUES (?,?,?,?,?)",
-                (sid, int(p.get("sig_class_id") or 0), p.get("sig_name") or "", action, comment),
-            )
+        if p.get("policy"):
+            _apply_policy_batch(conn, p["policy"])
         else:
-            conn.execute(
-                """INSERT INTO policy_filter(raw_sid, filter_sid, filter_rev, sig_class_id, sig_name, action, ip_src, ip_dst, ip_src_str, ip_dst_str, comment)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    int(p.get("raw_sid") or 0), 0, 0, int(p.get("sig_class_id") or 0),
-                    p.get("sig_name") or "", action,
-                    ip_to_int(p.get("ip_src_str") or p.get("ip_src") or ""),
-                    ip_to_int(p.get("ip_dst_str") or p.get("ip_dst") or ""),
-                    p.get("ip_src_str") or "", p.get("ip_dst_str") or "", comment,
-                ),
-            )
+            _apply_policy_item(conn, p)
         conn.commit()
         n = compile_rules(conn)
         reload_suricata()
         return ok({"compiled": n})
     if method == "delete":
-        typ = p.get("type") or "signature"
-        if typ == "class":
-            conn.execute("DELETE FROM policy_class WHERE sig_class_id=?", (int(p.get("sig_class_id") or 0),))
-        elif typ == "filter":
-            conn.execute("DELETE FROM policy_filter WHERE id=?", (int(p.get("id") or 0),))
+        if p.get("classes") or p.get("signatures"):
+            for cls in p.get("classes") or []:
+                name = cls.get("class_name") if isinstance(cls, dict) else str(cls)
+                row = conn.execute("SELECT sig_class_id FROM sig_class WHERE sig_class_name=?", (name,)).fetchone()
+                if row:
+                    conn.execute("DELETE FROM policy_class WHERE sig_class_id=?", (row["sig_class_id"],))
+            for sig in p.get("signatures") or []:
+                sid = int(sig.get("sid") or sig.get("raw_sid") or 0) if isinstance(sig, dict) else int(sig or 0)
+                ip_src = (sig.get("ip_src") or "") if isinstance(sig, dict) else ""
+                ip_dst = (sig.get("ip_dst") or "") if isinstance(sig, dict) else ""
+                if ip_src or ip_dst:
+                    conn.execute(
+                        "DELETE FROM policy_filter WHERE raw_sid=? AND ip_src_str=? AND ip_dst_str=?",
+                        (sid, ip_src, ip_dst),
+                    )
+                else:
+                    conn.execute("DELETE FROM policy_signature WHERE raw_sid=?", (sid,))
+                    conn.execute("DELETE FROM policy_filter WHERE raw_sid=?", (sid,))
         else:
-            conn.execute("DELETE FROM policy_signature WHERE raw_sid=?", (int(p.get("raw_sid") or p.get("sig_sid") or 0),))
+            typ = p.get("type") or "signature"
+            if typ == "class" or typ == 1 or typ == "1":
+                conn.execute("DELETE FROM policy_class WHERE sig_class_id=?", (int(p.get("sig_class_id") or 0),))
+            elif typ == "filter" or typ == 3 or typ == "3":
+                conn.execute("DELETE FROM policy_filter WHERE id=?", (int(p.get("id") or 0),))
+            else:
+                conn.execute("DELETE FROM policy_signature WHERE raw_sid=?", (int(p.get("raw_sid") or p.get("sig_sid") or p.get("sid") or 0),))
         conn.commit()
         compile_rules(conn)
         reload_suricata()
         return ok({})
     return err(102)
+
+
+def _class_id_by_name(conn, name):
+    row = conn.execute("SELECT sig_class_id FROM sig_class WHERE sig_class_name=?", (name,)).fetchone()
+    return row["sig_class_id"] if row else 0
+
+
+def _map_policy_action(action):
+    a = (action or "alert").lower()
+    if a in ("enabled", "enable", "alert"):
+        return "alert"
+    if a in ("disabled", "disable", "do_nothing"):
+        return "disable"
+    if a in ("drop", "pass"):
+        return a
+    return a or "alert"
+
+
+def _apply_policy_item(conn, p):
+    typ = p.get("type") or ("filter" if p.get("ip_src_str") or p.get("ip_src") else ("signature" if p.get("raw_sid") or p.get("sid") else "class"))
+    action = _map_policy_action(p.get("action") or "alert")
+    comment = p.get("comment") or ""
+    if typ == "class" or p.get("class_name"):
+        cid = int(p.get("sig_class_id") or 0) or _class_id_by_name(conn, p.get("class_name") or p.get("name") or "")
+        if cid:
+            conn.execute("INSERT OR REPLACE INTO policy_class(sig_class_id, action, comment) VALUES (?,?,?)", (cid, action, comment))
+        return
+    if typ == "signature" or (p.get("raw_sid") or p.get("sid")):
+        sid = int(p.get("raw_sid") or p.get("sig_sid") or p.get("sid") or 0)
+        conn.execute(
+            "INSERT OR REPLACE INTO policy_signature(raw_sid, sig_class_id, sig_name, action, comment) VALUES (?,?,?,?,?)",
+            (sid, int(p.get("sig_class_id") or 0), p.get("sig_name") or p.get("name") or "", action, comment),
+        )
+        return
+    conn.execute(
+        """INSERT INTO policy_filter(raw_sid, filter_sid, filter_rev, sig_class_id, sig_name, action, ip_src, ip_dst, ip_src_str, ip_dst_str, comment)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            int(p.get("raw_sid") or p.get("sid") or 0), 0, 0, int(p.get("sig_class_id") or 0),
+            p.get("sig_name") or p.get("name") or "", action,
+            ip_to_int(p.get("ip_src_str") or p.get("ip_src") or ""),
+            ip_to_int(p.get("ip_dst_str") or p.get("ip_dst") or ""),
+            str(p.get("ip_src_str") or p.get("ip_src") or ""),
+            str(p.get("ip_dst_str") or p.get("ip_dst") or ""), comment,
+        ),
+    )
+
+
+def _apply_policy_batch(conn, policy):
+    """Official Policy.set: [{class_name, action: enabled|disabled, signatures: [...]}]."""
+    for item in policy or []:
+        if not isinstance(item, dict):
+            continue
+        action = _map_policy_action(item.get("action") or "")
+        name = item.get("class_name") or item.get("name") or ""
+        if name and item.get("action") not in ("", None):
+            _apply_policy_item(conn, {"type": "class", "class_name": name, "action": action, "comment": item.get("comment") or ""})
+        for sig in item.get("signatures") or []:
+            if not isinstance(sig, dict):
+                continue
+            _apply_policy_item(conn, {
+                "type": "signature",
+                "sid": sig.get("sid") or sig.get("raw_sid") or sig.get("sig_sid"),
+                "sig_class_id": sig.get("sig_class_id") or 0,
+                "sig_name": sig.get("sig_name") or sig.get("name") or "",
+                "action": sig.get("action") or action or "alert",
+                "comment": sig.get("comment") or "",
+            })
 
 
 def settings_update(conn, api, method, p):
@@ -575,17 +704,33 @@ def devices(conn, method, p):
                 "device_name": r["device_name"],
                 "detect": bool(r["detect"]),
                 "loading_score": r["loading_score"],
+                "loading": r["loading_score"],
                 "online": r["mac"].lower() in online,
             })
-        return ok({"devices": out})
+        return ok(official_devices(out))
     if method == "set":
+        if "default_detect" in p:
+            kv_set(conn, "default_detect", "1" if _truth(p.get("default_detect")) else "0")
+        for item in p.get("device_list") or []:
+            if not isinstance(item, dict):
+                continue
+            mac = (item.get("mac") or "").lower()
+            if not mac:
+                continue
+            detect = 1 if _truth(item.get("detect", True)) else 0
+            name = item.get("device_name") or mac
+            conn.execute(
+                "INSERT OR REPLACE INTO device(mac, device_name, detect, loading_score) VALUES (?,?,?,0)",
+                (mac, name, detect),
+            )
         mac = (p.get("mac") or "").lower()
-        detect = 1 if _truth(p.get("detect", True)) else 0
-        name = p.get("device_name")
-        if name:
-            conn.execute("INSERT OR REPLACE INTO device(mac, device_name, detect, loading_score) VALUES (?,?,?,0)", (mac, name, detect))
-        else:
-            conn.execute("UPDATE device SET detect=? WHERE mac=?", (detect, mac))
+        if mac:
+            detect = 1 if _truth(p.get("detect", True)) else 0
+            name = p.get("device_name")
+            if name:
+                conn.execute("INSERT OR REPLACE INTO device(mac, device_name, detect, loading_score) VALUES (?,?,?,0)", (mac, name, detect))
+            else:
+                conn.execute("UPDATE device SET detect=? WHERE mac=?", (detect, mac))
         conn.commit()
         return ok({})
     return err(102)
@@ -634,7 +779,7 @@ def trends(conn, p):
             "total": rows["total"] or 0,
         })
         t += bucket
-    return ok({"points": points})
+    return ok(official_trends(conn))
 
 
 def notification(conn, method, p):
@@ -791,6 +936,17 @@ class Handler(BaseHTTPRequestHandler):
                 result = err(500, {"message": str(exc)})
             finally:
                 conn.close()
+            if api == "SYNO.TPS.Backup" and method == "backup" and result.get("success"):
+                body = (result.get("data") or {}).get("json") or "{}"
+                raw = body.encode("utf-8") if isinstance(body, str) else body
+                self.send_response(200)
+                self._cors()
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Disposition", "attachment; filename=\"threatprevention-backup.json\"")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
             return self._json(result)
         self.send_response(404)
         self._cors()

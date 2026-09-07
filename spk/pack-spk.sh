@@ -59,15 +59,48 @@ cp -a "${ROOT}/unpacked/package/etc/suricata/threshold.config" "${STAGING}/packa
 cp -a "${SRC}/package/etc/sensor/sensor.conf" "${STAGING}/package/etc/sensor/sensor.conf"
 cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/suricata/suricata.yaml"
 
-info "Stage DSM Start Menu UI"
-mkdir -p "${STAGING}/package/ui/images"
-cp -a "${SRC}/package/ui/." "${STAGING}/package/ui/"
-ICON256="${ORIG_SPK}/PACKAGE_ICON_256.PNG"
-if [ -f "${ICON256}" ] && command -v sips >/dev/null 2>&1; then
-  for sz in 16 24 32 48 64 72 256; do
-    sips -z "${sz}" "${sz}" "${ICON256}" --out "${STAGING}/package/ui/images/threatprevention_${sz}.png" >/dev/null
+info "Stage official ExtJS UI (research PoC — not redistributable)"
+OFFICIAL_UI="${ROOT}/unpacked/package/ui"
+[ -f "${OFFICIAL_UI}/synoips.js" ] || die "Official UI missing at ${OFFICIAL_UI}/synoips.js"
+rm -rf "${STAGING}/package/ui"
+mkdir -p "${STAGING}/package/ui"
+cp -a "${OFFICIAL_UI}/." "${STAGING}/package/ui/"
+cp -a "${SRC}/package/ui/tps-bridge.js" "${STAGING}/package/ui/tps-bridge.js"
+python3 - "${STAGING}/package/ui/config" <<'PY'
+import json, sys
+path = sys.argv[1]
+cfg = json.load(open(path, encoding="utf-8"))
+app = cfg["synoips.js"]["SYNO.SDS.TPS.Application"]
+deps = list(app.get("depend") or [])
+if "SYNO.SDS.TPS.Bridge" not in deps:
+    deps = ["SYNO.SDS.TPS.Bridge"] + deps
+app["depend"] = deps
+merged = {
+    "tps-bridge.js": {
+        "SYNO.SDS.TPS.Bridge": {
+            "type": "lib",
+            "title": "TPS Suricata compatibility",
+            "formatedTitle": "TPS Suricata compatibility",
+        }
+    }
+}
+merged.update(cfg)
+json.dump(merged, open(path, "w", encoding="utf-8"), indent=2)
+print("merged official ui/config with tps-bridge.js")
+PY
+# DSM tile sizes official tree may omit
+if command -v sips >/dev/null 2>&1 && [ -f "${STAGING}/package/ui/images/IDS_IPS_256.png" ]; then
+  for sz in 16 32; do
+    if [ ! -f "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" ]; then
+      sips -z "${sz}" "${sz}" "${STAGING}/package/ui/images/IDS_IPS_256.png" \
+        --out "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" >/dev/null
+    fi
   done
 fi
+
+info "Stage SYNO.TPS.lib (Info listing only; aarch64 .so are not packed)"
+mkdir -p "${STAGING}/package/webapi"
+cp -a "${ROOT}/unpacked/package/webapi/SYNO.TPS.lib" "${STAGING}/package/webapi/SYNO.TPS.lib"
 
 info "Compute extractsize"
 EXTRACT_KB="$(du -sk "${STAGING}/package" | awk '{print $1}')"

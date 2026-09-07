@@ -74,8 +74,20 @@ kill_pidfile() {
 	fi
 }
 
+link_webapi() {
+	# Official start does this as root. Unsigned package user may fail; bridge does not need it.
+	if [ -f "${PKGDEST}/webapi/SYNO.TPS.lib" ]; then
+		ln -sf "${PKGDEST}/webapi/SYNO.TPS.lib" /usr/syno/synoman/webapi/SYNO.TPS.lib 2>/dev/null || true
+	fi
+}
+
+unlink_webapi() {
+	rm -f /usr/syno/synoman/webapi/SYNO.TPS.lib 2>/dev/null || true
+}
+
 start_helpers() {
 	mkdir -p "${PKGVAR}" "${PKGETC}"
+	link_webapi
 	if [ ! -f "${PKGETC}/sensor.conf" ] && [ -f "${PKGDEST}/etc/sensor/sensor.conf" ]; then
 		cp -f "${PKGDEST}/etc/sensor/sensor.conf" "${PKGETC}/sensor.conf"
 	fi
@@ -140,6 +152,7 @@ start() {
 }
 
 stop() {
+	unlink_webapi
 	kill_pidfile "${INGEST_PID}"
 	kill_pidfile "${TPSWEB_PID}"
 	if [ -f "${PIDFILE}" ]; then
