@@ -1134,12 +1134,39 @@ SYNO.SDS.TPS.Bridge = {
 			minute: m
 		};
 	},
-	captureModeIsCopy: function (panel) {
+	radioInputValue: function (panel, name) {
+		/* syno_radio.getGroupValue walks this.el.up(...) and throws while
+		   the General panel is still constructing (el is not there yet). */
 		var form = panel && panel.getForm && panel.getForm();
-		var fld = form && form.findField && form.findField("capture_mode");
-		if (!fld) { return false; }
-		var v = fld.getGroupValue ? fld.getGroupValue() : (fld.getValue && fld.getValue());
-		return v === "copy";
+		var list = [];
+		if (form && form.findFields) {
+			try { list = form.findFields(name) || []; } catch (e) { list = []; }
+		}
+		if (!list.length && form && form.findField) {
+			var one = form.findField(name);
+			if (one) { list = [one]; }
+		}
+		if (!list.length && panel && panel.findBy) {
+			try {
+				list = panel.findBy(function (c) { return c && c.name === name; }) || [];
+			} catch (e2) { list = []; }
+		}
+		var i, c, v;
+		for (i = 0; i < list.length; i++) {
+			c = list[i];
+			if (!c) { continue; }
+			try {
+				v = (typeof c.getValue === "function") ? c.getValue() : c.checked;
+			} catch (e3) { continue; }
+			if (v === true || v === c.inputValue) {
+				return c.inputValue != null ? c.inputValue : v;
+			}
+			if (typeof v === "string" && v) { return v; }
+		}
+		return null;
+	},
+	captureModeIsCopy: function (panel) {
+		return this.radioInputValue(panel, "capture_mode") === "copy";
 	},
 	readMirrorValues: function (panel) {
 		var form = panel && panel.getForm && panel.getForm();
@@ -1149,11 +1176,7 @@ SYNO.SDS.TPS.Bridge = {
 			var v = fld.getValue();
 			return (v === null || v === undefined) ? fallback : v;
 		}
-		var mode = "lan";
-		var fld = form && form.findField && form.findField("capture_mode");
-		if (fld) {
-			mode = (fld.getGroupValue ? fld.getGroupValue() : fld.getValue()) || "lan";
-		}
+		var mode = this.radioInputValue(panel, "capture_mode") || "lan";
 		return {
 			capture_mode: mode === "copy" ? "copy" : "lan",
 			enabled: mode === "copy",
@@ -1214,7 +1237,9 @@ SYNO.SDS.TPS.Bridge = {
 	captureModeFieldset: function (panel) {
 		var me = this;
 		function onMode(fld, on) {
-			if (on) { me.syncCaptureMode(panel); me.prepareGeneralForm(panel); }
+			if (!on || !panel || !panel.rendered) { return; }
+			me.syncCaptureMode(panel);
+			me.prepareGeneralForm(panel);
 		}
 		return {
 			xtype: "syno_fieldset",
