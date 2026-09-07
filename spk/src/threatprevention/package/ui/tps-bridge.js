@@ -313,7 +313,12 @@ SYNO.SDS.TPS.Bridge = {
 				v.indexOf("<a ") !== -1 || v.indexOf("<a>") !== -1 ||
 				v.indexOf("font-order") !== -1 ||
 				v.indexOf("syno-sds-ips-event-") !== -1 ||
-				v.indexOf('class="syno-sds-ips') !== -1);
+				v.indexOf('class="syno-sds-ips') !== -1 ||
+				v.indexOf("note-font") !== -1 ||
+				v.indexOf("color-block") !== -1 ||
+				v.indexOf("font-percentage") !== -1 ||
+				v.indexOf("<span ") !== -1 ||
+				v.indexOf("<div ") !== -1);
 	},
 	restoreOfficialLabel: function (field) {
 		var html = field && field.fieldLabel;
@@ -328,6 +333,25 @@ SYNO.SDS.TPS.Bridge = {
 			node = null;
 		}
 		if (node) { node.innerHTML = markup; }
+	},
+	restoreOfficialValue: function (field) {
+		var v = field && field.value;
+		if (!this.looksOfficialHtml(v)) { return; }
+		var el = field.el && field.el.dom;
+		if (!el && field.getEl) {
+			var wrap = field.getEl();
+			el = wrap && wrap.dom;
+		}
+		if (!el) { return; }
+		var text = el.textContent || el.innerText || "";
+		if (text.indexOf("<") === -1 && !(el.innerHTML && el.innerHTML.indexOf("&lt;") !== -1)) {
+			return;
+		}
+		el.innerHTML = v;
+	},
+	restoreOfficialMarkup: function (field) {
+		this.restoreOfficialLabel(field);
+		this.restoreOfficialValue(field);
 	},
 	findOfficialLabelNode: function (field) {
 		/* Ext 3.4 Element.up → findParentNode does this.dom.parentNode with no
@@ -413,10 +437,11 @@ SYNO.SDS.TPS.Bridge = {
 				if (me.looksOfficialHtml(v)) { this.htmlEncode = false; }
 				if (origInit) { origInit.apply(this, arguments); }
 				if (me.looksOfficialHtml(this.value || v)) { this.htmlEncode = false; }
-				if (me.looksOfficialHtml(this.fieldLabel || label)) {
+				if (me.looksOfficialHtml(this.fieldLabel || label) ||
+						me.looksOfficialHtml(this.value || v)) {
 					this.on("afterrender", function () {
-						me.restoreOfficialLabel(field);
-						window.setTimeout(function () { me.restoreOfficialLabel(field); }, 0);
+						me.restoreOfficialMarkup(field);
+						window.setTimeout(function () { me.restoreOfficialMarkup(field); }, 0);
 					}, this);
 				}
 			};
@@ -484,8 +509,8 @@ SYNO.SDS.TPS.Bridge = {
 				else if (Cls.superclass && Cls.superclass.afterRender) {
 					Cls.superclass.afterRender.apply(this, arguments);
 				}
-				me.restoreOfficialLabel(this);
-				window.setTimeout(function () { me.restoreOfficialLabel(field); }, 0);
+				me.restoreOfficialMarkup(this);
+				window.setTimeout(function () { me.restoreOfficialMarkup(field); }, 0);
 			};
 			Cls.prototype._tpsPctLabel = true;
 		}
@@ -535,11 +560,25 @@ SYNO.SDS.TPS.Bridge = {
 		var origFill = NP.prototype.fillConfig;
 		NP.prototype.fillConfig = function (a) {
 			var cfg = origFill.apply(this, arguments);
+			/* SRM used labelWidth:400 so a long fieldLabel could sit in the
+			   label column. DSM 7's content pane is narrower; that leaves a
+			   ~400px gap before Email/SMS/Push/Subject inputs. */
+			cfg.defaults = Ext.apply({}, cfg.defaults || {});
+			cfg.defaults.labelWidth = 180;
+			Ext.each(cfg.items || [], function (item) {
+				if (!item || item.xtype !== "syno_displayfield") { return; }
+				if (item.fieldLabel && (item.value === undefined || item.value === "")) {
+					item.value = item.fieldLabel;
+					delete item.fieldLabel;
+					item.hideLabel = true;
+				}
+			});
 			cfg.items = (cfg.items || []).concat([me.telegramFieldset(this)]);
 			return cfg;
 		};
 		var origActivate = NP.prototype.onActivate;
 		NP.prototype.onActivate = function () {
+			this._tpsIgnoreDirty = true;
 			if (origActivate) { origActivate.apply(this, arguments); }
 			me.loadTelegramInto(this);
 		};
@@ -548,11 +587,13 @@ SYNO.SDS.TPS.Bridge = {
 			var panel = this;
 			if (origInit) { origInit.apply(this, arguments); }
 			me.hookNotificationApply(this);
-			this.on("afterrender", function () { me.clearTelegramDirty(panel); }, this, {single: true});
+			me.hookFormDirtyGate(this);
+			this._tpsIgnoreDirty = true;
 		};
 		var origProc = NP.prototype.processReturnData ||
 			(NP.superclass && NP.superclass.processReturnData);
 		NP.prototype.processReturnData = function () {
+			this._tpsIgnoreDirty = true;
 			var ret;
 			if (origProc) { ret = origProc.apply(this, arguments); }
 			me.loadTelegramInto(this);
@@ -575,13 +616,14 @@ SYNO.SDS.TPS.Bridge = {
 			xtype: "syno_fieldset",
 			border: false,
 			itemId: "tps_telegram_fieldset",
+			defaults: {labelWidth: 200},
 			items: [
 				{xtype: "syno_displayfield", value: '<font style="font-weight:bold;">Telegram</font>'},
-				{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot"},
-				{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1},
-				{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1},
-				{xtype: "syno_numberfield", name: "min_interval_telegram", fieldLabel: "Minimum interval (minutes)", indent: 1, maxValue: 60 * 24, allowDecimals: false, minValue: 0},
-				{xtype: "syno_checkbox", name: "telegram_follow_mail", boxLabel: "Use the same classes as email", indent: 1},
+				{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot", checked: false},
+				{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: ""},
+				{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1, value: ""},
+				{xtype: "syno_numberfield", name: "min_interval_telegram", fieldLabel: "Minimum interval (minutes)", indent: 1, maxValue: 60 * 24, allowDecimals: false, minValue: 0, value: 5},
+				{xtype: "syno_checkbox", name: "telegram_follow_mail", boxLabel: "Use the same classes as email", indent: 1, checked: true},
 				{xtype: "syno_button", itemId: "btn_telegram_test", text: "Send test message", indent: 1, handler: function () { me.testTelegram(panel); }}
 			]
 		};
@@ -630,20 +672,36 @@ SYNO.SDS.TPS.Bridge = {
 			chat_id: val("tg_chat_id", "") || ""
 		};
 	},
+	hookFormDirtyGate: function (panel, opts) {
+		opts = opts || {};
+		var form = panel && panel.getForm && panel.getForm();
+		if (!form || form._tpsDirtyGate) { return; }
+		form._tpsDirtyGate = true;
+		var orig = form.isDirty;
+		form.isDirty = function () {
+			if (panel._tpsIgnoreDirty) { return false; }
+			if (opts.never) { return false; }
+			return orig.apply(this, arguments);
+		};
+	},
 	clearTelegramDirty: function (panel) {
 		var f = panel && panel.getForm && panel.getForm();
 		if (!f) { return; }
-		Ext.each(this.telegramNames, function (name) {
-			var fld = f.findField(name);
-			if (!fld) { return; }
-			var v = fld.getValue ? fld.getValue() : fld.value;
+		function snap(fld) {
+			if (!fld || typeof fld.getValue !== "function") { return; }
+			var v = fld.getValue();
 			fld.originalValue = v;
 			if (fld.startValue !== undefined) { fld.startValue = v; }
 			if (fld.wasDirty) { fld.wasDirty = false; }
+		}
+		Ext.each(this.telegramNames, function (name) {
+			snap(f.findField(name));
 		});
+		panel._tpsIgnoreDirty = false;
 	},
 	loadTelegramInto: function (panel) {
 		var me = this;
+		panel._tpsIgnoreDirty = true;
 		this.call("SYNO.TPS.Settings.Telegram", "get", 1, {}, function (ok, data) {
 			if (panel.el && panel.el.unmask) { panel.el.unmask(); }
 			if (!ok || !data) {
@@ -651,7 +709,10 @@ SYNO.SDS.TPS.Bridge = {
 				return;
 			}
 			var f = panel.getForm && panel.getForm();
-			if (!f) { return; }
+			if (!f) {
+				panel._tpsIgnoreDirty = false;
+				return;
+			}
 			function set(name, v) {
 				var fld = f.findField(name);
 				if (fld && fld.setValue) { fld.setValue(v); }
@@ -664,6 +725,8 @@ SYNO.SDS.TPS.Bridge = {
 			if (!isFinite(sec) || sec < 0) { sec = 300; }
 			set("min_interval_telegram", Math.round(sec / 60));
 			me.clearTelegramDirty(panel);
+			window.setTimeout(function () { me.clearTelegramDirty(panel); }, 0);
+			window.setTimeout(function () { me.clearTelegramDirty(panel); }, 50);
 		});
 	},
 	saveTelegramFrom: function (panel) {
@@ -736,7 +799,7 @@ SYNO.SDS.TPS.Bridge = {
 		function selected() {
 			return grid.getSelectionModel().getSelected();
 		}
-		return new Form({
+		var panel = new Form({
 			title: "Rule Feeds",
 			itemId: "SYNO.SDS.TPS.Settings.FeedPanel",
 			padding: "0px 12px 0px 0px",
@@ -751,8 +814,8 @@ SYNO.SDS.TPS.Bridge = {
 				]},
 				grid,
 				{xtype: "syno_fieldset", border: false, items: [
-					{xtype: "syno_textfield", fieldLabel: "Name", name: "feed_name", width: 220},
-					{xtype: "syno_textfield", fieldLabel: "HTTPS URL", name: "feed_url", width: 420},
+					{xtype: "syno_textfield", fieldLabel: "Name", name: "feed_name", width: 220, value: ""},
+					{xtype: "syno_textfield", fieldLabel: "HTTPS URL", name: "feed_url", width: 420, value: ""},
 					{xtype: "syno_compositefield", items: [
 						{xtype: "syno_button", text: _T("common", "add") || "Add", handler: function () {
 							me.call("SYNO.TPS.Settings.Feed", "add", 1, {
@@ -782,6 +845,8 @@ SYNO.SDS.TPS.Bridge = {
 			],
 			listeners: {activate: reload}
 		});
+		me.hookFormDirtyGate(panel, {never: true});
+		return panel;
 	},
 	patchGmapsKey: function () {
 		var me = this;
