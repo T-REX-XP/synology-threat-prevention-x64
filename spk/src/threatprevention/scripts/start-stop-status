@@ -6,6 +6,40 @@ BIN="${PKGDEST}/bin/suricata"
 YAML="${PKGDEST}/etc/suricata/suricata.yaml"
 LOGDIR="${PKGVAR}/log"
 
+write_status() {
+	ui="${PKGDEST}/ui/status.html"
+	[ -d "${PKGDEST}/ui" ] || return 0
+	state="$1"
+	iface="$2"
+	cls="bad"
+	label="stopped"
+	pid=""
+	if [ "${state}" = "running" ] && [ -f "${PIDFILE}" ]; then
+		pid="$(cat "${PIDFILE}" 2>/dev/null || true)"
+		if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+			cls="ok"
+			label="running"
+		fi
+	fi
+	rules="bundled ET Open 2021 (Suricata 5 syntax)"
+	if [ -f "${PKGVAR}/rules/.from-suricata-update" ]; then
+		rules="suricata-update (current ET Open for Suricata 8)"
+	fi
+	alerts="(no alerts yet)"
+	if [ -s "${LOGDIR}/eve.json" ]; then
+		alerts="$(grep '"event_type":"alert"' "${LOGDIR}/eve.json" 2>/dev/null | tail -n 12 || true)"
+		[ -n "${alerts}" ] || alerts="(no alerts yet)"
+	fi
+	{
+		printf '<p>Engine: <span class="%s">%s</span>' "${cls}" "${label}"
+		[ -n "${pid}" ] && printf ' (pid %s)' "${pid}"
+		printf '</p>\n'
+		printf '<p>Capture interface: <code>%s</code></p>\n' "${iface:-unknown}"
+		printf '<p>Rules: %s</p>\n' "${rules}"
+		printf '<p>Recent eve.json alert lines</p><pre>%s</pre>\n' "${alerts}"
+	} > "${ui}.tmp" && mv "${ui}.tmp" "${ui}"
+}
+
 pick_iface() {
 	# Override: echo ovs_eth0 > /var/packages/ThreatPrevention/etc/interface
 	if [ -f /var/packages/ThreatPrevention/etc/interface ]; then
@@ -58,12 +92,14 @@ start() {
 	i=0
 	while [ "${i}" -lt 45 ]; do
 		if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+			write_status running "${IFACE}"
 			return 0
 		fi
 		sleep 1
 		i=$((i + 1))
 	done
 	echo "suricata did not daemonize (see ${LOGDIR}/suricata.log)" >&2
+	write_status failed "${IFACE}"
 	return 1
 }
 
@@ -73,6 +109,7 @@ stop() {
 		rm -f "${PIDFILE}"
 	fi
 	killall suricata 2>/dev/null || true
+	write_status stopped ""
 }
 
 status() {

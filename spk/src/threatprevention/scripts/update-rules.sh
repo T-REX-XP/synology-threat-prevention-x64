@@ -34,4 +34,5 @@ if [ ! -s "${OUT}/suricata.rules" ]; then
 	exit 1
 fi
 echo "Wrote ${OUT}/suricata.rules"
+: > "${OUT}/.from-suricata-update"
 echo "Restart the package to load the new rules: synopkg restart ThreatPrevention"

@@ -48,7 +48,7 @@ Codecs also decrypts official SPKs and patches `libsynoame-license.so`. **That p
 
 ## What this first SPK is (and is not)
 
-**Is:** a DSM 7 **x86_64** file+daemon package: Suricata 8.0.6, bundled ET rules, original class policy files, codecs-style unsigned layout. Install with `synopkg install` on Intel/AMD NAS.
+**Start Menu:** DSM only shows a launcher when `INFO` has `dsmuidir="ui"` plus `package.tgz/ui/config`. Package Center icons (`PACKAGE_ICON*.PNG`) are not enough. 8.0.6-0006 registers `SYNO.SDS.ThreatPrevention.Application`.
 
 **Is not:** a drop-in clone of SRM Threat Prevention (no WebAPI, no ExtJS UI, no `synodb`, no NFQUEUE autowiring). Inline IPS still needs the NAS to be a gateway and extra nftables — the stock start script uses **AF_PACKET IDS** on the first non-loopback interface.
 
