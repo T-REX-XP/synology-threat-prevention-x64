@@ -1702,6 +1702,7 @@ SYNO.SDS.TPS.Bridge = {
 			P.prototype.processReturnData = function (d, b) {
 				b = b || {};
 				var size;
+				var cap;
 				Ext.each(b.result || [], function (e) {
 					if (e && !e.data) { e.data = {}; }
 					if (e && e.api === "SYNO.TPS.Settings.Storage" && e.data && e.data.db_size) {
@@ -1710,11 +1711,16 @@ SYNO.SDS.TPS.Bridge = {
 					}
 					if (e && e.data && e.data.logStorageMaxLimit === "") {
 						delete e.data.logStorageMaxLimit;
+					} else if (e && e.data && e.data.logStorageMaxLimit) {
+						cap = e.data.logStorageMaxLimit;
 					}
 				});
 				var ret = orig.apply(this, arguments);
-				var field = this.getForm() && this.getForm().findField("db_size");
+				var form = this.getForm && this.getForm();
+				var field = form && form.findField("db_size");
 				if (field && size && field.setValue) { field.setValue(size); }
+				var capField = form && form.findField("logStorageMaxLimit");
+				if (capField && cap && capField.setValue) { capField.setValue(cap); }
 				return ret;
 			};
 			P.prototype.getUsbDeviceMaxStorage = function () {

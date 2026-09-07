@@ -239,54 +239,103 @@ def nsm_device_list():
 
 
 def usb_volume_rows():
-    """Mounted USB/eSATA shares with capacity, SRM partition fields."""
+    """Mounted USB/eSATA shares plus the DSM volume that holds tps.db."""
     rows = []
     roots = []
     for pat in ("/volumeUSB*", "/volumeSATA*", "/volumeUSBshare*"):
         roots.extend(glob.glob(pat))
     for root in sorted(set(roots)):
-        if not os.path.isdir(root):
-            continue
+        row = _volume_row(root)
+        if row:
+            rows.append(row)
+    data_root = data_volume_root()
+    if data_root:
+        seen = {r.get("id") for r in rows}
+        name = os.path.basename(data_root.rstrip(os.sep)) or data_root
+        if name not in seen:
+            row = _volume_row(data_root, share_name=name, list_shares=False)
+            if row:
+                rows.append(row)
+    return rows
+
+
+def _volume_row(root, share_name=None, list_shares=True):
+    if not root or not os.path.isdir(root):
+        return None
+    mb = volume_size_mb(root)
+    if mb <= 0:
+        return None
+    name = share_name or os.path.basename(root.rstrip(os.sep)) or root
+    partitions = []
+    if list_shares:
         try:
             shares = os.listdir(root)
         except OSError:
-            continue
-        partitions = []
+            shares = []
         for share in sorted(shares):
             if share.startswith(("@", "#", ".")):
                 continue
             path = os.path.join(root, share)
             if not os.path.isdir(path):
                 continue
-            try:
-                st = os.statvfs(path)
-            except OSError:
+            smb = volume_size_mb(path)
+            if smb <= 0:
                 continue
-            mb = int((st.f_frsize * st.f_blocks) / (1024.0 * 1024.0))
             partitions.append({
                 "share_name": share,
                 "path": path,
-                "total_size_mb": mb,
+                "total_size_mb": smb,
                 "status": "normal",
             })
-        if not partitions:
-            try:
-                st = os.statvfs(root)
-            except OSError:
-                continue
-            mb = int((st.f_frsize * st.f_blocks) / (1024.0 * 1024.0))
-            partitions.append({
-                "share_name": os.path.basename(root),
-                "path": root,
-                "total_size_mb": mb,
-                "status": "normal",
-            })
-        rows.append({
-            "id": os.path.basename(root),
-            "dev_id": os.path.basename(root),
-            "partitions": partitions,
+    if not partitions:
+        partitions.append({
+            "share_name": name,
+            "path": root,
+            "total_size_mb": mb,
+            "status": "normal",
         })
-    return rows
+    return {
+        "id": name,
+        "dev_id": name,
+        "partitions": partitions,
+    }
+
+
+def volume_size_mb(path):
+    try:
+        st = os.statvfs(path)
+    except OSError:
+        return 0
+    return int((st.f_frsize * st.f_blocks) / (1024.0 * 1024.0))
+
+
+def format_size_mb(mb):
+    mb = float(mb or 0)
+    if mb >= 1024:
+        return "%.2f GB" % (mb / 1024.0)
+    if mb > 0:
+        return "%.2f MB" % mb
+    return ""
+
+
+def data_volume_root():
+    """Filesystem root that holds package var / tps.db (`/volume1` on DSM)."""
+    from paths import PKGVAR
+    candidates = []
+    for raw in (PKGVAR, os.path.realpath(PKGVAR) if PKGVAR else ""):
+        if raw:
+            candidates.append(raw)
+    for path in candidates:
+        parts = [p for p in path.split(os.sep) if p]
+        for i, part in enumerate(parts):
+            if part.startswith("volume"):
+                return os.sep + os.path.join(*parts[: i + 1])
+    if os.path.isdir("/volume1"):
+        return "/volume1"
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return ""
 
 
 def usb_list():
@@ -295,7 +344,10 @@ def usb_list():
 
 
 def systemdb_get():
-    """SRM SystemDB: share name the event DB lives on (USB pick in Log Storage)."""
+    """Share/volume name the event DB lives on (Log Storage capacity)."""
+    root = data_volume_root()
+    if root:
+        return {"systemdb_shares": os.path.basename(root.rstrip(os.sep)) or root}
     shares = []
     for dev in usb_volume_rows():
         for part in dev.get("partitions") or []:

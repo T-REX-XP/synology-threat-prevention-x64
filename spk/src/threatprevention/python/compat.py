@@ -10,7 +10,7 @@ import json
 import os
 import time
 
-from paths import IFACE_FILE, SENSOR_CONF
+from paths import IFACE_FILE, PKGVAR, SENSOR_CONF
 from geoip import BOTNET_CLASSES, lookup as geoip_lookup
 
 
@@ -688,11 +688,17 @@ def official_storage(size_bytes, limit_mb, status, percent=100, usb_max=""):
 
 
 def usb_max_label():
-    """Best-effort USB volume size for Settings when Core.USB.list is empty."""
+    """Capacity of the volume that holds tps.db (DSM `/volume1`, else USB)."""
+    from corehost import data_volume_root, format_size_mb, volume_size_mb
+    root = data_volume_root()
+    if root:
+        label = format_size_mb(volume_size_mb(root))
+        if label:
+            return label
     import glob
     best = 0.0
     roots = []
-    for pat in ("/volumeUSB*", "/volumeUSBshare*"):
+    for pat in ("/volumeUSB*", "/volumeUSBshare*", "/volume1"):
         roots.extend(glob.glob(pat))
     for root in roots:
         if not os.path.isdir(root):
@@ -704,11 +710,7 @@ def usb_max_label():
         mb = (st.f_frsize * st.f_blocks) / (1024.0 * 1024.0)
         if mb > best:
             best = mb
-    if best >= 1024:
-        return "%.2f GB" % (best / 1024.0)
-    if best > 0:
-        return "%.2f MB" % best
-    return ""
+    return format_size_mb(best) if best else ""
 
 
 def official_policy_write(need_force=False):
