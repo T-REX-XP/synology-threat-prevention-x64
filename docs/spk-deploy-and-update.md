@@ -1,6 +1,6 @@
 # Threat Prevention SPK — deploy and update
 
-Unsigned DSM 7 x86_64 package (`ThreatPrevention`, current `8.0.6-0009`). Native desktop UI + `tpsweb` API on port **19557** ([native-app-plan.md](native-app-plan.md)).  
+Unsigned DSM 7 x86_64 package (`ThreatPrevention`, current `8.0.6-0010`). ExtJS Start Menu app + `tpsweb` API on port **19557** ([native-app-plan.md](native-app-plan.md)).  
 SPK scripts under `spk/src/threatprevention/scripts/` are stubs except `postinst`, `start-stop-status`, and `update-rules.sh`. **Most of the work that makes capture actually run is admin-side:** DSM will not let an unsigned package declare `run-as: root` or file capabilities (`synopkg` error 319). `start-stop-status` tries `setcap` but it is a no-op when Package Center starts the unit as the package user.
 
 Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
@@ -44,7 +44,7 @@ Rebuild the SPK on a Mac/Linux host with Docker:
 Package Center → Manual Install, or:
 
 ```sh
-sudo synopkg install /tmp/ThreatPrevention-x86_64-8.0.6-0009.spk
+sudo synopkg install /tmp/ThreatPrevention-x86_64-8.0.6-0010.spk
 ```
 
 What `postinst` does (as the package user): unpacks the bundled ET 2021 tarball if missing, concatenates `*.rules` into `/var/packages/ThreatPrevention/var/rules/suricata.rules` so the engine has a bootstrap ruleset. It does **not** apply `setcap` and does **not** fetch current ET Open.

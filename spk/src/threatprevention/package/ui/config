@@ -1,13 +1,25 @@
 {
-	".url": {
+	"threatprevention.js": {
 		"SYNO.SDS.ThreatPrevention.Application": {
-			"type": "url",
+			"type": "app",
 			"allUsers": false,
+			"allowMultiInstance": false,
+			"allowStandalone": false,
+			"maxInstance": 1,
+			"appWindow": "SYNO.SDS.ThreatPrevention.MainWindow",
 			"title": "Threat Prevention",
-			"desc": "Suricata 8 IDS — overview, events, policy, statistics, settings",
+			"formatedTitle": "Threat Prevention",
+			"desc": "Suricata 8 IDS — ExtJS desktop app",
 			"icon": "images/threatprevention_{0}.png",
-			"url": "/webman/3rdparty/ThreatPrevention/index.html",
-			"grantPrivilege": "admin"
+			"grantPrivilege": "admin",
+			"depend": ["SYNO.SDS.ThreatPrevention.MainWindow"]
+		},
+		"SYNO.SDS.ThreatPrevention.MainWindow": {
+			"type": "lib",
+			"title": "Threat Prevention",
+			"formatedTitle": "Threat Prevention",
+			"icon": "images/threatprevention_{0}.png",
+			"depend": []
 		}
 	}
 }

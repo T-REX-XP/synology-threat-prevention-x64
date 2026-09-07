@@ -1,6 +1,8 @@
 # Native Threat Prevention desktop app
 
-Implemented in **8.0.6-0009**. Official `synoips.js` / `SYNO.TPS.*.so` are **not** shipped.
+Implemented in **8.0.6-0010**. Official `synoips.js` / `SYNO.TPS.*.so` are **not** shipped (copyright + aarch64/SRM-only).
+
+Start Menu is a DSM **ExtJS** `type: app` (`threatprevention.js` → `SYNO.SDS.AppWindow`) with the official tab names. It is original community code, not a copy of `synoips.js`. It calls `SYNO.TPS.*` on tpsweb `:19557`. Package Center Open uses `dsmappname` (the ExtJS window), not a standalone HTML URL.
 
 | Piece | Path |
 | --- | --- |
@@ -9,7 +11,7 @@ Implemented in **8.0.6-0009**. Official `synoips.js` / `SYNO.TPS.*.so` are **not
 | SPA (Overview / Events / Policy / Statistics / Settings) | `spk/src/threatprevention/package/ui/` |
 | Start helpers | `spk/src/threatprevention/scripts/start-stop-status` |
 
-`tpsweb` listens on **TCP 19557** and `var/tpsweb.sock`. The Start Menu tile still loads `/webman/3rdparty/ThreatPrevention/index.html`; the SPA calls the API on `:19557` (CORS). Package Center **Open** uses `adminport=19557`.
+`tpsweb` listens on **TCP 19557** and `var/tpsweb.sock`. The Start Menu tile launches the ExtJS desktop window. The old HTML SPA remains at `/webman/3rdparty/ThreatPrevention/index.html` as a fallback. HTTPS DSM may block Ajax to HTTP `:19557` (mixed content); use HTTP DSM or open `http://<nas>:19557/`.
 
 Auth: DSM session cookie, SynoToken, localhost, or RFC1918 peer. Admin-only tile (`grantPrivilege: admin`).
 
