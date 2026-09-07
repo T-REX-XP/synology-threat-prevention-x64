@@ -206,7 +206,7 @@ i18n:
 - `this.helper.T("section","key")` — package `ui/texts/<lang>/strings`
 - `_T("common","colon")` / `_T("common","add")` / `_T("common","enabled")` — DSM core strings
 
-Help: [`ui/helptoc.conf`](../unpacked/package/ui/helptoc.conf) + `ui/help/<lang>/`. Search keywords: [`ui/index.conf`](../unpacked/package/ui/index.conf).
+Help: [`ui/helptoc.conf`](../unpacked/package/ui/helptoc.conf) + `ui/help/<lang>/`. Search keywords: [`ui/index.conf`](../unpacked/package/ui/index.conf). DSM Help Center only lists a package after `conf/resource` `indexdb.help-index` (and `app-index`) plus `pkgindexer_add` on start — see [`dsm-help.sh`](../spk/src/threatprevention/scripts/dsm-help.sh). Official SRM topics stay; pack adds `threatprevention_dsm.html` for this NAS PoC.
 
 ---
 

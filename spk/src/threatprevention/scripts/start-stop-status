@@ -275,6 +275,7 @@ start() {
 	else
 		write_status failed "${IFACE}"
 	fi
+	/var/packages/ThreatPrevention/scripts/dsm-help.sh add 2>/dev/null || true
 	# tpsweb is what the official ExtJS app needs. AF_PACKET may need a
 	# post-install setcap; do not fail Package Center for that.
 	if helpers_ok || [ "${suricata_ok}" -eq 1 ]; then
@@ -284,6 +285,7 @@ start() {
 }
 
 stop() {
+	/var/packages/ThreatPrevention/scripts/dsm-help.sh del 2>/dev/null || true
 	unlink_webapi
 	kill_pidfile "${INGEST_PID}"
 	kill_pidfile "${TPSWEB_PID}"

@@ -122,6 +122,59 @@ print("apps:", [k for k, v in cfg["synoips.js"].items() if isinstance(v, dict) a
 print("app version:", app.get("version"))
 print("official depend:", app.get("depend"))
 PY
+info "DSM Help (helptoc + community DSM page + empty indexdb)"
+HELP_SRC="${SRC}/package/ui/help/enu/threatprevention_dsm.html"
+[ -f "${HELP_SRC}" ] || die "Missing ${HELP_SRC}"
+python3 - "${STAGING}/package/ui" "${HELP_SRC}" <<'PY'
+import json, os, shutil, sys
+ui, html = sys.argv[1], sys.argv[2]
+help_root = os.path.join(ui, "help")
+for lang in sorted(os.listdir(help_root)):
+    dest = os.path.join(help_root, lang)
+    if os.path.isdir(dest):
+        shutil.copy(html, os.path.join(dest, "threatprevention_dsm.html"))
+toc_path = os.path.join(ui, "helptoc.conf")
+toc = json.load(open(toc_path, encoding="utf-8"))
+entry = {"title": "This NAS (Suricata IDS)", "content": "threatprevention_dsm.html"}
+children = toc.get("toc") or []
+if not any(c.get("content") == "threatprevention_dsm.html" for c in children):
+    children.insert(0, entry)
+    toc["toc"] = children
+    json.dump(toc, open(toc_path, "w", encoding="utf-8"), indent="\t")
+    print("helptoc.conf topics:", [c.get("content") for c in children])
+leaf = {
+    "id": "SYNO.SDS.TPS.Application:threatprevention_dsm.html",
+    "base": "help",
+    "topic": "threatprevention_dsm.html",
+    "text": "This NAS (Suricata IDS)",
+    "leaf": True,
+}
+htoc = os.path.join(ui, ".helptoc", "SYNO.SDS.TPS.Application")
+if os.path.isdir(htoc):
+    for name in os.listdir(htoc):
+        path = os.path.join(htoc, name)
+        try:
+            data = json.load(open(path, encoding="utf-8"))
+        except ValueError:
+            continue
+        kids = data.get("children") or []
+        if any(k.get("topic") == "threatprevention_dsm.html" for k in kids):
+            continue
+        kids.insert(0, dict(leaf))
+        data["children"] = kids
+        json.dump(data, open(path, "w", encoding="utf-8"), separators=(",", ":"))
+idx_path = os.path.join(ui, "index.conf")
+idx = json.load(open(idx_path, encoding="utf-8"))
+keys = list(idx.get("keywords") or [])
+for extra in ("suricata", "ids", "gretap", "emerging threats"):
+    if extra not in keys:
+        keys.append(extra)
+idx["keywords"] = keys
+json.dump(idx, open(idx_path, "w", encoding="utf-8"), indent="\t")
+print("index keywords:", keys)
+PY
+mkdir -p "${STAGING}/package/indexdb/helpindexdb" "${STAGING}/package/indexdb/appindexdb"
+touch "${STAGING}/package/indexdb/helpindexdb/.keep" "${STAGING}/package/indexdb/appindexdb/.keep"
 if command -v sips >/dev/null 2>&1 && [ -f "${STAGING}/package/ui/images/IDS_IPS_256.png" ]; then
   for sz in 16 32; do
     if [ ! -f "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" ]; then

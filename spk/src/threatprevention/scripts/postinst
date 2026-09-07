@@ -6,6 +6,7 @@ RULES_TGZ="${PKGDEST}/etc/rules/emerging.rules.tar.gz"
 RULES_DIR="${PKGDEST}/etc/rules/suricata"
 
 mkdir -p "${PKGVAR}/log" "${PKGVAR}/rules" "${PKGVAR}/export" "${RULES_DIR}"
+mkdir -p "${PKGDEST}/indexdb/helpindexdb" "${PKGDEST}/indexdb/appindexdb"
 # DSM does not wipe extra files in target/ui. Community leftovers keep the Start Menu
 # on SYNO.SDS.ThreatPrevention.Application instead of the official window.
 rm -f "${PKGDEST}/ui/threatprevention.js" \

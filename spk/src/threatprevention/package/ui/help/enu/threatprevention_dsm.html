@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html class="img-no-display">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<title>Threat Prevention on this NAS</title>
+<link href="../../../../help/help.css" rel="stylesheet" type="text/css">
+<link href="../../../../help/scrollbar/flexcroll.css" rel="stylesheet" type="text/css">
+<script type="text/javascript" src="../../../../help/scrollbar/flexcroll.js"></script>
+<script type="text/javascript" src="../../../../help/scrollbar/initFlexcroll.js"></script>
+</head>
+<body>
+<h1>Threat Prevention on this NAS</h1>
+<p>This package runs vanilla Suricata 8 on DSM 7 x86_64 and drives the official Threat Prevention window. It is a research PoC: <strong>IDS only</strong>. It does not drop packets (no NFQUEUE / IPS).</p>
+
+<div class="section">
+<h4>Note:</h4>
+<ul>
+	<li>This NAS is not the network gateway. Listening on LAN interfaces sees only traffic to or from the NAS unless you enable a router traffic copy.</li>
+	<li>The Prevention / drop-packet options in Settings are stored but not enforced.</li>
+	<li>After every install, Suricata needs <code>cap_net_raw</code> and <code>cap_net_admin</code> on <code>bin/suricata</code> or capture fails to start.</li>
+</ul>
+</div>
+
+<h2>Capture source</h2>
+<p>In <strong>Settings</strong> &gt; <strong>General</strong>:</p>
+<ul>
+	<li><strong>NAS LAN</strong> — Suricata listens on the NAS interfaces (typically OVS LAN). Only NAS traffic is inspected.</li>
+	<li><strong>Traffic copy from the router</strong> — OpenWrt GRE-copies LAN↔WAN onto local <code>tps0</code>. Enter the router LAN IPv4. DSM Firewall must allow GRE (protocol 47) from the router. Apply, then restart this package so the gretap is created.</li>
+</ul>
+
+<h2>Signature updates</h2>
+<p>Use <strong>Update Now</strong> or the automatic schedule. The first download of ET Open can take several minutes. When it finishes, last-updated is stamped and status becomes up to date. Connection errors mean the NAS could not reach Emerging Threats.</p>
+
+<h2>Events, policy, and notifications</h2>
+<ul>
+	<li><strong>Overview / Events / Statistics</strong> — alerts from Suricata <code>eve.json</code>.</li>
+	<li><strong>Self-Defined Policy</strong> — enable or disable signature classes; changes compile into <code>suricata.rules</code> and reload the engine.</li>
+	<li><strong>Notification</strong> — DSM mail/push plus optional Telegram (this PoC).</li>
+</ul>
+</body>
+</html>
