@@ -927,11 +927,125 @@ SYNO.SDS.TPS.Bridge = {
 			if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
 		}, 25);
 	},
+	findNamed: function (root, name) {
+		if (!root || !name) { return null; }
+		var form = root.getForm && root.getForm();
+		var f = form && form.findField && form.findField(name);
+		if (f && (f.name === name || f.hiddenName === name || f.itemId === name)) {
+			return f;
+		}
+		if (root.findBy) {
+			var list = root.findBy(function (c) {
+				return c && (c.name === name || c.hiddenName === name || c.itemId === name);
+			});
+			if (list && list.length) { return list[0]; }
+		}
+		return f || null;
+	},
+	timeItemStore: function (kind) {
+		var max = kind === "hour" ? 24 : 60;
+		var data = [];
+		var i;
+		for (i = 0; i < max; i++) {
+			data.push([i, (i < 10 ? "0" : "") + i]);
+		}
+		return new Ext.data.SimpleStore({ fields: ["value", "display"], data: data });
+	},
+	registerScheduleFields: function (panel) {
+		var form = panel && panel.getForm && panel.getForm();
+		if (!form || !form.add) { return; }
+		var me = this;
+		Ext.each(["weekday", "hour", "minute"], function (name) {
+			var existing = form.findField && form.findField(name);
+			if (existing && (existing.name === name || existing.hiddenName === name)) { return; }
+			var fld = me.findNamed(panel, name);
+			if (fld) { form.add(fld); }
+		});
+	},
+	bindTimeCombos: function (panel) {
+		var me = this;
+		Ext.each(["hour", "minute"], function (name) {
+			var field = me.findNamed(panel, name);
+			if (!field || field._tpsTimeBound) { return; }
+			field.mode = "local";
+			field.triggerAction = "all";
+			field.forceSelection = true;
+			field.editable = false;
+			var store = me.timeItemStore(name);
+			if (field.bindStore) { field.bindStore(store); }
+			else { field.store = store; }
+			field._tpsTimeBound = true;
+		});
+	},
+	applyScheduleData: function (panel, data) {
+		if (!panel || !data) { return; }
+		var me = this;
+		me.registerScheduleFields(panel);
+		me.bindTimeCombos(panel);
+		var auto = me.findNamed(panel, "auto_update");
+		var weekday = me.findNamed(panel, "weekday");
+		var hour = me.findNamed(panel, "hour");
+		var minute = me.findNamed(panel, "minute");
+		var composite = me.findNamed(panel, "schedule_time_settings") ||
+			me.findNamed(panel, "autoupdate_time_settings");
+		if (auto && auto.setValue && data.auto_update != null) {
+			auto.setValue(!!data.auto_update);
+		}
+		if (weekday && weekday.setValue && data.weekday != null && data.weekday !== "") {
+			var w = String(data.weekday);
+			if (w === "daily") { w = "0,1,2,3,4,5,6"; }
+			weekday.setValue(w);
+			weekday.allowBlank = true;
+			if (weekday.clearInvalid) { weekday.clearInvalid(); }
+		}
+		function setTime(field, raw) {
+			if (!field || !field.setValue || raw === undefined || raw === null || raw === "") { return; }
+			var n = Number(raw);
+			if (isNaN(n)) { return; }
+			field.setValue(n);
+		}
+		setTime(hour, data.hour);
+		setTime(minute, data.minute);
+		if (composite && composite.setDisabled) {
+			composite.setDisabled(!data.auto_update);
+		}
+	},
+	applyScheduleFromResult: function (panel, resp) {
+		var me = this;
+		Ext.each((resp && resp.result) || [], function (e) {
+			if (e && e.api === "SYNO.TPS.Settings.Update.Schedule" && e.data) {
+				me.applyScheduleData(panel, e.data);
+			}
+		});
+	},
+	readScheduleValues: function (panel) {
+		var auto = this.findNamed(panel, "auto_update");
+		var weekday = this.findNamed(panel, "weekday");
+		var hour = this.findNamed(panel, "hour");
+		var minute = this.findNamed(panel, "minute");
+		var w = weekday && weekday.getValue && weekday.getValue();
+		if (w == null || w === "" || w === "daily") { w = "0,1,2,3,4,5,6"; }
+		if (typeof w !== "string") { w = String(w); }
+		var h = hour && hour.getValue && hour.getValue();
+		var m = minute && minute.getValue && minute.getValue();
+		h = (h === "" || h == null) ? 2 : Number(h);
+		m = (m === "" || m == null) ? 0 : Number(m);
+		if (isNaN(h)) { h = 2; }
+		if (isNaN(m)) { m = 0; }
+		return {
+			auto_update: !!(auto && auto.getValue && auto.getValue()),
+			weekday: w,
+			hour: h,
+			minute: m
+		};
+	},
 	prepareGeneralForm: function (panel) {
 		if (!panel || !panel.getForm) { return; }
 		var me = this;
 		var form = panel.getForm();
 		if (!form) { return; }
+		me.registerScheduleFields(panel);
+		me.bindTimeCombos(panel);
 		var use = form.findField("use_code");
 		var code = form.findField("code");
 		var isPro = use && use.getValue && use.getValue() === "etPro";
@@ -939,19 +1053,15 @@ SYNO.SDS.TPS.Bridge = {
 			code.allowBlank = !isPro;
 			if (!isPro && code.clearInvalid) { code.clearInvalid(); }
 		}
-		var weekday = form.findField("weekday");
+		var weekday = me.findNamed(panel, "weekday");
 		if (weekday) {
 			weekday.allowBlank = true;
 			if (weekday.clearInvalid) { weekday.clearInvalid(); }
 		}
-		function coerceCombo(field, fallback) {
+		function coerceCombo(field) {
 			if (!field || !field.getValue) { return; }
 			var v = field.getValue();
-			if (v === "" || v === null || v === undefined) {
-				if (field.setValue) { field.setValue(fallback); }
-				me.snapFieldOriginal(field);
-				return;
-			}
+			if (v === "" || v === null || v === undefined) { return; }
 			if (!field.findRecord) { return; }
 			var vf = field.valueField || "value";
 			if (field.findRecord(vf, v)) { return; }
@@ -962,8 +1072,8 @@ SYNO.SDS.TPS.Bridge = {
 			}
 			me.snapFieldOriginal(field);
 		}
-		coerceCombo(form.findField("hour"), 2);
-		coerceCombo(form.findField("minute"), 0);
+		coerceCombo(me.findNamed(panel, "hour"));
+		coerceCombo(me.findNamed(panel, "minute"));
 		var weekdayVal = weekday && weekday.getValue && weekday.getValue();
 		if (weekday && weekday.setValue && (weekdayVal === "daily" || weekdayVal === "" || weekdayVal == null)) {
 			weekday.setValue("0,1,2,3,4,5,6");
@@ -1005,7 +1115,7 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		function snap(fld) { me.snapFieldOriginal(fld); }
 		if (names) {
-			Ext.each(names, function (name) { snap(form.findField(name)); });
+			Ext.each(names, function (name) { snap(me.findNamed(panel, name) || form.findField(name)); });
 			return;
 		}
 		if (form.items && form.items.each) {
@@ -1015,7 +1125,7 @@ SYNO.SDS.TPS.Bridge = {
 			"enable_sensor", "enable_prevention", "enable_auto_export_events_during_postupgrade",
 			"network_security_mode", "auto_update", "weekday", "hour", "minute",
 			"use_code", "code", "update_status", "last_updated"
-		], function (name) { snap(form.findField(name)); });
+		], function (name) { snap(me.findNamed(panel, name) || form.findField(name)); });
 		if (form.findFields) {
 			Ext.each(form.findFields("network_security_mode") || [], snap);
 		}
@@ -1063,6 +1173,13 @@ SYNO.SDS.TPS.Bridge = {
 							if (item.name === "code" || item.name === "weekday") {
 								item.allowBlank = true;
 							}
+							if (item.name === "hour" || item.name === "minute") {
+								item.mode = "local";
+								item.triggerAction = "all";
+								item.forceSelection = true;
+								item.editable = false;
+								item.store = me.timeItemStore(item.name);
+							}
 							if (item.items) { walk(item.items); }
 						});
 					}
@@ -1077,9 +1194,12 @@ SYNO.SDS.TPS.Bridge = {
 			};
 			var origReturn = P.prototype.processReturnData;
 			if (origReturn) {
-				P.prototype.processReturnData = function () {
+				P.prototype.processReturnData = function (b, a) {
 					var self = this;
+					me.registerScheduleFields(this);
+					me.bindTimeCombos(this);
 					var ret = origReturn.apply(this, arguments);
+					me.applyScheduleFromResult(this, a);
 					me.prepareGeneralForm(this);
 					me.clearGeneralDirty(this);
 					window.setTimeout(function () { me.clearGeneralDirty(self); }, 0);
@@ -1103,24 +1223,27 @@ SYNO.SDS.TPS.Bridge = {
 					return ret;
 				};
 			}
-			var origSchedDirty = P.prototype.CheckUpdateSettingsDirty;
 			P.prototype.CheckUpdateSettingsDirty = function (form, apis) {
 				/* Official only tests auto_update + the composite wrapper.
-				   syno_schedulefield / hour / minute live inside the composite
-				   and do not mark it dirty, so Schedule.set was skipped. */
-				var dirty = false;
-				Ext.each(["auto_update", "autoupdate_time_settings", "weekday", "hour", "minute"], function (name) {
-					var fld = form && form.findField && form.findField(name);
-					if (fld && fld.isDirty && fld.isDirty()) { dirty = true; }
-				});
-				if (!dirty && origSchedDirty) {
-					return origSchedDirty.apply(this, arguments);
-				}
-				if (!dirty) {
-					return this.skipSetAPI(apis, "SYNO.TPS.Settings.Update.Schedule");
-				}
+				   Nested weekday/hour/minute do not mark it dirty. Always
+				   include Schedule.set; processParams fills current values. */
 				return apis;
 			};
+			var origParams = P.prototype.processParams;
+			if (origParams) {
+				P.prototype.processParams = function (c, b) {
+					var out = origParams.apply(this, arguments);
+					if (c === "get") { return out; }
+					var vals = me.readScheduleValues(this);
+					Ext.each(out || [], function (f) {
+						if (!f || f.api !== "SYNO.TPS.Settings.Update.Schedule" || f.method !== "set") {
+							return;
+						}
+						f.params = Ext.apply({}, f.params || {}, vals);
+					});
+					return out;
+				};
+			}
 			var origDirty = P.prototype.extendFormDirty;
 			P.prototype.extendFormDirty = function () {
 				if (origDirty) { origDirty.apply(this, arguments); }

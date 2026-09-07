@@ -59,6 +59,10 @@ cp -a "${ORIG_RULES}/version.txt" "${STAGING}/package/etc/rules/" 2>/dev/null ||
 cp -a "${ROOT}/unpacked/package/etc/suricata/threshold.config" "${STAGING}/package/etc/suricata/"
 cp -a "${SRC}/package/etc/sensor/sensor.conf" "${STAGING}/package/etc/sensor/sensor.conf"
 cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/suricata/suricata.yaml"
+cp -a "${SRC}/package/etc/mirror.conf" "${STAGING}/package/etc/mirror.conf"
+mkdir -p "${STAGING}/package/etc/openwrt"
+cp -a "${SRC}/package/etc/openwrt/." "${STAGING}/package/etc/openwrt/"
+chmod +x "${STAGING}/package/etc/openwrt/apply-tps-mirror.sh" 2>/dev/null || true
 mkdir -p "${STAGING}/package/etc/nginx"
 cp -a "${SRC}/package/etc/nginx/dsm-tpsweb.conf" "${STAGING}/package/etc/nginx/dsm-tpsweb.conf"
 

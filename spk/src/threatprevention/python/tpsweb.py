@@ -55,6 +55,7 @@ from paths import (
     EXPORT_DIR,
     GMAPS_KEY,
     IFACE_FILE,
+    MIRROR_CONF,
     PKGDEST,
     PKGETC,
     PKGVAR,
@@ -296,7 +297,10 @@ def read_sensor():
                 pass
     elif ui:
         st = ui
-    data = official_sensor(cfg, st, pid, cfg.get("interface_list") or "", list_ifaces())
+    data = official_sensor(
+        cfg, st, pid, cfg.get("interface_list") or "", list_ifaces(),
+        mirror_ifname=read_mirror_conf().get("ifname") or "",
+    )
     for item in data.get("interface_list") or []:
         item["ip_addr"] = iface_ipv4(item.get("if_id") or item.get("ifname") or "") or ""
     return data
@@ -317,8 +321,13 @@ def write_sensor(data):
     else:
         iface = str(raw_iface).strip()
     if iface:
+        pin = iface.split()[0]
+        mirror = read_mirror_conf()
+        mname = mirror.get("ifname") or "tps0"
+        if mirror.get("enabled") and mname in iface.split():
+            pin = mname
         with open(IFACE_FILE, "w") as fh:
-            fh.write(iface.split()[0] + "\n")
+            fh.write(pin + "\n")
         try:
             os.chmod(IFACE_FILE, 0o644)
         except OSError:
@@ -355,6 +364,30 @@ def kv_peek(key, default=""):
         return default
 
 
+def read_mirror_conf():
+    out = {"enabled": False, "router_ip": "192.168.1.1", "local_ip": "", "ifname": "tps0"}
+    if not os.path.isfile(MIRROR_CONF):
+        return out
+    try:
+        fh = open(MIRROR_CONF, encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key, val = key.strip(), val.strip()
+            if key == "enabled":
+                out["enabled"] = _truth(val)
+            elif key in ("router_ip", "local_ip", "ifname") and val:
+                out[key] = val
+    if not out.get("ifname"):
+        out["ifname"] = "tps0"
+    return out
+
+
 def _iface_enslaved(name):
     return os.path.lexists("/sys/class/net/%s/master" % name)
 
@@ -362,6 +395,9 @@ def _iface_enslaved(name):
 def _skip_iface(name):
     if not name:
         return True
+    mirror = read_mirror_conf().get("ifname") or "tps0"
+    if name == mirror:
+        return False
     skip = ("lo", "sit0", "ovs-system", "syno_ovs_bonds", "dummy0", "bonding_masters")
     if name in skip or name.startswith(("veth", "docker", "br-", "tun", "tap", "gre", "sit", "ip6tnl")):
         return True
@@ -1143,43 +1179,70 @@ def _apply_policy_batch(conn, policy):
             })
 
 
+def schedule_payload(conn):
+    stored = kv_get(conn, "update_minute", "120")
+    hour = kv_get(conn, "update_hour", "")
+    minute = kv_get(conn, "update_min_of_hour", "")
+    if hour == "" or minute == "":
+        try:
+            combined = int(stored) if str(stored).lstrip("-").isdigit() else 120
+        except (TypeError, ValueError):
+            combined = 120
+        if hour == "":
+            hour = combined // 60
+        if minute == "":
+            minute = combined % 60
+    try:
+        hour_i = int(hour)
+    except (TypeError, ValueError):
+        hour_i = 2
+    try:
+        minute_i = int(minute)
+    except (TypeError, ValueError):
+        minute_i = 0
+    try:
+        sched = int(stored) if str(stored).lstrip("-").isdigit() else hour_i * 60 + minute_i
+    except (TypeError, ValueError):
+        sched = hour_i * 60 + minute_i
+    return {
+        "auto_update": kv_get(conn, "auto_update") == "1",
+        "weekday": official_weekday(kv_get(conn, "update_weekday", "daily")),
+        "hour": hour_i,
+        "minute": minute_i,
+        "schedule_minute": sched,
+    }
+
+
+def _schedule_int(raw, fallback):
+    if raw is None or raw == "":
+        return fallback
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return fallback
+
+
 def settings_update(conn, api, method, p):
     if api == "SYNO.TPS.Settings.Update.Schedule":
         if method == "get":
-            stored = kv_get(conn, "update_minute", "120")
-            hour = kv_get(conn, "update_hour", "")
-            minute = kv_get(conn, "update_min_of_hour", "")
-            if hour == "" or minute == "":
-                try:
-                    combined = int(stored or 120)
-                except ValueError:
-                    combined = 120
-                hour, minute = combined // 60, combined % 60
-            return ok({
-                "auto_update": kv_get(conn, "auto_update") == "1",
-                "weekday": official_weekday(kv_get(conn, "update_weekday", "daily")),
-                "hour": int(hour or 2),
-                "minute": int(minute or 0),
-                "schedule_minute": int(stored or 120) if str(stored).isdigit() else stored,
-            })
+            return ok(schedule_payload(conn))
         if method == "set":
             kv_set(conn, "auto_update", "1" if _truth(p.get("auto_update")) else "0")
             if "weekday" in p:
                 kv_set(conn, "update_weekday", parse_weekday(p.get("weekday")))
             if "hour" in p or "minute" in p:
-                try:
-                    hour = int(p.get("hour") if p.get("hour") not in (None, "") else kv_get(conn, "update_hour", "2") or 2)
-                except ValueError:
-                    hour = 2
-                try:
-                    minute = int(p.get("minute") if p.get("minute") not in (None, "") else kv_get(conn, "update_min_of_hour", "0") or 0)
-                except ValueError:
-                    minute = 0
+                cur = schedule_payload(conn)
+                hour = cur["hour"]
+                minute = cur["minute"]
+                if "hour" in p and p.get("hour") not in (None, ""):
+                    hour = _schedule_int(p.get("hour"), hour)
+                if "minute" in p and p.get("minute") not in (None, ""):
+                    minute = _schedule_int(p.get("minute"), minute)
                 kv_set(conn, "update_hour", str(hour))
                 kv_set(conn, "update_min_of_hour", str(minute))
                 kv_set(conn, "update_minute", str(hour * 60 + minute))
             conn.commit()
-            return ok({})
+            return ok(schedule_payload(conn))
     if api == "SYNO.TPS.Settings.Update.Source":
         if method == "get":
             return ok(official_source(kv_get(conn, "update_source", "et-open"), kv_get(conn, "etpro_code", "")))

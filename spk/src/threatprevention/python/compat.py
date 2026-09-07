@@ -294,7 +294,7 @@ def _collapse_ovs_ifaces(ifaces):
     return [row for row in ifaces if row.get("if_id") not in drop]
 
 
-def official_sensor(cfg, status, pid, iface, live=None):
+def official_sensor(cfg, status, pid, iface, live=None, mirror_ifname=""):
     enabled = set()
     ifaces = []
     raw = cfg.get("interface_list") or iface or ""
@@ -335,6 +335,15 @@ def official_sensor(cfg, status, pid, iface, live=None):
         ifaces.append(_iface_row(name, True))
         enabled.add(name)
     ifaces = _collapse_ovs_ifaces(ifaces)
+    cap = str(iface or "").replace(",", " ").split()[:1]
+    cap = cap[0] if cap else ""
+    if mirror_ifname and cap == mirror_ifname:
+        present = any(x.get("if_id") == mirror_ifname for x in ifaces)
+        if not present:
+            ifaces.append(_iface_row(mirror_ifname, True))
+        for row in ifaces:
+            row["enabled"] = row.get("if_id") == mirror_ifname
+        enabled = {mirror_ifname}
     if ifaces and not enabled:
         parts = str(iface or "").split()
         prefer = parts[0] if parts else "ovs_eth0"

@@ -29,6 +29,107 @@ read_iface_file() {
 	tr -d '\r' < "${PKGETC}/interface" | awk 'NF { print $1; exit }'
 }
 
+ensure_mirror_conf() {
+	mkdir -p "${PKGETC}"
+	if [ ! -f "${PKGETC}/mirror.conf" ] && [ -f "${PKGDEST}/etc/mirror.conf" ]; then
+		cp -f "${PKGDEST}/etc/mirror.conf" "${PKGETC}/mirror.conf" 2>/dev/null || true
+		chmod 644 "${PKGETC}/mirror.conf" 2>/dev/null || true
+	fi
+}
+
+mirror_kv() {
+	key="$1"
+	default="$2"
+	if [ ! -r "${PKGETC}/mirror.conf" ]; then
+		echo "${default}"
+		return
+	fi
+	awk -F= -v k="${key}" -v d="${default}" '
+		BEGIN { found=0 }
+		/^[ \t]*#/ { next }
+		NF < 1 { next }
+		{
+			gsub(/^[ \t]+|[ \t]+$/, "", $1)
+			if ($1 == k) {
+				val=$0
+				sub(/^[^=]*=/, "", val)
+				gsub(/^[ \t]+|[ \t]+$/, "", val)
+				print val
+				found=1
+				exit
+			}
+		}
+		END { if (!found) print d }
+	' "${PKGETC}/mirror.conf"
+}
+
+detect_local_ip() {
+	router="$1"
+	src=""
+	if [ -n "${router}" ]; then
+		src="$(ip -4 route get "${router}" 2>/dev/null | awk '{
+			for (i = 1; i <= NF; i++) if ($i == "src") { print $(i+1); exit }
+		}')"
+	fi
+	if [ -z "${src}" ]; then
+		src="$(ip -4 -o addr show ovs_eth0 2>/dev/null | awk '{ print $4; exit }' | cut -d/ -f1)"
+	fi
+	echo "${src}"
+}
+
+pin_iface() {
+	name="$1"
+	[ -n "${name}" ] || return 0
+	echo "${name}" > "${PKGETC}/interface" 2>/dev/null || true
+	chmod 644 "${PKGETC}/interface" 2>/dev/null || true
+}
+
+ensure_gretap() {
+	ensure_mirror_conf
+	enabled="$(mirror_kv enabled 0)"
+	case "${enabled}" in
+		1|yes|true|on) ;;
+		*) return 1 ;;
+	esac
+	ifname="$(mirror_kv ifname tps0)"
+	[ -n "${ifname}" ] || ifname="tps0"
+	router="$(mirror_kv router_ip 192.168.1.1)"
+	local_ip="$(mirror_kv local_ip "")"
+	if [ -z "${local_ip}" ]; then
+		local_ip="$(detect_local_ip "${router}")"
+	fi
+	if [ -z "${router}" ] || [ -z "${local_ip}" ]; then
+		echo "gretap skipped: need router_ip and local_ip" >&2
+		return 1
+	fi
+	modprobe ip_gre 2>/dev/null || modprobe gre 2>/dev/null || true
+	if ip link show "${ifname}" >/dev/null 2>&1; then
+		ip link set "${ifname}" up 2>/dev/null || true
+		pin_iface "${ifname}"
+		echo "gretap ${ifname} already present (remote ${router})" >&2
+		return 0
+	fi
+	if ip link add "${ifname}" type gretap remote "${router}" local "${local_ip}" ttl 255 2>/dev/null; then
+		ip link set "${ifname}" up 2>/dev/null || true
+		pin_iface "${ifname}"
+		echo "gretap ${ifname} ${local_ip} -> ${router}" >&2
+		return 0
+	fi
+	echo "gretap ${ifname} create failed; capture stays on LAN NIC" >&2
+	return 1
+}
+
+destroy_gretap() {
+	ensure_mirror_conf
+	ifname="$(mirror_kv ifname tps0)"
+	[ -n "${ifname}" ] || ifname="tps0"
+	if ip link show "${ifname}" >/dev/null 2>&1; then
+		ip link set "${ifname}" down 2>/dev/null || true
+		ip link del "${ifname}" 2>/dev/null || true
+		echo "gretap ${ifname} removed" >&2
+	fi
+}
+
 pick_iface() {
 	iface="$(read_iface_file || true)"
 	if [ -n "${iface}" ]; then
@@ -94,6 +195,13 @@ helpers_ok() {
 
 start() {
 	mkdir -p "${LOGDIR}" "${PKGVAR}" "${PKGETC}" "${PKGVAR}/export"
+	ensure_gretap || true
+	ifname="$(mirror_kv ifname tps0)"
+	cur="$(read_iface_file || true)"
+	if [ -n "${ifname}" ] && [ "${cur}" = "${ifname}" ] && ! ip link show "${ifname}" >/dev/null 2>&1; then
+		echo "capture pin ${ifname} missing; falling back to ovs_eth0" >&2
+		pin_iface ovs_eth0
+	fi
 	# Package Center start must not die on a stale root-owned iface pin.
 	IFACE="$(pick_iface)"
 	if [ -z "${IFACE}" ]; then
@@ -184,6 +292,7 @@ stop() {
 		rm -f "${PIDFILE}" 2>/dev/null || true
 	fi
 	killall suricata 2>/dev/null || true
+	destroy_gretap
 	write_status stopped ""
 }
 

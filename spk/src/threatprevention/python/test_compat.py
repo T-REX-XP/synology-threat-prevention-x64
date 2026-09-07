@@ -64,6 +64,14 @@ none = official_sensor({"enable_sensor": True, "interface_list": ""}, "running",
 check(len(none["interface_list"]) >= 1, "fallback iface when sysfs empty")
 check(any(x.get("enabled") for x in none["interface_list"]), "fallback enabled")
 
+mir = official_sensor(
+    {"enable_sensor": True, "interface_list": [{"if_id": "ovs_eth0", "enabled": True}]},
+    "running", 1, "tps0", ["ovs_eth0", "tps0"], "tps0",
+)
+check(mir["interface"] == "tps0", "mirror capture pin")
+check(any(x["if_id"] == "tps0" and x["enabled"] for x in mir["interface_list"]), "tps0 enabled")
+check(all(not x["enabled"] for x in mir["interface_list"] if x["if_id"] != "tps0"), "no dual ovs+tps")
+
 src = official_source("et-pro", "abc")
 check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_code")
 check(official_weekday("daily") == "0,1,2,3,4,5,6", "weekday daily for schedulefield")
@@ -195,10 +203,12 @@ check(usb["data"]["devices"], "usb/volume list not empty")
 sched = handle("SYNO.TPS.Settings.Update.Schedule", "get", {}, conn)
 check(sched["success"] and sched["data"]["weekday"] == "0,1,2,3,4,5,6", "schedule get weekday csv")
 saved = handle("SYNO.TPS.Settings.Update.Schedule", "set", {"auto_update": True, "weekday": "0,6", "hour": 3, "minute": 15}, conn)
-check(saved["success"], "schedule set")
+check(saved["success"] and saved["data"]["hour"] == 3 and saved["data"]["minute"] == 15, "schedule set returns payload")
 sched2 = handle("SYNO.TPS.Settings.Update.Schedule", "get", {}, conn)
 check(sched2["data"]["auto_update"] is True and sched2["data"]["weekday"] == "0,6", "schedule weekend roundtrip")
 check(sched2["data"]["hour"] == 3 and sched2["data"]["minute"] == 15, "schedule time roundtrip")
+midnight = handle("SYNO.TPS.Settings.Update.Schedule", "set", {"auto_update": True, "weekday": "0", "hour": 0, "minute": 0}, conn)
+check(midnight["data"]["hour"] == 0 and midnight["data"]["minute"] == 0, "schedule midnight hour not coerced")
 st = handle("SYNO.TPS.Settings.Storage", "set", {"db_size": "db_size_2gb"}, conn)
 check(st["success"] and st["data"]["db_size"] == "db_size_2gb", "storage set returns combo key")
 got2 = handle("SYNO.TPS.Settings.Storage", "get", {}, conn)

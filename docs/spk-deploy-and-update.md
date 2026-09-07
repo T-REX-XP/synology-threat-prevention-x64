@@ -11,7 +11,8 @@ Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
 | --- | --- |
 | Install root | `/var/packages/ThreatPrevention/target` |
 | Logs, pid, live rules | `/var/packages/ThreatPrevention/var/` |
-| Capture iface override | `/var/packages/ThreatPrevention/etc/interface` (one line, e.g. `ovs_eth0`) |
+| Capture iface override | `/var/packages/ThreatPrevention/etc/interface` (one line). When router copy is on, this is `tps0`. |
+| Traffic copy (gretap) | `/var/packages/ThreatPrevention/etc/mirror.conf` — see [router-traffic-copy.md](router-traffic-copy.md) |
 | Start Menu UI | `/usr/syno/synoman/webman/3rdparty/ThreatPrevention` → `target/ui` |
 | tpsweb API / SPA | `http://<nas>:19557/` (also unix `var/tpsweb.sock`) |
 | Event DB | `/var/packages/ThreatPrevention/var/tps.db` |
@@ -73,7 +74,7 @@ grep -E "Engine started|af-packet|Operation not permitted" \
   /var/packages/ThreatPrevention/var/log/suricata.log | tail
 ```
 
-Optional iface pin (then restart):
+Optional iface pin (then restart). **Do not pin `ovs_eth0` while router copy is enabled** — start will recreate `tps0` and rewrite `etc/interface`. See [router-traffic-copy.md](router-traffic-copy.md).
 
 ```sh
 echo ovs_eth0 | sudo tee /var/packages/ThreatPrevention/etc/interface

@@ -36,4 +36,8 @@ if [ ! -s "${PKGVAR}/rules/suricata.rules" ] && [ -d "${RULES_DIR}/rules" ]; the
 	cat "${RULES_DIR}/rules/"*.rules > "${PKGVAR}/rules/suricata.rules" 2>/dev/null || true
 	cp -f "${PKGVAR}/rules/suricata.rules" "${PKGVAR}/rules/catalog.rules" 2>/dev/null || true
 fi
+if [ ! -f "${PKGETC}/mirror.conf" ] && [ -f "${PKGDEST}/etc/mirror.conf" ]; then
+	cp -f "${PKGDEST}/etc/mirror.conf" "${PKGETC}/mirror.conf" 2>/dev/null || true
+	chmod 644 "${PKGETC}/mirror.conf" 2>/dev/null || true
+fi
 exit 0

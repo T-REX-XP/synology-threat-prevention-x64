@@ -56,7 +56,9 @@ af-packet:
   - interface: ovs_eth0
     defrag: yes
     use-mmap: yes
+    checksum-checks: no
     # DSM 7.4 SA6400 is Linux 5.10; PACKET_FANOUT (cluster_flow) is rejected.
+    # checksum-checks no: gretap copies can fail offload checksums.
 
 nfq:
   mode: accept

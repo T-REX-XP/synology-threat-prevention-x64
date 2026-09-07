@@ -1,0 +1,11 @@
+# OpenWrt UCI fragment — LAN gretap peer is the NAS. No IPv4 on the tap.
+# Apply with: cat tps-mirror.network >> /etc/config/network && /etc/init.d/network reload
+# Requires: opkg install kmod-gre gre
+
+config interface 'tpsmirror'
+	option proto 'gretap'
+	option ipaddr '192.168.1.1'
+	option peeraddr '192.168.1.130'
+	option tunlink 'br-lan'
+	option mtu '1462'
+	option force_link '1'
