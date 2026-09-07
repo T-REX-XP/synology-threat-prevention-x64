@@ -133,6 +133,10 @@ def engine_status():
             pid = int(open(SURICATA_PID).read().strip() or "0")
             if _pid_alive(pid):
                 return "running", pid
+            try:
+                os.remove(SURICATA_PID)
+            except OSError:
+                pass
         except (ValueError, OSError):
             pass
     pid = _find_suricata_pid()
@@ -144,6 +148,53 @@ def engine_status():
             pass
         return "running", pid
     return "stopped", 0
+
+
+_AUTOSTART_TRY = 0.0
+_AUTOSTART_FAIL = 0.0
+
+
+def maybe_autostart(enable):
+    """If capture is enabled but Suricata is dead, try to start it (needs setcap)."""
+    global _AUTOSTART_TRY, _AUTOSTART_FAIL
+    if not enable:
+        return
+    st, _pid = engine_status()
+    if st == "running":
+        return
+    now = time.time()
+    if now - _AUTOSTART_TRY < 45:
+        return
+    if _AUTOSTART_FAIL and now - _AUTOSTART_FAIL < 120:
+        return
+    _AUTOSTART_TRY = now
+
+    def _run():
+        global _AUTOSTART_FAIL
+        try:
+            conn = connect()
+            try:
+                kv_set(conn, "engine_ui_status", "engine_init")
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        if start_engine():
+            _AUTOSTART_FAIL = 0.0
+        else:
+            _AUTOSTART_FAIL = time.time()
+            try:
+                conn = connect()
+                try:
+                    kv_set(conn, "engine_ui_status", "")
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _capture_iface():
@@ -226,6 +277,7 @@ def read_sensor():
     cfg["enable_auto_export_events_during_postupgrade"] = _truth(
         cfg.get("enable_auto_export_events_during_postupgrade", False)
     )
+    maybe_autostart(cfg["enable_sensor"])
     ui = kv_peek("engine_ui_status")
     st, pid = engine_status()
     if st == "running":
@@ -305,7 +357,7 @@ def list_ifaces():
     sysnet = "/sys/class/net"
     if os.path.isdir(sysnet):
         for name in sorted(os.listdir(sysnet)):
-            if name in ("lo", "sit0", "ovs-system") or name.startswith(("veth", "docker", "br-", "tun", "tap")):
+            if name in ("lo", "sit0", "ovs-system", "syno_ovs_bonds", "dummy0") or name.startswith(("veth", "docker", "br-", "tun", "tap", "gre", "sit")):
                 continue
             names.append(name)
         return names
@@ -318,7 +370,7 @@ def list_ifaces():
         if len(parts) < 2:
             continue
         name = parts[1].strip().split("@", 1)[0]
-        if name in ("lo", "sit0", "ovs-system") or name.startswith(("veth", "docker", "br-")):
+        if name in ("lo", "sit0", "ovs-system", "syno_ovs_bonds") or name.startswith(("veth", "docker", "br-")):
             continue
         names.append(name)
     return names
@@ -1381,7 +1433,7 @@ def notification(conn, method, p):
             if k.startswith("enable_"):
                 data[k] = data[k] == "1"
             elif k.startswith("min_"):
-                data[k] = int(data[k] or 300)
+                data[k] = int(data[k] or 5)
         return ok(data)
     if method == "set":
         for k in keys:

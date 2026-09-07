@@ -140,6 +140,15 @@ start() {
 				sleep 1
 				i=$((i + 1))
 			done
+			# -D can write the pidfile then die on AF_PACKET EPERM.
+			if [ "${suricata_ok}" -eq 1 ]; then
+				sleep 4
+				if ! alive "${PIDFILE}"; then
+					echo "suricata exited after daemonize (often missing setcap)" >&2
+					suricata_ok=0
+					rm -f "${PIDFILE}" 2>/dev/null || true
+				fi
+			fi
 		else
 			echo "suricata failed to start (see ${LOGDIR}/suricata.log)" >&2
 		fi

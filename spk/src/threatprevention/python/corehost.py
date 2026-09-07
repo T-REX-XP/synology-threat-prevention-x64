@@ -208,7 +208,16 @@ def list_neighbors():
     for rec in by_mac.values():
         if not rec.get("hostname"):
             rec["hostname"] = hosts_ip.get(rec.get("ip") or "") or ""
-    return sorted(by_mac.values(), key=lambda r: r.get("ip") or r["mac"])
+    kept = []
+    for rec in by_mac.values():
+        mac = rec.get("mac") or ""
+        iface = rec.get("iface") or ""
+        if mac.startswith("02:42:"):
+            continue
+        if iface.startswith(("docker", "br-", "veth", "virbr")):
+            continue
+        kept.append(rec)
+    return sorted(kept, key=lambda r: r.get("ip") or r["mac"])
 
 
 def nsm_device_list():
