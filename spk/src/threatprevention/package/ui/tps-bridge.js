@@ -1176,8 +1176,10 @@ SYNO.SDS.TPS.Bridge = {
 		return null;
 	},
 	captureModeIsCopy: function (panel) {
-		var v = this.radioInputValue(panel, "capture_mode") || (panel && panel._tpsCaptureMode);
-		return v === "copy";
+		if (panel && panel._tpsCaptureMode) {
+			return panel._tpsCaptureMode === "copy";
+		}
+		return this.radioInputValue(panel, "capture_mode") === "copy";
 	},
 	readMirrorValues: function (panel) {
 		var form = panel && panel.getForm && panel.getForm();
@@ -1187,7 +1189,7 @@ SYNO.SDS.TPS.Bridge = {
 			var v = fld.getValue();
 			return (v === null || v === undefined) ? fallback : v;
 		}
-		var mode = this.radioInputValue(panel, "capture_mode") || (panel && panel._tpsCaptureMode) || "lan";
+		var mode = (panel && panel._tpsCaptureMode) || this.radioInputValue(panel, "capture_mode") || "lan";
 		return {
 			capture_mode: mode === "copy" ? "copy" : "lan",
 			enabled: mode === "copy",
@@ -1196,15 +1198,39 @@ SYNO.SDS.TPS.Bridge = {
 			ifname: String(val("ifname", "tps0") || "tps0").replace(/^\s+|\s+$/g, "") || "tps0"
 		};
 	},
-	setSectionActive: function (cmp, on) {
+	setCmpEnabled: function (cmp, on) {
 		if (!cmp) { return; }
-		if (cmp.setVisible) { cmp.setVisible(!!on); }
-		else if (on) { if (cmp.show) { cmp.show(); } }
-		else if (cmp.hide) { cmp.hide(); }
-		if (cmp.setDisabled) { cmp.setDisabled(!on); }
+		on = !!on;
+		try {
+			if (typeof cmp.setDisabled === "function") { cmp.setDisabled(!on); }
+			else if (on && cmp.enable) { cmp.enable(); }
+			else if (!on && cmp.disable) { cmp.disable(); }
+		} catch (e) {}
+	},
+	namedField: function (panel, name) {
+		var form = panel && panel.getForm && panel.getForm();
+		return (form && form.findField && form.findField(name)) || this.findNamed(panel, name);
+	},
+	gateMonitoredIfaces: function (panel) {
+		/* Official load / enable_sensor re-enables the grid. Keep it off in copy mode. */
+		var me = this;
+		if (!panel) { return; }
+		function wrap(obj) {
+			if (!obj || !obj.setDisabled || obj.setDisabled._tpsCopyGate) { return; }
+			var orig = obj.setDisabled;
+			obj.setDisabled = function (disabled) {
+				if (me.captureModeIsCopy(panel)) { disabled = true; }
+				return orig.call(this, disabled);
+			};
+			obj.setDisabled._tpsCopyGate = true;
+		}
+		wrap(panel.interfaceGrid);
+		wrap(this.findByItemId(panel, "tps_iface_fieldset") ||
+			(panel.interfaceGrid && panel.interfaceGrid.ownerCt));
 	},
 	syncCaptureMode: function (panel, forced) {
 		if (!panel || !panel.getForm) { return; }
+		var me = this;
 		var form = panel.getForm();
 		if (!form) { return; }
 		var copy;
@@ -1215,30 +1241,27 @@ SYNO.SDS.TPS.Bridge = {
 			copy = this.captureModeIsCopy(panel);
 			panel._tpsCaptureMode = copy ? "copy" : "lan";
 		}
-		var sensor = form.findField("enable_sensor");
+		this.gateMonitoredIfaces(panel);
+		var sensor = this.namedField(panel, "enable_sensor");
 		var sensorOn = !sensor || !sensor.getValue || !!sensor.getValue();
-		var copySec = this.findByItemId(panel, "tps_copy_section");
+		/* Copy-only: Router IP, optional NAS IP. */
+		me.setCmpEnabled(me.namedField(panel, "router_ip"), copy);
+		me.setCmpEnabled(me.namedField(panel, "local_ip"), copy);
+		var rip = me.namedField(panel, "router_ip");
+		if (rip) {
+			rip.allowBlank = !copy;
+			if (!copy && rip.clearInvalid) { rip.clearInvalid(); }
+		}
+		/* LAN-only: Monitored Interfaces. Sensor off also disables the grid. */
 		var ifaceFs = this.findByItemId(panel, "tps_iface_fieldset") ||
 			(panel.interfaceGrid && panel.interfaceGrid.ownerCt);
-		this.setSectionActive(copySec, copy);
-		Ext.each(["router_ip", "local_ip"], function (name) {
-			var fld = form.findField(name);
-			if (!fld) { return; }
-			if (fld.setDisabled) { fld.setDisabled(!copy); }
-			if (name === "router_ip") {
-				fld.allowBlank = !copy;
-				if (!copy && fld.clearInvalid) { fld.clearInvalid(); }
-			}
-		});
-		var ifacesOn = !!sensorOn && !copy;
-		if (ifaceFs) {
-			if (ifaceFs.setVisible) { ifaceFs.setVisible(true); }
-			if (ifaceFs.setDisabled) { ifaceFs.setDisabled(!ifacesOn); }
+		if (copy) {
+			me.setCmpEnabled(ifaceFs, false);
+			me.setCmpEnabled(panel.interfaceGrid, false);
+		} else {
+			me.setCmpEnabled(ifaceFs, true);
+			me.setCmpEnabled(panel.interfaceGrid, sensorOn);
 		}
-		if (panel.interfaceGrid && panel.interfaceGrid.setDisabled) {
-			panel.interfaceGrid.setDisabled(!ifacesOn);
-		}
-		if (panel.doLayout) { panel.doLayout(); }
 	},
 	applyMirrorData: function (panel, data) {
 		if (!panel || !data) { return; }
@@ -1272,9 +1295,20 @@ SYNO.SDS.TPS.Bridge = {
 	captureModeFieldset: function (panel) {
 		var me = this;
 		function onMode(fld, on) {
-			if (!on) { return; }
+			if (on === false) { return; }
 			me.syncCaptureMode(panel, fld && fld.inputValue);
 			me.prepareGeneralForm(panel);
+		}
+		function radio(value, label, checked) {
+			return {
+				xtype: "syno_radio",
+				name: "capture_mode",
+				inputValue: value,
+				boxLabel: label,
+				checked: !!checked,
+				handler: onMode,
+				listeners: { check: onMode, click: function () { onMode(this, true); } }
+			};
 		}
 		return {
 			xtype: "syno_fieldset",
@@ -1288,37 +1322,20 @@ SYNO.SDS.TPS.Bridge = {
 					xtype: "syno_displayfield", hideLabel: true, htmlEncode: false,
 					value: "The NAS is not the gateway. Choose how Suricata sees packets."
 				},
-				{
-					xtype: "syno_radio", name: "capture_mode", inputValue: "lan", checked: true,
-					boxLabel: "Listen on NAS LAN interfaces — only traffic to or from this NAS",
-					listeners: { check: onMode }
-				},
-				{
-					xtype: "syno_radio", name: "capture_mode", inputValue: "copy",
-					boxLabel: "Receive a traffic copy from the router — LAN↔WAN (OpenWrt GRE)",
-					listeners: { check: onMode }
-				},
+				radio("lan", "Listen on NAS LAN interfaces — only traffic to or from this NAS", true),
+				radio("copy", "Receive a traffic copy from the router — LAN↔WAN (OpenWrt GRE)", false),
 				{ xtype: "hidden", name: "ifname", value: "tps0" },
 				{
-					xtype: "container",
-					itemId: "tps_copy_section",
-					layout: "form",
-					hidden: true,
-					hideMode: "display",
-					items: [
-						{
-							xtype: "syno_textfield", name: "router_ip", fieldLabel: "Router IP",
-							indent: 1, allowBlank: true, value: "192.168.1.1"
-						},
-						{
-							xtype: "syno_textfield", name: "local_ip", fieldLabel: "NAS IP (optional)",
-							indent: 1, allowBlank: true, emptyText: "auto"
-						},
-						{
-							xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
-							value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router."
-						}
-					]
+					xtype: "syno_textfield", name: "router_ip", fieldLabel: "Router IP",
+					indent: 1, allowBlank: true, disabled: true, value: "192.168.1.1"
+				},
+				{
+					xtype: "syno_textfield", name: "local_ip", fieldLabel: "NAS IP (optional)",
+					indent: 1, allowBlank: true, disabled: true, emptyText: "auto"
+				},
+				{
+					xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
+					value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router."
 				}
 			]
 		};
@@ -1472,6 +1489,7 @@ SYNO.SDS.TPS.Bridge = {
 			return orig.apply(this, arguments);
 		};
 		form.isValid._tpsGeneral = true;
+		me.gateMonitoredIfaces(panel);
 		me.prepareGeneralForm(panel);
 	},
 	patchGeneralSettings: function (Panel) {
@@ -1523,7 +1541,10 @@ SYNO.SDS.TPS.Bridge = {
 						cfg.items.splice(1, 0, me.captureModeFieldset(this));
 					}
 					if (cfg && cfg.listeners) {
-						cfg.listeners.afterrender = function () { me.syncCaptureMode(this); };
+						cfg.listeners.afterrender = function () {
+							me.gateMonitoredIfaces(this);
+							me.syncCaptureMode(this);
+						};
 					}
 					return cfg;
 				};
@@ -1539,6 +1560,7 @@ SYNO.SDS.TPS.Bridge = {
 					var self = this;
 					me.registerScheduleFields(this);
 					me.bindTimeCombos(this);
+					me.gateMonitoredIfaces(this);
 					var ret = origReturn.apply(this, arguments);
 					me.applyScheduleFromResult(this, a);
 					me.applyMirrorFromResult(this, a);
@@ -1547,10 +1569,12 @@ SYNO.SDS.TPS.Bridge = {
 					me.clearGeneralDirty(this);
 					window.setTimeout(function () {
 						me.applyScheduleFromResult(self, a);
+						me.syncCaptureMode(self);
 						me.clearGeneralDirty(self);
 					}, 0);
 					window.setTimeout(function () {
 						me.applyScheduleFromResult(self, a);
+						me.syncCaptureMode(self);
 						me.clearGeneralDirty(self);
 					}, 50);
 					return ret;
