@@ -16,7 +16,7 @@ To make the official app fully replaceable you still need:
 
 | Layer | Official | Vanilla Suricata 8 | PoC replacement |
 | --- | --- | --- | --- |
-| Desktop | ExtJS `synoips.js` + `ui/config` `type: app` | none | pack official UI + inlined `tps-bridge.js` |
+| Desktop | ExtJS `synoips.js` + `ui/config` `type: app` | none | pack official UI + inlined `tps-bridge.js` ([dsm-extjs-sdk.md](dsm-extjs-sdk.md)) |
 | WebAPI transport | DSM `sendWebAPI` → `entry.cgi` → `.so` | none | bridge to `tpsweb :19557` |
 | 21 `SYNO.TPS.*` contracts | 8 aarch64 CGI modules + `libsynotps` | none | Python `tpsweb` + `compat.py` |
 | Event store | PostgreSQL `synotps` (Barnyard2 schema) | `eve.json` only | SQLite + `ingest.py` |

@@ -2,7 +2,7 @@
 
 Research inventory of what vanilla `synoips.js` (`SYNO.SDS.TPS.Application`) actually calls. Sources: `unpacked/package/ui/synoips.js`, `unpacked/package/webapi/SYNO.TPS.lib`, DSM `extjs-patch.bundle.js`. The eight `SYNO.TPS.*.so` modules are aarch64 and are not loaded on this NAS.
 
-The simplified community shapes in [SYNO.TPS.contract.md](SYNO.TPS.contract.md) are **not** what the official JS reads. Official envelopes live in `spk/src/threatprevention/python/compat.py`. Port status: [backend-port-backlog.md](backend-port-backlog.md).
+The simplified community shapes in [SYNO.TPS.contract.md](SYNO.TPS.contract.md) are **not** what the official JS reads. Official envelopes live in `spk/src/threatprevention/python/compat.py`. Port status: [backend-port-backlog.md](backend-port-backlog.md). How DSM loads ExtJS apps (JSLoad, `AppInstance`, `SYNO.ux`): [dsm-extjs-sdk.md](../dsm-extjs-sdk.md).
 
 ## Transport (not `entry.cgi` strings)
 

@@ -2,7 +2,7 @@
 
 **8.0.6-0018** packs the official ExtJS app (`synoips.js`, `SYNO.SDS.TPS.Application`) from `unpacked/package/ui/` and talks to the community `tpsweb` backend through an inlined `tps-bridge.js`. Official `.so` modules are still aarch64 and are **not** packed. This is a research PoC, not a product. See [backend-replaceability.md](backend-replaceability.md).
 
-The official sources are **not** cloned or rebuilt. The custom work is the Python `SYNO.TPS.*` compatibility layer.
+The official sources are **not** cloned or rebuilt. The custom work is the Python `SYNO.TPS.*` compatibility layer. DSM ExtJS host / JSLoad recovered in [dsm-extjs-sdk.md](dsm-extjs-sdk.md).
 
 | Piece | Path |
 | --- | --- |
