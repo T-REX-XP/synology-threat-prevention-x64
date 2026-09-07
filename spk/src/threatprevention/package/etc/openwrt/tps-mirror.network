@@ -1,5 +1,6 @@
 # OpenWrt UCI fragment — LAN gretap peer is the NAS. No IPv4 on the tap.
-# Apply with: cat tps-mirror.network >> /etc/config/network && /etc/init.d/network reload
+# Prefer: NAS_IP=<nas> sh apply-tps-mirror.sh  (see README.txt in this folder).
+# Manual: cat tps-mirror.network >> /etc/config/network && /etc/init.d/network reload
 # Requires: opkg install kmod-gre gre
 
 config interface 'tpsmirror'

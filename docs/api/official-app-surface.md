@@ -113,7 +113,7 @@ Google Maps (`SYNO.SDS.TPS.Utils.GoogleMapLoader`) is not a WebAPI. Official URL
 
 ## PoC-only APIs (bridge, not official `.lib`)
 
-Official `synoips.js` never calls these. [`tps-bridge.js`](../../spk/src/threatprevention/package/ui/tps-bridge.js) does, using the same `sendWebAPI` mixin. Host widget / JSLoad notes: [dsm-extjs-sdk.md](../dsm-extjs-sdk.md).
+Official `synoips.js` never calls these. [`bridge/`](../../spk/src/threatprevention/package/ui/bridge/) (`transport.js`, `dsm7.js`, `settings-inject.js`) does, using the same `sendWebAPI` mixin. Host widget / JSLoad notes: [dsm-extjs-sdk.md](../dsm-extjs-sdk.md).
 
 | API | Method | Contract |
 | --- | --- | --- |

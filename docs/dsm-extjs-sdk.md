@@ -113,7 +113,7 @@ Official Threat Prevention (trimmed):
 | `version` | Query string on the JS URL. Packer sets this to INFO version to bust cache |
 | `grantPrivilege` | `admin` if only administrators should see the tile |
 
-**JSLoad cycle (this package already hit it):** do **not** register `tps-bridge.js` as its own module that `depend`s on `SYNO.SDS.TPS.Application` while Application `depend`s on the bridge. DSM logs `loop detected` and AppLaunch dies. The packer **prepends** [`tps-bridge.js`](../spk/src/threatprevention/package/ui/tps-bridge.js) into `synoips.js` and lists Chart stubs only as [`tps-chart.js`](../spk/src/threatprevention/package/ui/tps-chart.js).
+**JSLoad cycle (this package already hit it):** do **not** register `ui/bridge/*.js` as its own module that `depend`s on `SYNO.SDS.TPS.Application` while Application `depend`s on the bridge. DSM logs `loop detected` and AppLaunch dies. The packer **prepends** [`transport.js`](../spk/src/threatprevention/package/ui/bridge/transport.js) + [`dsm7.js`](../spk/src/threatprevention/package/ui/bridge/dsm7.js) + [`settings-inject.js`](../spk/src/threatprevention/package/ui/bridge/settings-inject.js) into `synoips.js` and lists Chart stubs only as [`tps-chart.js`](../spk/src/threatprevention/package/ui/tps-chart.js).
 
 SRM-only classes official Overview `depend`s on, missing on DSM 7:
 
@@ -206,7 +206,7 @@ i18n:
 - `this.helper.T("section","key")` — package `ui/texts/<lang>/strings`
 - `_T("common","colon")` / `_T("common","add")` / `_T("common","enabled")` — DSM core strings
 
-Help: [`ui/helptoc.conf`](../unpacked/package/ui/helptoc.conf) + `ui/help/<lang>/`. Search keywords: [`ui/index.conf`](../unpacked/package/ui/index.conf). DSM Help Center only lists a package after `conf/resource` `indexdb.help-index` (and `app-index`) plus `pkgindexer_add` on start — see [`dsm-help.sh`](../spk/src/threatprevention/scripts/dsm-help.sh). Official SRM topics stay; pack adds `threatprevention_dsm.html` for this NAS PoC.
+Help: [`ui/helptoc.conf`](../unpacked/package/ui/helptoc.conf) + `ui/help/<lang>/`. Search keywords: [`ui/index.conf`](../unpacked/package/ui/index.conf). DSM Help Center only lists a package after `conf/resource` `indexdb.help-index` (and `app-index`) plus `pkgindexer_add` on start — see [`dsm-help.sh`](../spk/src/threatprevention/scripts/dsm-help.sh). Official SRM topics stay; pack prepends community pages `threatprevention_dsm.html` (IDS / setcap) and `threatprevention_router.html` (OpenWrt GRE copy). Operator copy of the router steps also ships in `target/etc/openwrt/README.txt`. Canonical write-up: [router-traffic-copy.md](router-traffic-copy.md).
 
 ---
 
@@ -252,7 +252,7 @@ SYNO.SDS.TPS.Application          (AppInstance)
             + FeedPanel          (bridge add(); not in official JS)
 ```
 
-Injection points in [`tps-bridge.js`](../spk/src/threatprevention/package/ui/tps-bridge.js) — wrap official prototypes; do **not** edit `unpacked/package/ui/synoips.js`:
+Injection points in [`bridge/`](../spk/src/threatprevention/package/ui/bridge/) (`transport.js`, `dsm7.js`, `settings-inject.js`) — wrap official prototypes; do **not** edit `unpacked/package/ui/synoips.js`:
 
 | Hook | Where | Why |
 | --- | --- | --- |

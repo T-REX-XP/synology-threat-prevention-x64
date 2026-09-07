@@ -74,12 +74,25 @@ grep -E "Engine started|af-packet|Operation not permitted" \
   /var/packages/ThreatPrevention/var/log/suricata.log | tail
 ```
 
-Optional iface pin (then restart). **Do not pin `ovs_eth0` while router copy is enabled** — start will recreate `tps0` and rewrite `etc/interface`. See [router-traffic-copy.md](router-traffic-copy.md).
+Optional iface pin (then restart). **Do not pin `ovs_eth0` while router copy is enabled** — start will recreate `tps0` and rewrite `etc/interface`.
 
 ```sh
 echo ovs_eth0 | sudo tee /var/packages/ThreatPrevention/etc/interface
 sudo synopkg restart ThreatPrevention
 ```
+
+### Router traffic copy (LAN↔WAN IDS)
+
+The NAS is not the gateway. LAN listen only sees NAS traffic. To inspect client LAN↔WAN flows, OpenWrt GRE-copies FORWARD frames onto `tps0`. Full steps (DSM Firewall proto 47, OpenWrt script, Settings, verify, teardown): [router-traffic-copy.md](router-traffic-copy.md).
+
+On the NAS after install, the same text is in DSM Help (**Router traffic copy**) and in `/var/packages/ThreatPrevention/target/etc/openwrt/README.txt`. Copy that folder to the router; do **not** let the SPK rewrite OpenWrt.
+
+```sh
+# on the router, after copying etc/openwrt/
+NAS_IP=192.168.1.130 sh apply-tps-mirror.sh
+```
+
+Then Settings → General → **Receive a traffic copy from the router**, Apply, `setcap`, `synopkg restart`.
 
 **Start Menu tile:** one app, `SYNO.SDS.TPS.Application`. After install, **log out of DSM and back in** and remove any leftover community `SYNO.SDS.ThreatPrevention.Application` pin. The bridge calls same-origin `/webman/tps-api` (nginx → tpsweb `:19557`), then falls back to `/webman/3rdparty/ThreatPrevention/api`. After UI/`config` changes, confirm the script URL is `synoips.js?v=8.0.6-0021` or newer — `?v=1.3.3-0926` is a stale cache.
 
@@ -170,5 +183,7 @@ sudo synopkg uninstall ThreatPrevention
 | `Cannot read properties of undefined (reading 'LineChart')` | DSM 7 has no SRM `SYNO.SDS.Chart.*`; or browser still has `synoips.js?v=1.3.3-0926` | Install ≥ `0021`, log out/in, hard-refresh. JSLoad should fetch `tps-chart.js` and `synoips.js?v=8.0.6-0021`. |
 | `POST …/ThreatPrevention/api` or `/webman/tps-api` 404 | nginx rewrote the POST to `/` and tpsweb served missing `index.html` (≤0019); or nginx not reloaded | Install ≥ `0021`. Then `sudo nginx -s reload`. Confirm: `curl -sS -d 'api=SYNO.TPS.Sensor&method=get&version=1' http://127.0.0.1:19557/api`. |
 | `NoApiKeys` / `mapsjs/gen_204` `ERR_BLOCKED_BY_CLIENT` | Official Maps loader has no key; ad blocker drops Google’s `gen_204` probe | Ignore. Not tpsweb. No demo key. Own key + GeoIP: [google-maps.md](google-maps.md). |
+| `tps0` missing after enabling router copy | Tap is created only at package start; no `CAP_NET_ADMIN` | `setcap` then `synopkg restart`. [router-traffic-copy.md](router-traffic-copy.md). |
+| `tps0` UP but only NAS traffic in Events | DSM Firewall blocking GRE, or OpenWrt WAN ifname is not L3 | Allow proto 47 from the router LAN IP; `WAN_IF=pppoe-wan NAS_IP=… sh apply-tps-mirror.sh`. |
 
 Do not set `LD_LIBRARY_PATH` to `target/lib` in a root shell: that Ubuntu `libc.so.6` will break DSM tools (`tail`, etc.) in the same environment. The ELF interpreter is already patched to `target/lib/ld-linux-x86-64.so.2`.

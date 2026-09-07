@@ -1,5 +1,6 @@
 # fw4 include: copy LAN↔WAN frames onto the gretap (FORWARD only).
 # GRE to the NAS is OUTPUT, so it is not re-mirrored. Still skip proto gre.
+# See README.txt. Prefer apply-tps-mirror.sh, which writes this file.
 # Place as /etc/nftables.d/10-tps-mirror.nft after substituting:
 #   __WAN_IF__   OpenWrt WAN L3 device (eth1, pppoe-wan, wan, …)
 #   __NAS_IP__   NAS IPv4

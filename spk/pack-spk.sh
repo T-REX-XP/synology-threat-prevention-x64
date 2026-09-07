@@ -78,16 +78,22 @@ OFFICIAL_UI="${ROOT}/unpacked/package/ui"
 rm -rf "${STAGING}/package/ui"
 mkdir -p "${STAGING}/package/ui"
 cp -a "${OFFICIAL_UI}/." "${STAGING}/package/ui/"
-# One JS file only. A second config module (tps-bridge.js) makes DSM JSLoad
-# a cycle: synoips.js ↔ tps-bridge.js, and AppLaunch dies with "loop detected".
+# One JS file only. Registering bridge files as ui/config modules makes DSM
+# JSLoad a cycle (synoips.js ↔ Bridge) and AppLaunch dies with "loop detected".
+BRIDGE="${SRC}/package/ui/bridge"
 {
-  printf '%s\n' "/* tps-bridge inlined — do not add tps-bridge.js to ui/config */"
-  cat "${SRC}/package/ui/tps-bridge.js"
+  printf '%s\n' "/* tps-bridge inlined — do not add ui/bridge/*.js to ui/config */"
+  cat "${BRIDGE}/transport.js"
+  printf '\n'
+  cat "${BRIDGE}/dsm7.js"
+  printf '\n'
+  cat "${BRIDGE}/settings-inject.js"
   printf '\n'
   cat "${STAGING}/package/ui/synoips.js"
 } > "${STAGING}/package/ui/synoips.js.new"
 mv "${STAGING}/package/ui/synoips.js.new" "${STAGING}/package/ui/synoips.js"
 cp -a "${SRC}/package/ui/tps-chart.js" "${STAGING}/package/ui/tps-chart.js"
+rm -rf "${STAGING}/package/ui/bridge"
 rm -f "${STAGING}/package/ui/tps-bridge.js" \
   "${STAGING}/package/ui/threatprevention.js" \
   "${STAGING}/package/ui/index.html" \
@@ -122,51 +128,70 @@ print("apps:", [k for k, v in cfg["synoips.js"].items() if isinstance(v, dict) a
 print("app version:", app.get("version"))
 print("official depend:", app.get("depend"))
 PY
-info "DSM Help (helptoc + community DSM page + empty indexdb)"
-HELP_SRC="${SRC}/package/ui/help/enu/threatprevention_dsm.html"
-[ -f "${HELP_SRC}" ] || die "Missing ${HELP_SRC}"
-python3 - "${STAGING}/package/ui" "${HELP_SRC}" <<'PY'
+info "DSM Help (helptoc + community pages + empty indexdb)"
+HELP_DIR="${SRC}/package/ui/help/enu"
+[ -f "${HELP_DIR}/threatprevention_dsm.html" ] || die "Missing ${HELP_DIR}/threatprevention_dsm.html"
+[ -f "${HELP_DIR}/threatprevention_router.html" ] || die "Missing ${HELP_DIR}/threatprevention_router.html"
+python3 - "${STAGING}/package/ui" "${HELP_DIR}" <<'PY'
 import json, os, shutil, sys
-ui, html = sys.argv[1], sys.argv[2]
+ui, src_dir = sys.argv[1], sys.argv[2]
+pages = [
+    ("threatprevention_dsm.html", "This NAS (Suricata IDS)"),
+    ("threatprevention_router.html", "Router traffic copy"),
+]
 help_root = os.path.join(ui, "help")
-for lang in sorted(os.listdir(help_root)):
-    dest = os.path.join(help_root, lang)
-    if os.path.isdir(dest):
-        shutil.copy(html, os.path.join(dest, "threatprevention_dsm.html"))
+for name, _title in pages:
+    src = os.path.join(src_dir, name)
+    if not os.path.isfile(src):
+        raise SystemExit("missing " + src)
+    for lang in sorted(os.listdir(help_root)):
+        dest = os.path.join(help_root, lang)
+        if os.path.isdir(dest):
+            shutil.copy(src, os.path.join(dest, name))
 toc_path = os.path.join(ui, "helptoc.conf")
 toc = json.load(open(toc_path, encoding="utf-8"))
-entry = {"title": "This NAS (Suricata IDS)", "content": "threatprevention_dsm.html"}
 children = toc.get("toc") or []
-if not any(c.get("content") == "threatprevention_dsm.html" for c in children):
-    children.insert(0, entry)
-    toc["toc"] = children
-    json.dump(toc, open(toc_path, "w", encoding="utf-8"), indent="\t")
-    print("helptoc.conf topics:", [c.get("content") for c in children])
-leaf = {
-    "id": "SYNO.SDS.TPS.Application:threatprevention_dsm.html",
-    "base": "help",
-    "topic": "threatprevention_dsm.html",
-    "text": "This NAS (Suricata IDS)",
-    "leaf": True,
-}
+existing = {c.get("content") for c in children}
+insert_at = 0
+for name, title in pages:
+    if name in existing:
+        continue
+    children.insert(insert_at, {"title": title, "content": name})
+    insert_at += 1
+toc["toc"] = children
+json.dump(toc, open(toc_path, "w", encoding="utf-8"), indent="\t")
+print("helptoc.conf topics:", [c.get("content") for c in children])
 htoc = os.path.join(ui, ".helptoc", "SYNO.SDS.TPS.Application")
 if os.path.isdir(htoc):
-    for name in os.listdir(htoc):
-        path = os.path.join(htoc, name)
+    for fname in os.listdir(htoc):
+        path = os.path.join(htoc, fname)
         try:
             data = json.load(open(path, encoding="utf-8"))
         except ValueError:
             continue
         kids = data.get("children") or []
-        if any(k.get("topic") == "threatprevention_dsm.html" for k in kids):
-            continue
-        kids.insert(0, dict(leaf))
+        have = {k.get("topic") for k in kids}
+        insert_at = 0
+        for name, title in pages:
+            if name in have:
+                continue
+            kids.insert(insert_at, {
+                "id": "SYNO.SDS.TPS.Application:" + name,
+                "base": "help",
+                "topic": name,
+                "text": title,
+                "leaf": True,
+            })
+            insert_at += 1
         data["children"] = kids
         json.dump(data, open(path, "w", encoding="utf-8"), separators=(",", ":"))
 idx_path = os.path.join(ui, "index.conf")
 idx = json.load(open(idx_path, encoding="utf-8"))
 keys = list(idx.get("keywords") or [])
-for extra in ("suricata", "ids", "gretap", "emerging threats"):
+for extra in (
+    "suricata", "ids", "gretap", "emerging threats",
+    "gre", "openwrt", "traffic copy", "protocol 47", "nftables",
+):
     if extra not in keys:
         keys.append(extra)
 idx["keywords"] = keys

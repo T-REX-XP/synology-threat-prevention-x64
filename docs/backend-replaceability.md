@@ -16,7 +16,7 @@ To make the official app fully replaceable you still need:
 
 | Layer | Official | Vanilla Suricata 8 | PoC replacement |
 | --- | --- | --- | --- |
-| Desktop | ExtJS `synoips.js` + `ui/config` `type: app` | none | pack official UI + inlined `tps-bridge.js` ([dsm-extjs-sdk.md](dsm-extjs-sdk.md)) |
+| Desktop | ExtJS `synoips.js` + `ui/config` `type: app` | none | pack official UI + inlined `ui/bridge/*.js` ([dsm-extjs-sdk.md](dsm-extjs-sdk.md)) |
 | WebAPI transport | DSM `sendWebAPI` → `entry.cgi` → `.so` | none | bridge to `tpsweb :19557` |
 | 21 `SYNO.TPS.*` contracts | 8 aarch64 CGI modules + `libsynotps` | none | Python `tpsweb` + `compat.py` |
 | Event store | PostgreSQL `synotps` (Barnyard2 schema) | `eve.json` only | SQLite + `ingest.py` |
@@ -150,7 +150,7 @@ Score: **S** = Suricata-native (yaml / eve / suricatasc / suricata-update). **M*
 Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS). Official UI sources are packed as-is; they are not cloned or rebuilt.
 
 1. **Pack official UI** from `unpacked/package/ui/` (`synoips.js`, texts, help, icons).
-2. **`tps-bridge.js`** inlined into `synoips.js` at pack time — `sendWebAPI`, `downloadWebAPI`, `pollReg`, `SYNO.API.Request`, `SYNO.API.Store`, `Ext.Ajax` → tpsweb.
+2. **`ui/bridge/*.js`** inlined into `synoips.js` at pack time (`transport.js`, `dsm7.js`, `settings-inject.js`) — `sendWebAPI`, `downloadWebAPI`, `pollReg`, `SYNO.API.Request`, `SYNO.API.Store`, `Ext.Ajax` → tpsweb.
 3. **`compat.py` + `tpsweb`** — official envelopes: Event `task_id` / `list_status`, Sensor state names + live ifaces, Signature `signatures` / Policy `list`, Statistic buckets, Source `use_code`, Storage `db_size_*` + clear `task_id`.
 4. **`ingest.py`** — tail `eve.json` into SQLite (payload hex, L3/L4 headers, device `loading_score`).
 5. **`compiler.py`** — `signature.conf` + `policy_*` → `var/rules/suricata.rules` + reload.
@@ -193,7 +193,7 @@ Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS). Official UI s
 | --- | --- |
 | `unpacked/package/ui/synoips.js` | official app (source of truth for the contract) |
 | `unpacked/package/webapi/SYNO.TPS.lib` | official method table |
-| `spk/src/threatprevention/package/ui/tps-bridge.js` | research hook (original) |
+| `spk/src/threatprevention/package/ui/bridge/` | research hook (`transport.js`, `dsm7.js`, `settings-inject.js`) |
 | `spk/src/threatprevention/python/compat.py` | official envelopes |
 | `spk/src/threatprevention/python/tpsweb.py` | HTTP + unix API |
 | `docs/api/official-app-surface.md` | official JS + `.lib` inventory |

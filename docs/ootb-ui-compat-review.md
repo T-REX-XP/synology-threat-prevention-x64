@@ -1,10 +1,10 @@
 # OOTB UI on a custom Suricata backend
 
 **Date:** 2026-09-08  
-**Package:** research PoC `8.0.6-0055`  
+**Package:** research PoC `8.0.6-0056`  
 **Scope:** How the official ExtJS Threat Prevention app (`synoips.js`) was made to launch on DSM 7 x86_64 against vanilla Suricata 8 + tpsweb, what the hacks do, and what to fix or replace.
 
-Not a runtime audit of a NAS. Sources: [`tps-bridge.js`](../spk/src/threatprevention/package/ui/tps-bridge.js), [`tpsweb.py`](../spk/src/threatprevention/python/tpsweb.py), [`compat.py`](../spk/src/threatprevention/python/compat.py), [`pack-spk.sh`](../spk/pack-spk.sh). Related: [backend-replaceability.md](backend-replaceability.md), [dsm-extjs-sdk.md](dsm-extjs-sdk.md), [backend-port-backlog.md](api/backend-port-backlog.md).
+Not a runtime audit of a NAS. Sources: [`bridge/transport.js`](../spk/src/threatprevention/package/ui/bridge/transport.js), [`dsm7.js`](../spk/src/threatprevention/package/ui/bridge/dsm7.js), [`settings-inject.js`](../spk/src/threatprevention/package/ui/bridge/settings-inject.js) (concatenated at pack time), [`tpsweb.py`](../spk/src/threatprevention/python/tpsweb.py), [`compat.py`](../spk/src/threatprevention/python/compat.py), [`pack-spk.sh`](../spk/pack-spk.sh). Related: [backend-replaceability.md](backend-replaceability.md), [dsm-extjs-sdk.md](dsm-extjs-sdk.md), [backend-port-backlog.md](api/backend-port-backlog.md).
 
 The official ExtJS app (`synoips.js`, `SYNO.SDS.TPS.Application`) is Synology copyright and is packed here only so we can measure the real API surface. Do not publish it as a community contribution.
 
@@ -19,7 +19,7 @@ Vanilla Suricata 8 supplies capture, `eve.json`, and reload. Everything else —
 | | |
 | --- | --- |
 | `SYNO.TPS.*` APIs shimmed | 21 |
-| `tps-bridge.js` | ~2.8k lines |
+| `bridge/*.js` | ~2.8k lines (3 files, concat at pack) |
 | Capture | AF_PACKET IDS (no NFQUEUE) |
 | Hack layers | 8 |
 
@@ -43,7 +43,7 @@ Official JS calls host mixins only. The bridge steals hosted `SYNO.TPS.*` (and a
 synoips.js (official, unmodified)
     │  sendWebAPI / SYNO.API.Store / pollReg / downloadWebAPI / compound
     ▼
-tps-bridge.js (inlined at pack time)
+tps-bridge (transport + dsm7 + settings-inject, inlined at pack time)
     │  isHosted? → tpsweb JSON : else DSM entry.cgi
     ▼
 tpsweb.py + compat.py
@@ -60,7 +60,7 @@ Verdict: **Keep** = load-bearing and shaped correctly. **Must-keep** = regressio
 
 | Layer | Verdict | Hack | Why it exists |
 | --- | --- | --- | --- |
-| Pack | Keep | Prepend `tps-bridge.js` into `synoips.js` | A second `ui/config` module that depends on Application caused a JSLoad cycle and the tile never opened. |
+| Pack | Keep | Prepend `bridge/{transport,dsm7,settings-inject}.js` into `synoips.js` | A second `ui/config` module that depends on Application caused a JSLoad cycle and the tile never opened. |
 | Transport | Fragile | Hijack `sendWebAPI` / Request / Store / `pollReg` | Official JS never writes `entry.cgi` for `SYNO.TPS.*`. Mixins must land on `AppWindow` **and** bare `Ext.Component` (SignatureUpdater). |
 | Desktop poll | Must-keep | Skip non-TPS compounds on `SYNO.API.Request` | Wrapping Request globally crashed DSM `pollingCompoundCallack` (expected `data.reg_ref`). Only intercept hosted TPS compounds. |
 | Envelope | Keep | `compat.py` reshapes Suricata/SQLite into SRM contracts | `Event.list` is async `{task_id}`; Sensor status is a state machine; Signature roots and Policy types are vendor-specific. |
@@ -105,10 +105,10 @@ These are the places the shim fights the official app instead of meeting the con
 | P6 | Med | Chart stubs look like charts | `SYNO.SDS.Chart.*` SVG placeholders let Overview construct. Trends/pies do not match SRM Chart widgets. | Either implement `setChartItems`/`draw` against official data, or show a DSM note instead of a fake graph. |
 | P7 | Med | Compound = N sequential HTTP posts | Settings Apply fans out each `SYNO.TPS.*` call. Order `Sensor.set` vs `Mirror.set` races capture pin. | Add one tpsweb compound method that applies the list server-side in a defined order (Mirror then Sensor). |
 | P8 | Med | Fake `Polling.List` admin collection | SignatureUpdater expected DSM job names `SYNO.TPS_Updater`. Bridge synthesizes a collection then rewrites `update()` to poll `Update.status`. | Keep the updater patch (it is the right contract) but drop the fake List once `update()` no longer calls `pollList`. |
-| P9 | Med | God files | `tps-bridge.js` ~2.8k lines; `tpsweb.handle()` is a long if-ladder. Timing retries (25ms × 80) wait for `Ext.define`. | Pack-time concat of named bridge files. Split tpsweb routers. Hook `Ext.define` once; drop `setInterval` polls. |
+| P9 | Med | God files | `tpsweb.handle()` is a long if-ladder. Timing retries (25ms × 80) wait for `Ext.define`. | Bridge is split at pack time. Split tpsweb routers. Hook `Ext.define` once; drop `setInterval` polls. |
 | P10 | Med | gretap from the package user | UI writes `mirror.conf`; tpsweb `ip link add` often fails without `CAP_NET_ADMIN`. Tunnel only appears after `synopkg restart` as root. | Create `tps0` only in `start-stop-status`. UI set writes conf + pin; return `tap_present` honestly; tell the user to restart the package. |
 | P11 | Low | Two extra-feature patterns | Telegram stripped from `Notification.set`; Mirror uses fieldset `webapi`; Feeds is a new tab with `useDefaultBtn:false`. | One pattern: extra Settings tab for all community fields. Do not splice official `fillConfig` except for capture source if it must sit next to the iface grid. |
-| P12 | Low | HTTPS DSM mixed content | tpsweb is HTTP `:19557`. Same-origin nginx `/webman/tps-api` is the fix; leftover `:19557` fallback still exists in the bridge. | Remove the host:19557 fallback. Fail closed if `/webman/tps-api` is missing. |
+| P12 | Low | HTTPS DSM mixed content | tpsweb is HTTP `:19557`. Same-origin nginx `/webman/tps-api` is the fix; leftover `:19557` fallback still exists in the bridge. | Remove the host:19557 fallback. Fail closed if `/webman/tps-api` (then same-origin legacy) is missing. |
 
 ---
 
@@ -120,7 +120,7 @@ These are the places the shim fights the official app instead of meeting the con
 
 **JSLoad prepend.** Do not register the bridge as its own `ui/config` module. Pack-time concat is the supported way to run before `Ext.define` of TPS classes. Chart stubs as a separate `type:lib` is also correct.
 
-**IDS topology.** The NAS is not the gateway. LAN listen vs OpenWrt GRE copy is a real product choice. Keep `mirror.conf` + `start-stop-status` gretap. Stop creating tunnels from tpsweb as the package user. See [router-traffic-copy.md](router-traffic-copy.md).
+**IDS topology.** The NAS is not the gateway. LAN listen vs OpenWrt GRE copy is a real product choice. Keep `mirror.conf` + `start-stop-status` gretap. Stop creating tunnels from tpsweb as the package user. Operator docs: [router-traffic-copy.md](router-traffic-copy.md), DSM Help **Router traffic copy**, `target/etc/openwrt/README.txt`.
 
 ---
 
@@ -134,20 +134,20 @@ These are the places the shim fights the official app instead of meeting the con
 | Landed | Capture | Un-monkey `setDisabled` | `syncCaptureMode` after official Sensor get. Radios: single `check` handler. No `interfaceGrid.setDisabled` wrap. |
 | Landed | API | Server-side compound | `SYNO.TPS.Compound.request` applies Mirror → Sensor → Schedule → Source. Result rows stay in request order. |
 | Landed | Ops | gretap only at package start | `settings_mirror` writes conf + pin; `tap_present` is honest. `ensure_gretap` lives in `start-stop-status`. |
-| Next | Code | Split the bridge at pack time | `transport.js`, `dsm7.js`, `settings-inject.js` concatenated in `pack-spk.sh`. Same JSLoad story. |
-| Next | Tests | Envelope fixtures from `synoips.js` | For each official Store root / FormPanel get, a `test_compat` case. Capture-mode Apply order included. |
+| Landed | Code | Split the bridge at pack time | `bridge/transport.js`, `dsm7.js`, `settings-inject.js` concatenated in `pack-spk.sh`. Same JSLoad prepend. |
+| Landed | Tests | Envelope fixtures from `synoips.js` | Store roots (`signatures`, `rules`, `list`, `devices`, `notification_filters`, `events`, `days7`, `trends`) plus FormPanel gets in `test_compat.py`. Capture-mode Apply order is the Compound Mirror-then-Sensor case. |
+| Landed | Transport | Drop `:19557` fallback | Bridge posts `/webman/tps-api`, then same-origin `/webman/3rdparty/ThreatPrevention/api`. No `http://host:19557`. |
 | Later | Charts | Real Overview graphs or a stub label | Drive `LineChart` from `Statistic.Trends`; stop drawing empty SVG that looks like a product chart. |
-| Later | Ops | setcap + nginx in one operator path | `postinst` prints the exact `sudo setcap`; Overview banner if cap missing. Drop `:19557` fallback. |
+| Later | Ops | setcap + nginx in one operator path | `postinst` prints the exact `sudo setcap`; Overview banner if cap missing. |
 | Exit | Product | Vue DSM app, Suricata-native API | Stop shipping `synoips.js`. Official UI is research-only and Synology copyright. |
 
 **Recommended next cuts if you stay on the shim**
 
-The “Now” honesty / Request / form / capture / compound / gretap cuts above are in `8.0.6-0055`. Remaining:
+The “Now” honesty / Request / form / capture / compound / gretap cuts, plus the pack-time bridge split, envelope fixtures, and `:19557` drop, are in `8.0.6-0056`. Remaining:
 
-1. Pack-time split of `tps-bridge.js` (`transport.js` / `dsm7.js` / `settings-inject.js`).
-2. Envelope fixtures per official Store root in `test_compat.py`.
-3. Drop the `:19557` HTTP fallback; fail closed without `/webman/tps-api`.
-4. Real Overview charts or a stub label instead of empty SVG.
+1. Real Overview charts or a stub label instead of empty SVG.
+2. `postinst` setcap one-liner and Overview banner if the cap is missing.
+3. Split `tpsweb.handle()` routers; hook `Ext.define` once and drop `setInterval` polls.
 
 Those remove the remaining “feel broken” surface without a new UI.
 

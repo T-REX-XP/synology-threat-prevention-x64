@@ -1,11 +1,16 @@
 #!/bin/sh
 # Run on the OpenWrt router. Installs gre, adds UCI gretap, writes nft LAN↔WAN dup.
-# Does not commit from the NAS package — copy this script to the router and run it.
+# Does not commit from the NAS package — copy this folder to the router and run it.
+# See README.txt in this directory.
+#
+#   NAS_IP=192.168.1.130 sh apply-tps-mirror.sh
+#   WAN_IF=pppoe-wan NAS_IP=192.168.1.130 sh apply-tps-mirror.sh
 set -e
 
 NAS_IP="${NAS_IP:-192.168.1.130}"
 LAN_IP="${LAN_IP:-}"
 GRE_NAME="${GRE_NAME:-tpsmirror}"
+WAN_IF="${WAN_IF:-}"
 
 if [ -z "${LAN_IP}" ]; then
 	LAN_IP="$(uci -q get network.lan.ipaddr || true)"
@@ -30,7 +35,9 @@ detect_wan_if() {
 	echo "${dev}" | awk '{ print $1 }'
 }
 
-WAN_IF="$(detect_wan_if)"
+if [ -z "${WAN_IF}" ]; then
+	WAN_IF="$(detect_wan_if)"
+fi
 [ -n "${WAN_IF}" ] || { echo "could not detect WAN ifname; set WAN_IF" >&2; exit 1; }
 
 echo "LAN_IP=${LAN_IP} NAS_IP=${NAS_IP} WAN_IF=${WAN_IF} GRE=${GRE_NAME}"

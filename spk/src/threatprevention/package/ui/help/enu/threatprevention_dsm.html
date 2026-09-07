@@ -11,32 +11,44 @@
 </head>
 <body>
 <h1>Threat Prevention on this NAS</h1>
-<p>This package runs vanilla Suricata 8 on DSM 7 x86_64 and drives the official Threat Prevention window. It is a research PoC: <strong>IDS only</strong>. It does not drop packets (no NFQUEUE / IPS).</p>
+<p>This package runs vanilla Suricata 8 on DSM 7 x86_64 and drives the official Threat Prevention window. It is a research PoC: <b>IDS only</b>. It does not drop packets (no NFQUEUE / IPS).</p>
 
 <div class="section">
 <h4>Note:</h4>
 <ul>
-	<li>This NAS is not the network gateway. Listening on LAN interfaces sees only traffic to or from the NAS unless you enable a router traffic copy.</li>
-	<li>The Prevention / drop-packet options in Settings are stored but not enforced.</li>
-	<li>After every install, Suricata needs <code>cap_net_raw</code> and <code>cap_net_admin</code> on <code>bin/suricata</code> or capture fails to start.</li>
+	<li>This NAS is not the network gateway. Listening on LAN interfaces sees only traffic to or from the NAS unless you enable a router traffic copy. See <b>Router traffic copy</b> in this help set.</li>
+	<li>The Prevention / drop-packet options in Settings are stored but not enforced. Official Settings help still describes SRM IPS; ignore those drop-packet steps on this NAS.</li>
+	<li>Unsigned packages cannot declare file capabilities. After every install or upgrade, an administrator must apply <code>setcap</code> on <code>bin/suricata</code> or capture fails to start.</li>
+	<li>After UI-affecting upgrades, log out of DSM and log in again so the Start Menu reloads the app script.</li>
 </ul>
 </div>
 
+<h2>After install</h2>
+<ol>
+	<li>SSH to the NAS as an administrator.</li>
+	<li>Apply capabilities on the new Suricata binary (DSM replaces it on every install):
+		<p><code>/usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep /var/packages/ThreatPrevention/target/bin/suricata</code></p>
+	</li>
+	<li>Start or restart the package: <code>synopkg restart ThreatPrevention</code> (use <code>/usr/syno/bin/synopkg</code> if <code>synopkg</code> is not on PATH).</li>
+	<li>Confirm <code>getcap …/target/bin/suricata</code> lists those capabilities and that <code>suricata.log</code> contains <code>Engine started</code>.</li>
+</ol>
+
 <h2>Capture source</h2>
-<p>In <strong>Settings</strong> &gt; <strong>General</strong>:</p>
+<p>In <b>Settings</b> &gt; <b>General</b>:</p>
 <ul>
-	<li><strong>NAS LAN</strong> — Suricata listens on the NAS interfaces (typically OVS LAN). Only NAS traffic is inspected.</li>
-	<li><strong>Traffic copy from the router</strong> — OpenWrt GRE-copies LAN↔WAN onto local <code>tps0</code>. Enter the router LAN IPv4. DSM Firewall must allow GRE (protocol 47) from the router. Apply, then restart this package so the gretap is created.</li>
+	<li><b>Listen on NAS LAN interfaces</b> — Suricata listens on the NAS interfaces (typically the OVS LAN bridge <code>ovs_eth0</code>). Only traffic to or from this NAS is inspected.</li>
+	<li><b>Receive a traffic copy from the router</b> — OpenWrt GRE-copies LAN↔WAN onto local <code>tps0</code>. Enter the router LAN IPv4. Allow GRE (IP protocol 47) from that router in DSM Firewall. Apply, then restart this package so the gretap is created. Full steps: <b>Router traffic copy</b>.</li>
 </ul>
+<p>Monitored Interfaces should show <b>one</b> enabled capture device. In copy mode that is <code>tps0</code>, not <code>tps0</code> plus LAN 1.</p>
 
 <h2>Signature updates</h2>
-<p>Use <strong>Update Now</strong> or the automatic schedule. The first download of ET Open can take several minutes. When it finishes, last-updated is stamped and status becomes up to date. Connection errors mean the NAS could not reach Emerging Threats.</p>
+<p>Use <b>Update Now</b> or the automatic schedule. The first download of ET Open can take several minutes. When it finishes, last-updated is stamped and status becomes up to date. Connection errors mean the NAS could not reach Emerging Threats.</p>
 
 <h2>Events, policy, and notifications</h2>
 <ul>
-	<li><strong>Overview / Events / Statistics</strong> — alerts from Suricata <code>eve.json</code>.</li>
-	<li><strong>Self-Defined Policy</strong> — enable or disable signature classes; changes compile into <code>suricata.rules</code> and reload the engine.</li>
-	<li><strong>Notification</strong> — DSM mail/push plus optional Telegram (this PoC).</li>
+	<li><b>Overview / Events / Statistics</b> — alerts from Suricata <code>eve.json</code>.</li>
+	<li><b>Self-Defined Policy</b> — enable or disable signature classes; changes compile into <code>suricata.rules</code> and reload the engine.</li>
+	<li><b>Notification</b> — DSM mail/push plus optional Telegram (this PoC).</li>
 </ul>
 </body>
 </html>

@@ -306,7 +306,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			var copy = (data.capture_mode || (data.enabled ? "copy" : "lan")) === "copy";
 			var hint = form.findField("mirror_hint");
 			if (hint && hint.setValue) {
-				var msg = "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router.";
+				var msg = "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router. See Help: Router traffic copy.";
 				if (copy && !data.tap_present) {
 					msg += " tps0 is not up yet — Apply, then restart Threat Prevention if the tunnel is missing.";
 				}
@@ -362,7 +362,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					},
 					{
 						xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
-						value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router. Restart the package after Apply so tps0 can be created."
+						value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router. Restart the package after Apply so tps0 can be created. Full steps: Help → Router traffic copy, or /var/packages/ThreatPrevention/target/etc/openwrt/README.txt."
 					}
 				]
 			};

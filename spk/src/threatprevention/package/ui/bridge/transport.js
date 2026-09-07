@@ -53,12 +53,62 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			if (j && j.error) { out.error = j.error; }
 			return out;
 		},
+		componentGone: function (comp) {
+			return !!(comp && comp !== window && (comp.isDestroyed || comp.destroying));
+		},
+		walkAppWindow: function (start) {
+			var c = start, n = 0;
+			while (c && n++ < 40) {
+				if (typeof c.getMsgBox === "function" && (c.appInstance || c.appWin)) { return c; }
+				if (window.SYNO && SYNO.SDS) {
+					if (SYNO.SDS.AppWindow && c instanceof SYNO.SDS.AppWindow) { return c; }
+					if (SYNO.SDS.PageListAppWindow && c instanceof SYNO.SDS.PageListAppWindow) { return c; }
+				}
+				c = c.ownerCt || c.owner || c.appWindow || (c.module && c.module.appWin);
+			}
+			return null;
+		},
+		ensureFindAppWindow: function (comp) {
+			if (!comp || typeof comp !== "object" || comp._tpsFindWin) { return; }
+			var me = this;
+			var orig = comp.findAppWindow;
+			comp.findAppWindow = function () {
+				var w = null;
+				try { w = orig ? orig.apply(this, arguments) : null; } catch (e) { w = null; }
+				if (w && typeof w.getMsgBox === "function") { return w; }
+				w = me.walkAppWindow(this);
+				if (w && typeof w.getMsgBox === "function") { return w; }
+				var desk = window.SYNO && SYNO.SDS && SYNO.SDS.Desktop;
+				if (desk && typeof desk.getMsgBox === "function") { return desk; }
+				return {
+					getMsgBox: function () {
+						return Ext.Msg || {
+							alert: Ext.emptyFn, hide: Ext.emptyFn,
+							show: Ext.emptyFn, updateProgress: Ext.emptyFn
+						};
+					},
+					clearStatusBusy: Ext.emptyFn,
+					setStatusBusy: Ext.emptyFn,
+					title: ""
+				};
+			};
+			comp._tpsFindWin = true;
+		},
 		call: function (api, method, version, params, cb, scope) {
 			var me = this;
 			var q = Ext.apply({ api: api, method: method, version: version || 1 }, this.encodeParams(params));
 			function fire(ok, j) {
+				if (me.componentGone(scope)) { return; }
+				var data = (j && j.data) || {};
+				if (!ok && data.code == null) {
+					data = Ext.apply({
+						code: (j && j.error && j.error.code) || 500,
+						isTimeout: !!(j && j.error && j.error.isTimeout)
+					}, data);
+				}
+				if (scope && scope !== window) { me.ensureFindAppWindow(scope); }
 				try {
-					if (cb) { cb.call(scope || window, ok, (j && j.data) || {}, j || {}, q); }
+					if (cb) { cb.call(scope || window, ok, data, j || {}, q); }
 				} catch (e) {
 					if (window.console && console.error) { console.error("SYNO.TPS callback", e); }
 				}
@@ -75,11 +125,22 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						fire(!!j.success, j);
 					},
 					failure: function (resp) {
-						if (then404 && resp && (resp.status === 404 || resp.status === 0)) {
+						if (me.componentGone(scope)) { return; }
+						var status = resp && resp.status;
+						/* 0 is abort (tab change / destroy), not a missing URL. */
+						if (status === 0) { return; }
+						if (then404 && status === 404) {
 							then404();
 							return;
 						}
-						fire(false, { success: false, error: { code: 500 } });
+						var j = { success: false, error: { code: status || 500, isTimeout: status === 0 } };
+						if (resp && resp.responseText) {
+							try {
+								var parsed = Ext.decode(resp.responseText);
+								if (parsed) { j = parsed; }
+							} catch (e) { /* keep synthetic error */ }
+						}
+						fire(!!j.success, j);
 					}
 				});
 			}
@@ -470,8 +531,10 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			Polling.Register = function (opts) {
 				var api = opts && opts.webapi && opts.webapi.api;
 				if (me.isTps(api)) {
-					var self = (opts && opts.scope) || window;
+					var self = (opts && (opts.scope || opts.appWindow)) || window;
+					if (self && self !== window) { me.ensureFindAppWindow(self); }
 					var tick = function () {
+						if (me.componentGone(self)) { return; }
 						me.call(
 							opts.webapi.api,
 							opts.webapi.method,
@@ -604,7 +667,9 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					var api = opts && opts.webapi && opts.webapi.api;
 					if (!me.isTps(api)) { return origPoll.apply(this, args); }
 					var self = this;
+					me.ensureFindAppWindow(self);
 					var tick = function () {
+						if (me.componentGone(self)) { return; }
 						me.call(
 							opts.webapi.api,
 							opts.webapi.method,
@@ -632,6 +697,10 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			}
 			wrapPollReg(SYNO.SDS.AppWindow);
 			wrapPollReg(Ext.Component);
+			if (window.SYNO && SYNO.ux) {
+				wrapPollReg(SYNO.ux.Panel);
+				wrapPollReg(SYNO.ux.FormPanel);
+			}
 			function wrapPollList(cls) {
 				if (!cls || !cls.prototype || !cls.prototype.pollList || cls.prototype.pollList._tpsBridge) { return; }
 				var origList = cls.prototype.pollList;

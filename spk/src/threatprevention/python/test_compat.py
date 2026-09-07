@@ -12,14 +12,20 @@ os.environ.setdefault("TPS_PKGDEST", os.environ["TPS_PKGVAR"])
 
 from compat import (  # noqa: E402
     classify_update,
+    official_devices,
     official_event,
+    official_event_statistic,
     official_map,
+    official_policy_list,
     official_policy_write,
     official_sensor,
+    official_signature_classes,
     official_source,
     official_stat_bucket,
     official_storage,
+    official_trends,
     official_update_status,
+    official_variables,
     official_weekday,
     parse_weekday,
 )
@@ -172,8 +178,11 @@ check(should_steal_request({
 check(should_steal_request({"api": "SYNO.TPS.Sensor", "method": "get"}), "hosted TPS api is stolen")
 check(not should_steal_request({"api": "SYNO.Core.System.Utilization", "method": "get"}), "Core api is not stolen")
 
-bridge_js = os.path.join(HERE, "..", "package", "ui", "tps-bridge.js")
-js = open(bridge_js, encoding="utf-8").read()
+bridge_dir = os.path.join(HERE, "..", "package", "ui", "bridge")
+js = "".join(
+    open(os.path.join(bridge_dir, name), encoding="utf-8").read()
+    for name in ("transport.js", "dsm7.js", "settings-inject.js")
+)
 check("shouldStealRequest" in js, "bridge defines shouldStealRequest")
 check('String(api).indexOf("Polling") !== -1' in js, "bridge refuses Polling APIs")
 check("isPollingCallback" in js and "compoundHasHosted" in js, "bridge keeps reg_ref guards")
@@ -181,6 +190,9 @@ check("wrappedReq.Polling = origReq.Polling" in js, "Request wrap copies .Pollin
 check("gateMonitoredIfaces" not in js, "no interfaceGrid setDisabled monkeypatch")
 check("me.clearGeneralDirty(this);" in js, "General form snaps originalValue once")
 check("setTimeout(function () { me.clearGeneralDirty" not in js, "no timer dirty-clears on General")
+check("fallbackBase" not in js, "no :19557 fallback helper")
+check(":19557" not in js, "no mixed-content host:19557 fallback")
+check("return \"/webman/tps-api\"" in js, "same-origin tps-api is primary")
 
 src = official_source("et-pro", "abc")
 check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_code")
@@ -225,6 +237,64 @@ check(ev["ip_ver"] == 4 and ev["tcp_seq"] == 0, "event get L3/L4 fallback")
 bucket = official_stat_bucket(conn, 0)
 check("country_src" in bucket and "botnet_ip_src" in bucket, "stat geo/botnet keys")
 check(bucket["country_src"] == [] or isinstance(bucket["country_src"], list), "country_src list")
+
+# Official synoips.js Store roots / FormPanel gets (see docs/api/official-app-surface.md).
+classes = official_signature_classes([
+    {"name": "trojan-activity", "class_name": "trojan-activity", "enabled": 1, "total": 4, "severity": 1},
+])
+check(isinstance(classes["signatures"], list) and classes["signatures"][0]["name"] == "trojan-activity",
+      "Signature.list root signatures")
+check(classes["signatures"][0]["severity"] == 1 and "enabledCount" in classes["signatures"][0],
+      "signature class severity int")
+policy_rows = official_policy_list([
+    {"type": "class", "sig_name": "trojan-activity", "action": "alert"},
+    {"type": "signature", "raw_sid": 2100001, "sig_name": "ET SCAN", "action": "alert"},
+])
+check(isinstance(policy_rows["list"], list) and policy_rows["list"][0]["type"] == 1, "Policy.list root list type int")
+check(policy_rows["list"][1]["type"] == 2 and policy_rows["list"][1]["sid"] == 2100001, "policy signature type 2")
+devs = official_devices([{"mac": "aa:bb:cc:dd:ee:ff", "device_name": "nas", "detect": True, "online": True}])
+check(isinstance(devs["device_list"], list) and isinstance(devs["devices"], list), "Device.list roots")
+check(devs["device_list"][0]["mesh_re"] is False, "device mesh_re skipped")
+vars_ = official_variables({"HOME_NET": "[10.0.0.0/8]"})
+check(vars_["home_net"] == "[10.0.0.0/8]" and "http_ports" in vars_, "Sensor.Variables lowercase")
+tr = official_trends(conn)
+check(isinstance(tr["trends"], list) and "points" in tr, "Trends Store series")
+estat = official_event_statistic(conn)
+check(all(k in estat for k in ("days7", "days30", "all_logs")), "Event.Statistic buckets")
+check(all(k in estat["days7"] for k in ("class_name", "ip_src", "ip_dst", "botnet_ip_src", "country_src")),
+      "Event.Statistic pie keys")
+
+listed = handle("SYNO.TPS.Event", "list", {"limit": 10}, conn)
+check(listed["success"] and "task_id" in listed["data"] and "events" not in listed["data"],
+      "Event.list is async task_id only")
+lst = handle("SYNO.TPS.Event", "list_status", {"task_id": listed["data"]["task_id"]}, conn)
+inner = (lst.get("data") or {}).get("data") or {}
+check(lst["success"] and lst["data"].get("finish") is True and isinstance(inner.get("events"), list),
+      "list_status events root")
+check("now" in inner and "total" in inner, "list_status now/total")
+sens = handle("SYNO.TPS.Sensor", "get", {}, conn)
+check(sens["success"] and isinstance(sens["data"].get("interface_list"), list), "Sensor.get interface_list")
+check(sens["data"]["prevention_enforced"] is False and sens["data"]["ips_mode"] == "ids", "Sensor.get ids")
+svar = handle("SYNO.TPS.Sensor.Variables", "get", {}, conn)
+check(svar["success"] and "home_net" in svar["data"], "Variables.get home_net")
+pol = handle("SYNO.TPS.Signature.Policy", "list", {}, conn)
+check(pol["success"] and isinstance(pol["data"].get("list"), list), "Policy.list handle root")
+nfilt = handle("SYNO.TPS.Notification.Filter", "list", {}, conn)
+check(nfilt["success"] and isinstance(nfilt["data"].get("notification_filters"), list),
+      "Notification.Filter list root")
+sdev = handle("SYNO.TPS.Statistic.Device", "list", {}, conn)
+check(sdev["success"] and isinstance(sdev["data"].get("devices"), list), "Statistic.Device Store devices")
+trend = handle("SYNO.TPS.Statistic.Trends", "get", {}, conn)
+check(trend["success"] and isinstance(trend["data"].get("trends"), list), "Trends.get trends")
+est = handle("SYNO.TPS.Event.Statistic", "get", {}, conn)
+check(est["success"] and "days7" in est["data"], "Event.Statistic handle days7")
+emap = handle("SYNO.TPS.Event.Map", "list", {}, conn)
+check(emap["success"] and "days7" in emap["data"] and "location" in emap["data"]["days7"],
+      "Event.Map list location")
+rules = handle("SYNO.TPS.Signature.Rule", "list", {"limit": 5}, conn)
+check(rules["success"] and isinstance(rules["data"].get("rules"), list), "Signature.Rule Store rules")
+sigs = handle("SYNO.TPS.Signature", "list", {}, conn)
+check(sigs["success"] and isinstance(sigs["data"].get("signatures"), list), "Signature.list signatures")
 
 boundary = "----x"
 body = (

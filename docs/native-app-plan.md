@@ -8,7 +8,7 @@ The official sources are **not** cloned or rebuilt. The custom work is the Pytho
 | --- | --- |
 | API contract | [api/SYNO.TPS.contract.md](api/SYNO.TPS.contract.md) |
 | SQLite + ingest + compiler + tpsweb | `spk/src/threatprevention/python/` |
-| Bridge (inlined at pack time) | `spk/src/threatprevention/package/ui/tps-bridge.js` |
+| Bridge (inlined at pack time) | `spk/src/threatprevention/package/ui/bridge/{transport,dsm7,settings-inject}.js` |
 | Official UI (packed as-is) | `unpacked/package/ui/` |
 | Start helpers | `spk/src/threatprevention/scripts/start-stop-status` |
 
