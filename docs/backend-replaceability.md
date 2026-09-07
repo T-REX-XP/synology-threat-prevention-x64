@@ -23,7 +23,7 @@ To make the official app fully replaceable you still need:
 | Policy compiler | `synotpsd` / `synotpstool` + `signature.conf` | rule files on disk | `compiler.py` → `var/rules/suricata.rules` |
 | Engine | `synosuricata` 6.0.4 NFQUEUE IPS | Suricata 8 AF_PACKET IDS | vendored linux/amd64 Suricata 8 |
 | Device / NSM | `SYNO.Core.Network.NSM.Device` + MAC table | none | ARP scrape; NSM join still missing |
-| Map / GeoIP | Event.Map + Google Maps loader | none | empty stub |
+| Map / GeoIP | Event.Map + Google Maps loader (no API key) | none | empty stub; see [google-maps.md](google-maps.md) |
 | Notify / export | DSM mail + File Station export folder | none | persist flags only |
 | Inline block | NFQUEUE + `syno-bridge-nf-*` + USB swap | AF_PACKET IDS | **not replaced** |
 

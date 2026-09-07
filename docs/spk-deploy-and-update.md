@@ -168,5 +168,6 @@ sudo synopkg uninstall ThreatPrevention
 | Stale pidfile abort | Previous crash left `var/suricata.pid` | Current start script removes it if the pid is dead. |
 | `Cannot read properties of undefined (reading 'LineChart')` | DSM 7 has no SRM `SYNO.SDS.Chart.*`; or browser still has `synoips.js?v=1.3.3-0926` | Install ≥ `0021`, log out/in, hard-refresh. JSLoad should fetch `tps-chart.js` and `synoips.js?v=8.0.6-0021`. |
 | `POST …/ThreatPrevention/api` or `/webman/tps-api` 404 | nginx rewrote the POST to `/` and tpsweb served missing `index.html` (≤0019); or nginx not reloaded | Install ≥ `0021`. Then `sudo nginx -s reload`. Confirm: `curl -sS -d 'api=SYNO.TPS.Sensor&method=get&version=1' http://127.0.0.1:19557/api`. |
+| `NoApiKeys` / `mapsjs/gen_204` `ERR_BLOCKED_BY_CLIENT` | Official Maps loader has no key; ad blocker drops Google’s `gen_204` probe | Ignore. Not tpsweb. No demo key. Own key + GeoIP: [google-maps.md](google-maps.md). |
 
 Do not set `LD_LIBRARY_PATH` to `target/lib` in a root shell: that Ubuntu `libc.so.6` will break DSM tools (`tail`, etc.) in the same environment. The ELF interpreter is already patched to `target/lib/ld-linux-x86-64.so.2`.

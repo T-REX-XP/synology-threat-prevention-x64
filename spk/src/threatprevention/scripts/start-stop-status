@@ -113,6 +113,12 @@ start() {
 		oldpid="$(cat "${PIDFILE}" 2>/dev/null || true)"
 		if [ -z "${oldpid}" ] || ! kill -0 "${oldpid}" 2>/dev/null; then
 			rm -f "${PIDFILE}" 2>/dev/null || true
+		elif ! grep -q "\[${oldpid} .*Engine started" "${LOGDIR}/suricata.log" 2>/dev/null; then
+			# Still loading rules, or this is the pre-setcap Package Center
+			# start that will die on AF_PACKET. Do not reuse it.
+			kill "${oldpid}" 2>/dev/null || true
+			rm -f "${PIDFILE}" 2>/dev/null || true
+			sleep 1
 		fi
 	fi
 	echo "starting suricata on ${IFACE}" >&2
@@ -141,7 +147,7 @@ start() {
 	start_helpers
 	if [ "${suricata_ok}" -ne 1 ]; then
 		# -D sometimes exits before --pidfile is written; recover a live engine.
-		live="$(pgrep -f "${BIN}" | head -1 || true)"
+		live="$(ps -eo pid,args 2>/dev/null | awk -v b="${BIN}" '$0 ~ b && $0 !~ /awk/ { print $1; exit }')"
 		if [ -n "${live}" ] && kill -0 "${live}" 2>/dev/null; then
 			echo "${live}" > "${PIDFILE}" 2>/dev/null || true
 			suricata_ok=1

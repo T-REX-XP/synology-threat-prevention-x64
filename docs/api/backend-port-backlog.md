@@ -46,7 +46,7 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 | ID | API.method | Gap | Work |
 | --- | --- | --- | --- |
 | T20 | `Event.Statistic.get` | `botnet_*`, `country_src` empty | GeoIP + optional botnet list |
-| T21 | `Event.Map.list` | empty `location[]` | GeoIP on `ip_src`; Maps key is optional |
+| T21 | `Event.Map.list` | empty `location[]` | GeoIP on `ip_src`; Maps key is optional — [google-maps.md](../google-maps.md) |
 | T22 | `Event.get` | L3/L4 from eve when present | already hex payload; fill tcp/udp/icmp consistently |
 | T23 | `Notification` / `Filter` | persist only | optional: call DSM notify APIs if configured |
 | T24 | `Sensor.set` prevention / `security` | stored, not enforced | document IDS-only; do not fake drop counts |

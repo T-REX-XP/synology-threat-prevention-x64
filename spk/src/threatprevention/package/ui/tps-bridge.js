@@ -284,6 +284,77 @@ SYNO.SDS.TPS.Bridge = {
 		admin.size = function () { return this.length; };
 		return { admin: admin };
 	},
+	looksOfficialHtml: function (v) {
+		return typeof v === "string" && v.indexOf("<") !== -1 &&
+			(v.indexOf("pathlink") !== -1 || v.indexOf("<font") !== -1 ||
+				v.indexOf("<a ") !== -1 || v.indexOf("<a>") !== -1 ||
+				v.indexOf("syno-sds-ips-event-") !== -1 ||
+				v.indexOf('class="syno-sds-ips') !== -1);
+	},
+	patchDisplayHtml: function () {
+		/* Official Overview injects <a class="pathlink"> into syno_displayfield.
+		   SRM rendered that HTML. DSM 7 encodes it, so the link is visible as
+		   text and afterrender does b.el.down("a").on(...) on null. */
+		var me = this;
+		var seen = [];
+		function patch(Cls) {
+			if (!Cls || !Cls.prototype || Cls.prototype._tpsHtml || seen.indexOf(Cls) !== -1) { return; }
+			seen.push(Cls);
+			var proto = Cls.prototype;
+			var origInit = proto.initComponent;
+			proto.initComponent = function () {
+				var v = (this.initialConfig && this.initialConfig.value) || this.value;
+				if (me.looksOfficialHtml(v)) { this.htmlEncode = false; }
+				if (origInit) { origInit.apply(this, arguments); }
+				if (me.looksOfficialHtml(this.value || v)) { this.htmlEncode = false; }
+			};
+			var origSet = proto.setValue;
+			proto.setValue = function (v) {
+				if (me.looksOfficialHtml(v)) { this.htmlEncode = false; }
+				if (origSet) { return origSet.apply(this, arguments); }
+				this.value = v;
+				if (this.rendered && this.el) { this.el.update(this.htmlEncode ? Ext.util.Format.htmlEncode(v) : v); }
+			};
+			proto._tpsHtml = true;
+		}
+		patch(window.SYNO && SYNO.ux && SYNO.ux.DisplayField);
+		patch(window.Ext && Ext.form && Ext.form.DisplayField);
+		if (window.Ext && Ext.ComponentMgr && Ext.ComponentMgr.types) {
+			patch(Ext.ComponentMgr.types.syno_displayfield);
+			patch(Ext.ComponentMgr.types.displayfield);
+		}
+	},
+	patchMapSeverity: function () {
+		var Cls = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic &&
+			SYNO.SDS.TPS.Statistic.MapPanel;
+		if (!Cls || !Cls.prototype || Cls.prototype._tpsSev) { return; }
+		Cls.prototype.onSeverityAfterrender = function () {
+			var self = this;
+			Ext.each(["high", "medium", "low"], function (name) {
+				var rec = self.icons && self.icons[name];
+				var el = rec && document.getElementById(rec.id);
+				if (!el) { return; }
+				el.onclick = function () {
+					var on = !self.getSeverityChecked(this.id);
+					self.setSeverityChecked(this.id, on);
+					if (on) { this.classList.remove("unchecked"); }
+					else { this.classList.add("unchecked"); }
+				};
+			});
+		};
+		Cls.prototype.resetSeverityIcons = function () {
+			var name, el;
+			for (name in this.icons) {
+				if (!this.icons.hasOwnProperty(name)) { continue; }
+				el = document.getElementById(this.icons[name].id);
+				if (!el) { continue; }
+				if (this.icons[name].checked === false) { el.classList.remove("unchecked"); }
+				this.icons[name].checked = true;
+			}
+			if (this.store && this.store.clearFilter) { this.store.clearFilter(); }
+		};
+		Cls.prototype._tpsSev = true;
+	},
 	hookPolling: function () {
 		var me = this;
 		if (!window.SYNO || !SYNO.API || !SYNO.API.Request) { return; }
@@ -460,6 +531,8 @@ SYNO.SDS.TPS.Bridge = {
 			wrappedReq._tpsBridge = true;
 			SYNO.API.Request = wrappedReq;
 		}
+		me.patchDisplayHtml();
+		me.patchMapSeverity();
 		me.hookPolling();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {
 			var origAjax = Ext.Ajax.request;

@@ -106,10 +106,11 @@ def _find_suricata_pid():
         if not name.isdigit():
             continue
         try:
-            cmd = open(os.path.join(proc, name, "cmdline"), "rb").read().replace(b"\x00", b" ")
+            raw = open(os.path.join(proc, name, "cmdline"), "rb").read()
         except OSError:
             continue
-        if b"/suricata" in cmd or cmd.startswith(b"suricata"):
+        argv0 = raw.split(b"\x00", 1)[0]
+        if argv0.endswith(b"/suricata") or argv0 == b"suricata":
             return int(name)
     return 0
 

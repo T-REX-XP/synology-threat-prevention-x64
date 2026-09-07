@@ -103,7 +103,7 @@ These are **not** `SYNO.TPS.*`. The bridge must send them to `/webapi/entry.cgi`
 | `SYNO.Core.Notification.Push.Mail` | `get` | same |
 | `SYNO.Entry.Request` | `request` | wraps the four Notify compounds |
 
-Google Maps (`SYNO.SDS.TPS.Utils.GoogleMapLoader`) is not a WebAPI. No key → `NoApiKeys` in console (ignore).
+Google Maps (`SYNO.SDS.TPS.Utils.GoogleMapLoader`) is not a WebAPI. Official URL has no `key=` → `NoApiKeys`. Ad blockers turn `mapsjs/gen_204` into `ERR_BLOCKED_BY_CLIENT`. Pins need GeoIP (`location[]`). See [google-maps.md](../google-maps.md).
 
 ## SRM-only desktop widgets
 
