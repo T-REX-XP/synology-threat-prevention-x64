@@ -3,40 +3,172 @@
 <head>
 <meta charset="utf-8">
 <title>Threat Prevention</title>
-<meta http-equiv="refresh" content="15">
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-         margin: 24px; color: #1d1d1f; background: #f5f5f7; }
-  h1 { font-size: 20px; margin: 0 0 8px; }
-  .sub { color: #6e6e73; margin-bottom: 20px; }
-  .card { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px;
-          border: 1px solid #e5e5ea; }
-  .ok { color: #248a3d; font-weight: 600; }
-  .bad { color: #c9341c; font-weight: 600; }
-  pre { white-space: pre-wrap; word-break: break-word; font-size: 12px;
-        background: #f2f2f7; padding: 12px; border-radius: 8px; overflow: auto; max-height: 420px; }
-  code { font-size: 12px; }
-</style>
+<link rel="stylesheet" href="app.css">
 </head>
 <body>
-<h1>Threat Prevention</h1>
-<p class="sub">Suricata 8.0.6 community package — not an official Synology app.</p>
-<div class="card" id="status">Loading status…</div>
-<div class="card">
-  <strong>Rules</strong>
-  <p>The bundled Emerging Threats tarball is ET Open for <em>Suricata 5</em> (feed 9840, Sept 2021). Do not convert those files. Pull a current Suricata 8 ruleset:</p>
-  <pre>sudo /var/packages/ThreatPrevention/scripts/update-rules.sh
-sudo synopkg restart ThreatPrevention</pre>
-  <p>Default source is ET Open. Optional extras after <code>update-sources</code>: Abuse.ch SSLBL, ET Pro (license), etc.</p>
+<div class="app">
+  <div class="top">
+    <div>
+      <h1>Threat Prevention</h1>
+      <div class="sub">Suricata 8 community package — not an official Synology app</div>
+    </div>
+    <nav class="tabs">
+      <button data-tab="overview" class="on">Overview</button>
+      <button data-tab="events">Events</button>
+      <button data-tab="policy">Self-Defined Policy</button>
+      <button data-tab="statistics">Statistics</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+  </div>
+  <div class="main">
+    <div id="banner" class="banner hidden"></div>
+
+    <section id="overview">
+      <div class="grid">
+        <div class="card"><h2>Engine</h2><div id="ov-engine">…</div></div>
+        <div class="card"><h2>Capture interface</h2><div id="ov-iface">…</div></div>
+        <div class="card"><h2>Rules</h2><div id="ov-rules">…</div></div>
+        <div class="card"><h2>Last signature update</h2><div id="ov-updated">…</div></div>
+      </div>
+      <div class="card">
+        <h2>Malicious events (past 7 days)</h2>
+        <p><span id="ov-total">0</span> total · <span id="ov-high"></span> · <span id="ov-med"></span> · <span id="ov-low"></span></p>
+        <div class="chart" id="ov-chart"></div>
+      </div>
+      <div class="card">
+        <h2>Devices with potential threats</h2>
+        <div id="ov-devices"></div>
+      </div>
+    </section>
+
+    <section id="events" class="hidden">
+      <div class="card">
+        <div class="toolbar">
+          <input id="ev-q" placeholder="Find signature or IP">
+          <select id="ev-range">
+            <option value="7days">7 days</option>
+            <option value="30days">30 days</option>
+            <option value="all">All</option>
+          </select>
+          <button class="btn primary" id="ev-go">Find</button>
+          <button class="btn" id="ev-prev">Newer</button>
+          <button class="btn" id="ev-next">Older</button>
+          <span class="muted" id="ev-meta"></span>
+        </div>
+        <table>
+          <thead><tr><th>Time</th><th>Severity</th><th>Signature</th><th>Source</th><th>Destination</th><th>Action</th></tr></thead>
+          <tbody id="ev-body"></tbody>
+        </table>
+      </div>
+      <div class="card" id="ev-detail"><p class="muted">Select an event to view details.</p></div>
+    </section>
+
+    <section id="policy" class="hidden">
+      <div class="card">
+        <h2>Class policy</h2>
+        <p class="muted">Set class policy to enable/disable included signatures. Apply writes suricata.rules and reloads.</p>
+        <table>
+          <thead><tr><th>Class</th><th>Description</th><th>Rules</th><th>Action</th></tr></thead>
+          <tbody id="pol-classes"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Signature rules</h2>
+        <div class="toolbar">
+          <input id="rule-q" placeholder="sid or keyword">
+          <input id="rule-class" placeholder="class id (optional)" style="width:8em">
+          <button class="btn" id="rule-go">Find</button>
+        </div>
+        <table>
+          <thead><tr><th>SID</th><th>Signature</th><th>Class</th><th>Action</th></tr></thead>
+          <tbody id="pol-rules"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Signature / filter overrides</h2>
+        <table>
+          <thead><tr><th>Type</th><th>SID</th><th>Name</th><th>Action</th><th>IPs</th><th></th></tr></thead>
+          <tbody id="pol-extra"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="statistics" class="hidden">
+      <div class="card">
+        <h2>Trend (7 days, 8-hour buckets)</h2>
+        <div id="st-sum"></div>
+        <div class="chart" id="st-chart"></div>
+      </div>
+      <div class="grid">
+        <div class="card"><h2>Top event types</h2><table><tbody id="st-class"></tbody></table></div>
+        <div class="card"><h2>Top source IPs</h2><table><tbody id="st-src"></tbody></table></div>
+        <div class="card"><h2>Top destination IPs</h2><table><tbody id="st-dst"></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="settings" class="hidden">
+      <div class="card">
+        <h2>General</h2>
+        <label class="row"><input type="checkbox" id="set-enable"> Enable Threat Prevention (IDS capture)</label>
+        <label class="row"><input type="checkbox" id="set-prev"> Drop detected packets (stored only; NFQUEUE is not auto-wired)</label>
+        <label class="row">Interface <input id="set-iface" placeholder="ovs_eth0"></label>
+        <label class="row">When busy
+          <select id="set-mode">
+            <option value="availability">Network stability priority</option>
+            <option value="security">Security priority</option>
+          </select>
+        </label>
+        <button class="btn primary" id="set-save-sensor">Save sensor</button>
+      </div>
+      <div class="card">
+        <h2>Signature update</h2>
+        <p class="muted" id="set-upd"></p>
+        <label class="row"><input type="checkbox" id="set-auto"> Automatically update signatures</label>
+        <label class="row">Source
+          <select id="set-src"><option value="et-open">ET Open</option><option value="et-pro">ET Pro</option></select>
+        </label>
+        <label class="row">ET Pro code <input id="set-code"></label>
+        <button class="btn" id="set-save-upd">Save schedule / source</button>
+        <button class="btn primary" id="set-update">Update Now</button>
+      </div>
+      <div class="card">
+        <h2>Device</h2>
+        <table>
+          <thead><tr><th>Name</th><th>MAC</th><th>Status</th><th>Protected</th></tr></thead>
+          <tbody id="set-dev"></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Notification</h2>
+        <p class="muted">Stored here. Configure mail/push in DSM Control Panel &gt; Notification.</p>
+        <label class="row"><input type="checkbox" id="set-ntf"> Enable event notification</label>
+        <label class="row"><input type="checkbox" id="set-mail"> Mail</label>
+        <label class="row"><input type="checkbox" id="set-push"> Push</label>
+        <label class="row">Subject prefix <input id="set-prefix"></label>
+        <button class="btn" id="set-save-ntf">Save notification</button>
+      </div>
+      <div class="card">
+        <h2>Log storage</h2>
+        <p class="muted" id="set-db"></p>
+        <label class="row">Maximum log usage
+          <select id="set-limit">
+            <option value="500">500 MiB</option>
+            <option value="1024">1 GiB</option>
+            <option value="2048">2 GiB</option>
+          </select>
+        </label>
+        <button class="btn" id="set-save-stor">Save limit</button>
+        <button class="btn danger" id="set-clear">Clear Logs</button>
+      </div>
+      <div class="card">
+        <h2>Backup &amp; Restore</h2>
+        <p class="muted">JSON export of policies and settings (not the official .dss format).</p>
+        <button class="btn" id="set-backup">Back Up</button>
+        <label class="row">Restore <input type="file" id="set-restore" accept="application/json"></label>
+      </div>
+    </section>
+  </div>
 </div>
-<script>
-fetch("status.html", {cache: "no-store"})
-  .then(function(r) { return r.text(); })
-  .then(function(t) { document.getElementById("status").innerHTML = t; })
-  .catch(function() {
-    document.getElementById("status").innerHTML =
-      "<span class=\"bad\">Status file not written yet.</span> Start the package from Package Center.";
-  });
-</script>
+<script src="app.js"></script>
 </body>
 </html>

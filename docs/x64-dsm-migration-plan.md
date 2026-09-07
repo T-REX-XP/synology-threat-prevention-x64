@@ -37,7 +37,7 @@ Build tree: `build/suricata-8/` (Docker `linux/amd64`). Install prefix: `/opt/tp
 2. systemd `suricata.service`; eve socket under `/volume1/@appdata/ThreatPrevention`.
 3. Default IDS; IPS only when `ip_forward=1`.
 4. SQLite (or NAS pgsql) for events; Python 3 rotation.
-5. New DSM 7 WebAPI + UI.
+5. New DSM 7 WebAPI + UI — shipped in 8.0.6-0009 as `tpsweb` + native SPA. See [native-app-plan.md](native-app-plan.md) and [api/SYNO.TPS.contract.md](api/SYNO.TPS.contract.md).
 
 ## This repo’s first build
 

@@ -1,10 +1,22 @@
 #!/bin/sh
 PKGDEST="${SYNOPKG_PKGDEST:-/var/packages/ThreatPrevention/target}"
 PKGVAR="/var/packages/ThreatPrevention/var"
+PKGETC="/var/packages/ThreatPrevention/etc"
 PIDFILE="${PKGVAR}/suricata.pid"
+INGEST_PID="${PKGVAR}/ingest.pid"
+TPSWEB_PID="${PKGVAR}/tpsweb.pid"
 BIN="${PKGDEST}/bin/suricata"
 YAML="${PKGDEST}/etc/suricata/suricata.yaml"
 LOGDIR="${PKGVAR}/log"
+PYDIR="${PKGDEST}/lib/tps"
+PYTHON=""
+for c in /usr/bin/python3 /usr/local/bin/python3 python3; do
+	if command -v "${c}" >/dev/null 2>&1 || [ -x "${c}" ]; then
+		PYTHON="${c}"
+		break
+	fi
+done
+[ -n "${PYTHON}" ] || PYTHON="python3"
 
 write_status() {
 	ui="${PKGDEST}/ui/status.html"
@@ -25,28 +37,21 @@ write_status() {
 	if [ -f "${PKGVAR}/rules/.from-suricata-update" ]; then
 		rules="suricata-update (current ET Open for Suricata 8)"
 	fi
-	alerts="(no alerts yet)"
-	if [ -s "${LOGDIR}/eve.json" ]; then
-		alerts="$(grep '"event_type":"alert"' "${LOGDIR}/eve.json" 2>/dev/null | tail -n 12 || true)"
-		[ -n "${alerts}" ] || alerts="(no alerts yet)"
-	fi
 	{
 		printf '<p>Engine: <span class="%s">%s</span>' "${cls}" "${label}"
 		[ -n "${pid}" ] && printf ' (pid %s)' "${pid}"
 		printf '</p>\n'
 		printf '<p>Capture interface: <code>%s</code></p>\n' "${iface:-unknown}"
 		printf '<p>Rules: %s</p>\n' "${rules}"
-		printf '<p>Recent eve.json alert lines</p><pre>%s</pre>\n' "${alerts}"
+		printf '<p>API: <code>http://NAS:19557/</code> (tpsweb)</p>\n'
 	} > "${ui}.tmp" && mv "${ui}.tmp" "${ui}"
 }
 
 pick_iface() {
-	# Override: echo ovs_eth0 > /var/packages/ThreatPrevention/etc/interface
-	if [ -f /var/packages/ThreatPrevention/etc/interface ]; then
-		cat /var/packages/ThreatPrevention/etc/interface
+	if [ -f "${PKGETC}/interface" ]; then
+		cat "${PKGETC}/interface"
 		return
 	fi
-	# SA6400 / DSM OVS: eth0 is a slave; LAN is ovs_eth0.
 	if ip link show ovs_eth0 >/dev/null 2>&1; then
 		echo ovs_eth0
 		return
@@ -58,8 +63,38 @@ pick_iface() {
 	' | cut -d'@' -f1
 }
 
+alive() {
+	[ -f "$1" ] && kill -0 "$(cat "$1" 2>/dev/null)" 2>/dev/null
+}
+
+kill_pidfile() {
+	if [ -f "$1" ]; then
+		kill "$(cat "$1" 2>/dev/null)" 2>/dev/null || true
+		rm -f "$1"
+	fi
+}
+
+start_helpers() {
+	mkdir -p "${PKGVAR}" "${PKGETC}"
+	if [ ! -f "${PKGETC}/sensor.conf" ] && [ -f "${PKGDEST}/etc/sensor/sensor.conf" ]; then
+		cp -f "${PKGDEST}/etc/sensor/sensor.conf" "${PKGETC}/sensor.conf"
+	fi
+	if [ -x "${PYTHON}" ] || command -v "${PYTHON}" >/dev/null 2>&1; then
+		if ! alive "${INGEST_PID}"; then
+			PYTHONPATH="${PYDIR}" "${PYTHON}" "${PYDIR}/ingest.py" >>"${LOGDIR}/ingest.log" 2>&1 &
+			echo $! > "${INGEST_PID}"
+		fi
+		if ! alive "${TPSWEB_PID}"; then
+			PYTHONPATH="${PYDIR}" "${PYTHON}" "${PYDIR}/tpsweb.py" >>"${LOGDIR}/tpsweb.log" 2>&1 &
+			echo $! > "${TPSWEB_PID}"
+		fi
+	else
+		echo "python3 missing; tpsweb/ingest not started" >&2
+	fi
+}
+
 start() {
-	mkdir -p "${LOGDIR}" "${PKGVAR}"
+	mkdir -p "${LOGDIR}" "${PKGVAR}" "${PKGETC}"
 	if [ ! -x "${BIN}" ]; then
 		echo "suricata binary missing" >&2
 		return 1
@@ -69,7 +104,6 @@ start() {
 		echo "no capture interface" >&2
 		return 1
 	fi
-	# Drop a leftover pid file from a failed start (Suricata refuses to run otherwise).
 	if [ -f "${PIDFILE}" ]; then
 		oldpid="$(cat "${PIDFILE}" 2>/dev/null || true)"
 		if [ -z "${oldpid}" ] || ! kill -0 "${oldpid}" 2>/dev/null; then
@@ -77,7 +111,6 @@ start() {
 		fi
 	fi
 	echo "starting suricata on ${IFACE}" >&2
-	# IDS (af-packet). Capture needs file caps (unsigned SPK cannot declare run-as root).
 	if command -v setcap >/dev/null 2>&1; then
 		setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep "${BIN}" 2>/dev/null || true
 	fi
@@ -87,11 +120,13 @@ start() {
 		-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}"; then
 		echo "suricata failed to start (see ${LOGDIR}/suricata.log)" >&2
 		write_status failed "${IFACE}"
+		start_helpers
 		return 1
 	fi
 	i=0
 	while [ "${i}" -lt 45 ]; do
 		if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then
+			start_helpers
 			write_status running "${IFACE}"
 			return 0
 		fi
@@ -100,10 +135,13 @@ start() {
 	done
 	echo "suricata did not daemonize (see ${LOGDIR}/suricata.log)" >&2
 	write_status failed "${IFACE}"
+	start_helpers
 	return 1
 }
 
 stop() {
+	kill_pidfile "${INGEST_PID}"
+	kill_pidfile "${TPSWEB_PID}"
 	if [ -f "${PIDFILE}" ]; then
 		kill "$(cat "${PIDFILE}")" 2>/dev/null || true
 		rm -f "${PIDFILE}"

@@ -1,6 +1,6 @@
 # Threat Prevention SPK — deploy and update
 
-Unsigned DSM 7 x86_64 package (`ThreatPrevention`, current `8.0.6-0006`).  
+Unsigned DSM 7 x86_64 package (`ThreatPrevention`, current `8.0.6-0009`). Native desktop UI + `tpsweb` API on port **19557** ([native-app-plan.md](native-app-plan.md)).  
 SPK scripts under `spk/src/threatprevention/scripts/` are stubs except `postinst`, `start-stop-status`, and `update-rules.sh`. **Most of the work that makes capture actually run is admin-side:** DSM will not let an unsigned package declare `run-as: root` or file capabilities (`synopkg` error 319). `start-stop-status` tries `setcap` but it is a no-op when Package Center starts the unit as the package user.
 
 Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
@@ -13,6 +13,8 @@ Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
 | Logs, pid, live rules | `/var/packages/ThreatPrevention/var/` |
 | Capture iface override | `/var/packages/ThreatPrevention/etc/interface` (one line, e.g. `ovs_eth0`) |
 | Start Menu UI | `/usr/syno/synoman/webman/3rdparty/ThreatPrevention` → `target/ui` |
+| tpsweb API / SPA | `http://<nas>:19557/` (also unix `var/tpsweb.sock`) |
+| Event DB | `/var/packages/ThreatPrevention/var/tps.db` |
 | Package log | `/var/log/synopkg.log` |
 | Engine log | `/var/packages/ThreatPrevention/var/log/suricata.log` |
 | Alerts | `/var/packages/ThreatPrevention/var/log/eve.json` |
@@ -42,7 +44,7 @@ Rebuild the SPK on a Mac/Linux host with Docker:
 Package Center → Manual Install, or:
 
 ```sh
-sudo synopkg install /tmp/ThreatPrevention-x86_64-8.0.6-0006.spk
+sudo synopkg install /tmp/ThreatPrevention-x86_64-8.0.6-0009.spk
 ```
 
 What `postinst` does (as the package user): unpacks the bundled ET 2021 tarball if missing, concatenates `*.rules` into `/var/packages/ThreatPrevention/var/rules/suricata.rules` so the engine has a bootstrap ruleset. It does **not** apply `setcap` and does **not** fetch current ET Open.
@@ -78,7 +80,7 @@ echo ovs_eth0 | sudo tee /var/packages/ThreatPrevention/etc/interface
 sudo synopkg restart ThreatPrevention
 ```
 
-**Start Menu tile:** `INFO` now has `dsmuidir="ui"` and `dsmappname="SYNO.SDS.ThreatPrevention.Application"`. Package Center icons alone do not create a desktop app. After install, **log out of DSM and back in** (or reboot the desktop session) so the launcher cache reloads. The tile is admin-only.
+**Start Menu tile:** `INFO` has `dsmuidir="ui"` and `dsmappname="SYNO.SDS.ThreatPrevention.Application"`. After install, **log out of DSM and back in**. The tile is admin-only. The SPA talks to `tpsweb` on port **19557** (Package Center → Open uses the same port). If the browser blocks mixed HTTP on an HTTPS DSM session, open `http://<nas>:19557/` directly.
 
 Optional but recommended — replace the 2021 Suricata-5 ET dump with a current Suricata 8 feed (do **not** convert the old files):
 

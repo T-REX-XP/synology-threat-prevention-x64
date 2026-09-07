@@ -17,5 +17,6 @@ fi
 # First boot: one file the yaml can load. Later replaced by update-rules.sh.
 if [ ! -s "${PKGVAR}/rules/suricata.rules" ] && [ -d "${RULES_DIR}/rules" ]; then
 	cat "${RULES_DIR}/rules/"*.rules > "${PKGVAR}/rules/suricata.rules" 2>/dev/null || true
+	cp -f "${PKGVAR}/rules/suricata.rules" "${PKGVAR}/rules/catalog.rules" 2>/dev/null || true
 fi
 exit 0
