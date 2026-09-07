@@ -1,5 +1,5 @@
 package="ThreatPrevention"
-version="8.0.6-0042"
+version="8.0.6-0044"
 os_min_ver="7.0-40000"
 displayname="Threat Prevention (Suricata 8 PoC)"
 description="Research PoC: vanilla Suricata 8.0.6 plus a SYNO.TPS.* compatibility layer so the official ExtJS app can run on DSM 7 x86_64. Not a product, not for contribution. IPS/NFQUEUE is not auto-wired."

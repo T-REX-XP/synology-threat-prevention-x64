@@ -246,6 +246,31 @@ def _looks_hex(text):
         return False
 
 
+def _iface_operstate(name):
+    path = "/sys/class/net/%s/operstate" % name
+    try:
+        st = open(path, encoding="utf-8", errors="replace").read().strip()
+    except OSError:
+        return "connected"
+    if st in ("down", "lowerlayerdown"):
+        return "disconnected"
+    return "connected"
+
+
+def _iface_row(name, enabled=True, extra=None):
+    row = {
+        "if_id": name,
+        "ifname": name,
+        "enabled": bool(enabled),
+        "status": _iface_operstate(name),
+        "type": "",
+        "additional": {},
+    }
+    if extra:
+        row.update(extra)
+    return row
+
+
 def official_sensor(cfg, status, pid, iface, live=None):
     enabled = set()
     ifaces = []
@@ -254,7 +279,7 @@ def official_sensor(cfg, status, pid, iface, live=None):
         for item in raw:
             if not isinstance(item, dict):
                 name = str(item)
-                ifaces.append({"if_id": name, "ifname": name, "enabled": True})
+                ifaces.append(_iface_row(name, True))
                 enabled.add(name)
                 continue
             name = item.get("if_id") or item.get("ifname") or ""
@@ -265,25 +290,31 @@ def official_sensor(cfg, status, pid, iface, live=None):
                 on = False
             else:
                 on = True
-            ifaces.append({"if_id": name, "ifname": name, "enabled": on})
+            row = _iface_row(name, on)
+            for key in ("status", "type", "additional"):
+                if item.get(key) not in (None, ""):
+                    row[key] = item[key]
+            ifaces.append(row)
             if on:
                 enabled.add(name)
     else:
         for part in str(raw).replace(",", " ").split():
-            ifaces.append({"if_id": part, "ifname": part, "enabled": True})
+            ifaces.append(_iface_row(part, True))
             enabled.add(part)
     seen = {x["if_id"] for x in ifaces}
     for name in live or []:
         if name and name not in seen:
-            ifaces.append({"if_id": name, "ifname": name, "enabled": name in enabled})
+            ifaces.append(_iface_row(name, name in enabled))
             seen.add(name)
-    if not ifaces and iface:
-        ifaces.append({"if_id": str(iface), "ifname": str(iface), "enabled": True})
-        enabled.add(str(iface))
+    if not ifaces:
+        fallback = str(iface or "").split()[:1]
+        name = fallback[0] if fallback else "ovs_eth0"
+        ifaces.append(_iface_row(name, True))
+        enabled.add(name)
     if ifaces and not enabled:
         parts = str(iface or "").split()
         prefer = parts[0] if parts else "ovs_eth0"
-        pick = next((x for x in ifaces if x["if_id"] in (prefer, "ovs_eth0")), ifaces[0])
+        pick = next((x for x in ifaces if x["if_id"] in (prefer, "ovs_eth0", "eth0")), ifaces[0])
         pick["enabled"] = True
     if status == "running":
         eng = "engine_start"

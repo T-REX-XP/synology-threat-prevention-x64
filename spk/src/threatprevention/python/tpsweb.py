@@ -352,27 +352,49 @@ def kv_peek(key, default=""):
         return default
 
 
+def _skip_iface(name):
+    if not name:
+        return True
+    skip = ("lo", "sit0", "ovs-system", "syno_ovs_bonds", "dummy0", "bonding_masters")
+    return name in skip or name.startswith(("veth", "docker", "br-", "tun", "tap", "gre", "sit", "ip6tnl"))
+
+
 def list_ifaces():
     names = []
+    seen = set()
+
+    def add(name):
+        name = (name or "").strip()
+        if _skip_iface(name) or name in seen:
+            return
+        seen.add(name)
+        names.append(name)
+
     sysnet = "/sys/class/net"
     if os.path.isdir(sysnet):
-        for name in sorted(os.listdir(sysnet)):
-            if name in ("lo", "sit0", "ovs-system", "syno_ovs_bonds", "dummy0") or name.startswith(("veth", "docker", "br-", "tun", "tap", "gre", "sit")):
+        try:
+            for name in sorted(os.listdir(sysnet)):
+                add(name)
+        except OSError:
+            pass
+    if os.path.isfile("/proc/net/dev"):
+        try:
+            for line in open("/proc/net/dev", encoding="utf-8", errors="replace"):
+                if ":" not in line:
+                    continue
+                add(line.split(":", 1)[0].strip())
+        except OSError:
+            pass
+    if not names:
+        try:
+            out = subprocess.check_output(["ip", "-o", "link", "show"], stderr=subprocess.DEVNULL, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            out = b""
+        for line in out.decode("utf-8", "replace").splitlines():
+            parts = line.split(":", 2)
+            if len(parts) < 2:
                 continue
-            names.append(name)
-        return names
-    try:
-        out = subprocess.check_output(["ip", "-o", "link", "show"], stderr=subprocess.DEVNULL, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return names
-    for line in out.decode("utf-8", "replace").splitlines():
-        parts = line.split(":", 2)
-        if len(parts) < 2:
-            continue
-        name = parts[1].strip().split("@", 1)[0]
-        if name in ("lo", "sit0", "ovs-system", "syno_ovs_bonds") or name.startswith(("veth", "docker", "br-")):
-            continue
-        names.append(name)
+            add(parts[1].strip().split("@", 1)[0])
     return names
 
 
@@ -1133,7 +1155,13 @@ def settings_update(conn, api, method, p):
         if method == "set":
             kv_set(conn, "auto_update", "1" if _truth(p.get("auto_update")) else "0")
             if "weekday" in p:
-                kv_set(conn, "update_weekday", p["weekday"])
+                wd = p["weekday"]
+                if isinstance(wd, (list, tuple)):
+                    days = [str(x) for x in wd]
+                    wd = "daily" if len(days) >= 7 else ",".join(days)
+                elif isinstance(wd, dict):
+                    wd = wd.get("value") or wd.get("weekday") or "daily"
+                kv_set(conn, "update_weekday", str(wd))
             if "hour" in p or "minute" in p:
                 try:
                     hour = int(p.get("hour") if p.get("hour") not in (None, "") else kv_get(conn, "update_hour", "2") or 2)
@@ -1322,9 +1350,10 @@ def settings_storage(conn, method, p):
 def devices(conn, method, p):
     online = set()
     default_detect = 1 if kv_get(conn, "default_detect", "1") == "1" else 0
+    conn.execute("DELETE FROM device WHERE mac LIKE '02:42:%'")
     for rec in list_neighbors():
         mac = rec.get("mac") or ""
-        if not mac:
+        if not mac or mac.startswith("02:42:"):
             continue
         if rec.get("is_online"):
             online.add(mac)
@@ -1346,13 +1375,16 @@ def devices(conn, method, p):
         conn.commit()
         out = []
         for r in conn.execute("SELECT * FROM device ORDER BY device_name"):
+            mac = (r["mac"] or "").lower()
+            if mac.startswith("02:42:"):
+                continue
             out.append({
-                "mac": r["mac"],
+                "mac": mac,
                 "device_name": r["device_name"],
                 "detect": bool(r["detect"]),
                 "loading_score": r["loading_score"],
                 "loading": r["loading_score"],
-                "online": r["mac"].lower() in online,
+                "online": mac in online,
             })
         return ok(official_devices(out, kv_get(conn, "default_detect", "1") == "1"))
     if method == "set":

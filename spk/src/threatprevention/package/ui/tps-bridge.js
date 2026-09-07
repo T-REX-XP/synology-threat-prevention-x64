@@ -276,16 +276,167 @@ SYNO.SDS.TPS.Bridge = {
 	injectInfo: function () {
 		var info = { path: "entry.cgi", minVersion: 1, maxVersion: 4 };
 		var targets = [];
-		if (window.SYNO && SYNO.API) {
-			targets.push(SYNO.API.info, SYNO.API.Info, SYNO.API._info);
-			if (SYNO.API.Info && SYNO.API.Info.knowns) { targets.push(SYNO.API.Info.knowns); }
+		function add(obj) {
+			if (obj && typeof obj === "object") { targets.push(obj); }
 		}
-		if (window._S) { targets.push(_S.knowns, _S.Info); }
+		if (window.SYNO && SYNO.API) {
+			add(SYNO.API.info);
+			add(SYNO.API.Info);
+			add(SYNO.API._info);
+			if (SYNO.API.Info && SYNO.API.Info.knowns) { add(SYNO.API.Info.knowns); }
+			Ext.each([SYNO.API.Manager, SYNO.API.currentManager], function (mgr) {
+				if (!mgr) { return; }
+				if (!mgr.knownAPI) { mgr.knownAPI = {}; }
+				add(mgr.knownAPI);
+			});
+		}
+		if (window._S) {
+			add(_S.knowns);
+			add(_S.Info);
+		}
 		Ext.each(this.apis, function (api) {
 			Ext.each(targets, function (obj) {
-				if (obj && typeof obj === "object" && !obj[api]) { obj[api] = info; }
+				if (obj) { obj[api] = info; }
 			});
 		});
+	},
+	hookManagerRequest: function () {
+		/* Settings Device loadForm → getForm().submit({compound})
+		   → SYNO.API.Form.Action.Submit.run
+		   → Manager.requestAjaxAPI(api, method, version, {compound}, params, cb)
+		   → requestAjaxAPIv2 rewrites to SYNO.Entry.Request and POSTs entry.cgi.
+		   DSM 7 has neither SYNO.TPS.Device nor SYNO.Core.Network.NSM.Device, so
+		   the compound comes back has_fail / "No Such API" and the grid never
+		   loadData(). queryAPI("all") also replaces Manager.knownAPI and would
+		   drop catalog entries. Host those APIs on tpsweb and intercept here. */
+		var me = this;
+		var hostedInfo = { path: "entry.cgi", minVersion: 1, maxVersion: 4 };
+		function fire(cb, scope, ok, data, raw) {
+			var envelope = data || {};
+			var fake = {
+				status: ok ? 200 : 500,
+				responseData: envelope,
+				responseText: Ext.encode({ success: !!ok, data: envelope })
+			};
+			if (cb) { cb.call(scope || window, ok, envelope, envelope, {}, fake); }
+		}
+		function hostedCompound(compound) {
+			var hit = false;
+			if (!compound || !compound.params) { return false; }
+			Ext.each(compound.params, function (item) {
+				if (item && me.isHosted(item.api)) { hit = true; }
+			});
+			return hit;
+		}
+		function pickCompound() {
+			var i, cfg, found = null;
+			for (i = 0; i < arguments.length; i++) {
+				cfg = arguments[i];
+				if (!cfg || typeof cfg !== "object") { continue; }
+				if (cfg.webapi && cfg.webapi.compound && cfg.webapi.compound.params) {
+					found = cfg.webapi.compound;
+				}
+				if (cfg.compound && cfg.compound.params) { found = cfg.compound; }
+			}
+			return found;
+		}
+		function intercept(api, method, version, opts, params, cb, scope) {
+			var compound = pickCompound(api, opts, params);
+			var cfg = (api && typeof api === "object" && !Ext.isString(api)) ? (api.webapi || api) : null;
+			if (!cb && cfg) { cb = cfg.callback || api.callback; }
+			if (!cb && opts) { cb = opts.callback; }
+			if (!scope && cfg) { scope = cfg.scope || api.scope; }
+			if (!scope && opts) { scope = opts.scope; }
+			if (hostedCompound(compound)) {
+				me.compound({
+					compound: compound,
+					scope: scope,
+					callback: function (ok, data) { fire(cb, scope, ok, data); }
+				});
+				return true;
+			}
+			if (cfg && !compound && me.isHosted(cfg.api)) {
+				me.call(cfg.api, cfg.method, cfg.version || 1, cfg.params || {}, function (ok, data, raw) {
+					fire(cb, scope, ok, data, raw);
+				});
+				return true;
+			}
+			if (me.isHosted(api)) {
+				me.call(api, method, version || 1, params || (opts && opts.params) || {}, function (ok, data, raw) {
+					fire(cb, scope, ok, data, raw);
+				});
+				return true;
+			}
+			return false;
+		}
+		function wrapRequest(obj) {
+			if (!obj) { return; }
+			Ext.each(["requestAjaxAPI", "requestAjaxAPIv2", "requestAPI"], function (name) {
+				if (typeof obj[name] !== "function" || obj[name]._tpsBridge) { return; }
+				(function (key) {
+					var orig = obj[key];
+					obj[key] = function (api, method, version, opts, params, cb, scope, http) {
+						if (intercept(api, method, version, opts, params, cb, scope)) { return true; }
+						return orig.apply(this, arguments);
+					};
+					obj[key]._tpsBridge = true;
+				}(name));
+			});
+		}
+		function wrapQuery(obj) {
+			if (!obj || typeof obj.queryAPI !== "function" || obj.queryAPI._tpsBridge) { return; }
+			var orig = obj.queryAPI;
+			obj.queryAPI = function (api, cb, scope) {
+				return orig.call(this, api, function () {
+					me.injectInfo();
+					if (cb) { cb.apply(scope || this, arguments); }
+				}, scope);
+			};
+			obj.queryAPI._tpsBridge = true;
+		}
+		function wrapKnown(obj) {
+			if (!obj) { return; }
+			Ext.each(["getKnownAPI", "getKnownAPIv2"], function (name) {
+				if (typeof obj[name] !== "function" || obj[name]._tpsBridge) { return; }
+				(function (key) {
+					var orig = obj[key];
+					obj[key] = function (api, extra) {
+						var name = api;
+						if (api && typeof api === "object") { name = api.api; }
+						var info = orig.apply(this, arguments);
+						if (!info && me.isHosted(name)) { return hostedInfo; }
+						return info;
+					};
+					obj[key]._tpsBridge = true;
+				}(name));
+			});
+		}
+		function hookObj(obj) {
+			if (!obj) { return; }
+			wrapRequest(obj);
+			wrapQuery(obj);
+			wrapKnown(obj);
+			if (obj.prototype) {
+				wrapRequest(obj.prototype);
+				wrapQuery(obj.prototype);
+				wrapKnown(obj.prototype);
+			}
+		}
+		if (window.SYNO && SYNO.API) {
+			hookObj(SYNO.API._Manager);
+			hookObj(SYNO.API.Manager);
+			hookObj(SYNO.API.currentManager);
+			if (SYNO.API.GetKnownAPI && !SYNO.API.GetKnownAPI._tpsBridge) {
+				var origGet = SYNO.API.GetKnownAPI;
+				SYNO.API.GetKnownAPI = function (api, extra) {
+					var info = origGet.apply(this, arguments);
+					if (!info && me.isHosted(api)) { return hostedInfo; }
+					return info;
+				};
+				SYNO.API.GetKnownAPI._tpsBridge = true;
+			}
+		}
+		me.injectInfo();
 	},
 	download: function (opts) {
 		var api = opts.api || (opts.webapi && opts.webapi.api);
@@ -344,6 +495,12 @@ SYNO.SDS.TPS.Bridge = {
 			el = wrap && wrap.dom;
 		}
 		if (!el) { return; }
+		/* Rewriting live markup drops Ext listeners official afterrender just
+		   attached to <a class="pathlink">. Skip when tags are already real. */
+		if (el.querySelector && el.querySelector("a.pathlink, a, font")) {
+			var cur = el.innerHTML || "";
+			if (cur.indexOf("<") !== -1 && cur.indexOf("&lt;") === -1) { return; }
+		}
 		el.innerHTML = v;
 	},
 	restoreOfficialMarkup: function (field) {
@@ -418,8 +575,9 @@ SYNO.SDS.TPS.Bridge = {
 		/* Official Overview injects <a class="pathlink"> into syno_displayfield.
 		   SRM rendered that HTML. DSM 7 encodes it, so the link is visible as
 		   text and afterrender does b.el.down("a").on(...) on null.
-		   Statistics TopNPercentPanel puts <font class="font-order"> in
-		   fieldLabel (not value); DSM 7 encodes that too. */
+		   Restoring innerHTML after that bind also drops the listener — see
+		   patchOverviewPathlinks. Statistics TopNPercentPanel puts
+		   <font class="font-order"> in fieldLabel (not value); DSM 7 encodes that too. */
 		var me = this;
 		var seen = [];
 		function patch(Cls) {
@@ -536,6 +694,297 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		attach();
 	},
+	openTpsPage: function (win, pageFn, tabId) {
+		if (!win) { return; }
+		function callFirst(names, arg) {
+			var i, fn;
+			for (i = 0; i < names.length; i++) {
+				fn = win[names[i]];
+				if (typeof fn !== "function") { continue; }
+				try { fn.call(win, arg); return true; } catch (e) { /* try next */ }
+			}
+			return false;
+		}
+		if (!callFirst(["selectPage", "openPage", "goToPage", "setActivePage", "activatePage"], pageFn)) {
+			var list = win.moduleList || win.pageList || win.listPanel;
+			var root = list && list.getRootNode && list.getRootNode();
+			var node = root && root.findChild && root.findChild("fn", pageFn, true);
+			if (node && list.selectPath && node.getPath) {
+				try { list.selectPath(node.getPath()); } catch (e2) { /* ignore */ }
+			} else if (node && list.fireEvent) {
+				list.fireEvent("click", node);
+			}
+		}
+		if (!tabId) { return; }
+		var tries = 0;
+		function applyTab() {
+			if (typeof win.selectTab === "function") {
+				try { win.selectTab(tabId); return true; } catch (e3) { /* fall through */ }
+			}
+			var page = (win.getActivePage && win.getActivePage()) ||
+				(win.getPage && win.getPage(pageFn));
+			if (!page && win.findBy) {
+				var found = win.findBy(function (c) {
+					return c && (c.itemId === pageFn || c.id === pageFn);
+				});
+				page = found && found[0];
+			}
+			if (page && page.setActiveTab) {
+				var tab = (page.getComponent && page.getComponent(tabId)) || tabId;
+				try { page.setActiveTab(tab); return true; } catch (e4) { return false; }
+			}
+			return false;
+		}
+		function poll() {
+			if (applyTab() || ++tries > 20) { return; }
+			window.setTimeout(poll, 50);
+		}
+		window.setTimeout(poll, 0);
+	},
+	bindStatusPathlinks: function (panel) {
+		if (!panel) { return; }
+		var el = panel.el || (panel.getEl && panel.getEl());
+		var dom = el && (el.dom || (el.nodeType === 1 ? el : null));
+		if (!dom) { return; }
+		if (dom.querySelectorAll) {
+			var nodes = dom.querySelectorAll("a.pathlink");
+			var i;
+			for (i = 0; i < nodes.length; i++) {
+				nodes[i].style.cursor = "pointer";
+				if (!nodes[i].getAttribute("href")) { nodes[i].setAttribute("href", "#"); }
+			}
+		}
+		if (panel._tpsPathlinkBound) { return; }
+		if (!dom.addEventListener) { return; }
+		panel._tpsPathlinkBound = true;
+		var me = this;
+		dom.addEventListener("click", function (ev) {
+			var t = ev.target || ev.srcElement;
+			var a = t;
+			while (a && a !== dom) {
+				if (a.tagName === "A" && (" " + (a.className || "") + " ").indexOf(" pathlink ") !== -1) {
+					break;
+				}
+				a = a.parentNode;
+			}
+			if (!a || a === dom) { return; }
+			if (ev.preventDefault) { ev.preventDefault(); }
+			if (ev.stopPropagation) { ev.stopPropagation(); }
+			function txt(sec, key) {
+				try { return panel.helper && panel.helper.T ? panel.helper.T(sec, key) : ""; }
+				catch (e) { return ""; }
+			}
+			var updateNow = txt("updater", "update_now_btn");
+			var newVer = txt("updater", "update_status_new_version_desc");
+			var auto = txt("overview", "auto_update_isnot_set_desc");
+			var note = txt("overview", "notification_isnot_set_desc");
+			var linkText = a.textContent || a.innerText || "";
+			if (updateNow && linkText.indexOf(updateNow) !== -1) {
+				if (panel.startUpdate) { panel.startUpdate(); }
+				return;
+			}
+			var html = "";
+			var p = a;
+			while (p && p !== dom) {
+				html = p.innerHTML || html;
+				if ((auto && html.indexOf(auto) !== -1) || (note && html.indexOf(note) !== -1) ||
+						(newVer && html.indexOf(newVer) !== -1)) {
+					break;
+				}
+				p = p.parentNode;
+			}
+			if ((newVer && html.indexOf(newVer) !== -1) ||
+					(updateNow && html.indexOf(updateNow) !== -1)) {
+				if (panel.startUpdate) { panel.startUpdate(); }
+			} else if (auto && html.indexOf(auto) !== -1) {
+				me.openTpsPage(panel.findAppWindow && panel.findAppWindow(),
+					"SYNO.SDS.TPS.Settings.TabPanel",
+					"SYNO.SDS.TPS.Settings.GeneralPanel");
+			} else if (note && html.indexOf(note) !== -1) {
+				me.openTpsPage(panel.findAppWindow && panel.findAppWindow(),
+					"SYNO.SDS.TPS.Settings.TabPanel",
+					"SYNO.SDS.TPS.Settings.NotificationPanel");
+			}
+		}, true);
+	},
+	patchOverviewPathlinks: function (Panel) {
+		/* Official afterrender does b.el.down("a").on("click", …). DSM 7 may
+		   encode the markup so down("a") is null; restoreOfficialMarkup then
+		   rewrites innerHTML and drops any listener that did attach. Capture
+		   on StatusPanel survives both. */
+		var me = this;
+		function tryPatch() {
+			var P = Panel;
+			if (!P || !P.prototype) {
+				P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Overview &&
+					SYNO.SDS.TPS.Overview.StatusPanel;
+			}
+			if (!P || !P.prototype) { return false; }
+			if (P.prototype._tpsPathlink) { return true; }
+			P.prototype._tpsPathlink = true;
+			var origAfter = P.prototype.afterRender;
+			P.prototype.afterRender = function () {
+				if (origAfter) { origAfter.apply(this, arguments); }
+				me.bindStatusPathlinks(this);
+			};
+			var origShowStart = P.prototype.showStart;
+			if (origShowStart) {
+				P.prototype.showStart = function () {
+					var self = this;
+					var ret = origShowStart.apply(this, arguments);
+					me.bindStatusPathlinks(this);
+					window.setTimeout(function () { me.bindStatusPathlinks(self); }, 0);
+					return ret;
+				};
+			}
+			if (Ext.ComponentMgr && Ext.ComponentMgr.all && Ext.ComponentMgr.all.each) {
+				Ext.ComponentMgr.all.each(function (c) {
+					if (c instanceof P) { me.bindStatusPathlinks(c); }
+				});
+			}
+			P.prototype.linkToGeneralSetting = function () {
+				me.openTpsPage(this.findAppWindow && this.findAppWindow(),
+					"SYNO.SDS.TPS.Settings.TabPanel",
+					"SYNO.SDS.TPS.Settings.GeneralPanel");
+			};
+			P.prototype.linkToNotificationSetting = function () {
+				me.openTpsPage(this.findAppWindow && this.findAppWindow(),
+					"SYNO.SDS.TPS.Settings.TabPanel",
+					"SYNO.SDS.TPS.Settings.NotificationPanel");
+			};
+			return true;
+		}
+		if (tryPatch()) { return; }
+		if (Panel) { return; }
+		var tries = 0;
+		var id = window.setInterval(function () {
+			if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
+		}, 25);
+	},
+	prepareGeneralForm: function (panel) {
+		if (!panel || !panel.getForm) { return; }
+		var form = panel.getForm();
+		if (!form) { return; }
+		var use = form.findField("use_code");
+		var code = form.findField("code");
+		var isPro = use && use.getValue && use.getValue() === "etPro";
+		if (code) {
+			code.allowBlank = !isPro;
+			if (!isPro && code.clearInvalid) { code.clearInvalid(); }
+		}
+		var weekday = form.findField("weekday");
+		if (weekday) {
+			weekday.allowBlank = true;
+			if (weekday.clearInvalid) { weekday.clearInvalid(); }
+		}
+		function coerceCombo(field, fallback) {
+			if (!field || !field.getValue) { return; }
+			var v = field.getValue();
+			if (v === "" || v === null || v === undefined) {
+				if (field.setValue) { field.setValue(fallback); }
+				return;
+			}
+			if (!field.findRecord) { return; }
+			var vf = field.valueField || "value";
+			if (field.findRecord(vf, v)) { return; }
+			if (field.findRecord(vf, String(v))) { field.setValue(String(v)); return; }
+			var n = Number(v);
+			if (!isNaN(n) && field.findRecord(vf, n)) { field.setValue(n); }
+		}
+		coerceCombo(form.findField("hour"), 2);
+		coerceCombo(form.findField("minute"), 0);
+		var store = panel.interfaceStore;
+		if (!store) { return; }
+		if (store.getCount() === 0) {
+			store.loadData({
+				interface_list: [{
+					if_id: "ovs_eth0", enabled: true, status: "connected",
+					type: "", additional: {}
+				}]
+			});
+		}
+		var any = false;
+		store.each(function (rec) {
+			if (rec && rec.get("enabled")) { any = true; }
+		});
+		if (!any && store.getCount()) {
+			var rec = store.getAt(0);
+			if (rec) {
+				rec.set("enabled", true);
+				if (rec.commit) { rec.commit(); }
+			}
+		}
+	},
+	wrapGeneralFormValid: function (panel) {
+		var me = this;
+		var form = panel && panel.getForm && panel.getForm();
+		if (!form || !form.isValid || form.isValid._tpsGeneral) { return; }
+		var orig = form.isValid;
+		form.isValid = function () {
+			me.prepareGeneralForm(panel);
+			return orig.apply(this, arguments);
+		};
+		form.isValid._tpsGeneral = true;
+		me.prepareGeneralForm(panel);
+	},
+	patchGeneralSettings: function (Panel) {
+		/* Official isValid requires an enabled monitored interface. Empty
+		   interface_list (or a hidden ET Pro code with allowBlank:false)
+		   shows "Some of your settings are invalid" and blocks Apply. */
+		var me = this;
+		function tryPatch() {
+			var P = Panel;
+			if (!P || !P.prototype) {
+				P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Settings &&
+					SYNO.SDS.TPS.Settings.GeneralPanel;
+			}
+			if (!P || !P.prototype) { return false; }
+			if (P.prototype._tpsGeneral) { return true; }
+			P.prototype._tpsGeneral = true;
+			var origFill = P.prototype.fillConfig;
+			if (origFill) {
+				P.prototype.fillConfig = function (a) {
+					var cfg = origFill.apply(this, arguments);
+					function walk(items) {
+						Ext.each(items || [], function (item) {
+							if (!item) { return; }
+							if (item.name === "code" || item.name === "weekday") {
+								item.allowBlank = true;
+							}
+							if (item.items) { walk(item.items); }
+						});
+					}
+					walk(cfg && cfg.items);
+					return cfg;
+				};
+			}
+			var origExtend = P.prototype.extendFormValid;
+			P.prototype.extendFormValid = function () {
+				if (origExtend) { origExtend.apply(this, arguments); }
+				me.wrapGeneralFormValid(this);
+			};
+			var origReturn = P.prototype.processReturnData;
+			if (origReturn) {
+				P.prototype.processReturnData = function () {
+					var ret = origReturn.apply(this, arguments);
+					me.prepareGeneralForm(this);
+					return ret;
+				};
+			}
+			if (Ext.ComponentMgr && Ext.ComponentMgr.all && Ext.ComponentMgr.all.each) {
+				Ext.ComponentMgr.all.each(function (c) {
+					if (c instanceof P) { me.wrapGeneralFormValid(c); }
+				});
+			}
+			return true;
+		}
+		if (tryPatch()) { return; }
+		if (Panel) { return; }
+		var tries = 0;
+		var id = window.setInterval(function () {
+			if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
+		}, 25);
+	},
 	injectSettingsTabs: function () {
 		var me = this;
 		function tryPatch() {
@@ -545,6 +994,7 @@ SYNO.SDS.TPS.Bridge = {
 			}
 			me.patchNotificationTelegram(S.NotificationPanel);
 			me.patchSettingsTabPanel(S.TabPanel);
+			if (S.GeneralPanel) { me.patchGeneralSettings(S.GeneralPanel); }
 			return true;
 		}
 		if (tryPatch()) { return; }
@@ -564,6 +1014,12 @@ SYNO.SDS.TPS.Bridge = {
 			}
 			if (name === "SYNO.SDS.TPS.Settings.TabPanel") {
 				me.patchSettingsTabPanel(cls);
+			}
+			if (name === "SYNO.SDS.TPS.Overview.StatusPanel") {
+				me.patchOverviewPathlinks(cls);
+			}
+			if (name === "SYNO.SDS.TPS.Settings.GeneralPanel") {
+				me.patchGeneralSettings(cls);
 			}
 			return cls;
 		};
@@ -1358,9 +1814,11 @@ SYNO.SDS.TPS.Bridge = {
 		var me = this;
 		if (me._installed) {
 			me.injectInfo();
+			me.hookManagerRequest();
 			return;
 		}
 		me.injectInfo();
+		me.hookManagerRequest();
 		function hookProto(cls, name, extra) {
 			if (!cls || !cls.prototype || !cls.prototype[name] || cls.prototype[name]._tpsBridge) { return; }
 			var orig = cls.prototype[name];
@@ -1453,6 +1911,9 @@ SYNO.SDS.TPS.Bridge = {
 			var origReq = SYNO.API.Request;
 			var wrappedReq = function (opts) {
 				var args = arguments;
+				if (opts && opts.compound && opts.compound.params) {
+					return me.dispatch(opts, function () { return origReq.apply(this, args); });
+				}
 				if (opts && me.isHosted(opts.api)) {
 					return me.dispatch(opts, function () { return origReq.apply(this, args); });
 				}
@@ -1477,6 +1938,8 @@ SYNO.SDS.TPS.Bridge = {
 		me.patchOsmTiles();
 		me.patchDeviceCellClick();
 		me.patchLogStorage();
+		me.patchOverviewPathlinks();
+		me.patchGeneralSettings();
 		me.injectSettingsTabs();
 		me.hookPolling();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {

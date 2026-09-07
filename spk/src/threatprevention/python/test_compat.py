@@ -51,6 +51,11 @@ check(any(x["if_id"] == "eth0" for x in sensor["interface_list"]), "live iface m
 empty = official_sensor({"enable_sensor": True, "interface_list": ""}, "running", 1, "", ["ovs_eth0", "eth0"])
 check(empty["interface"] == "ovs_eth0", "empty iface prefers ovs_eth0")
 check(any(x["if_id"] == "ovs_eth0" and x["enabled"] for x in empty["interface_list"]), "empty live enable")
+check(all(x.get("status") for x in empty["interface_list"]), "iface link status")
+
+none = official_sensor({"enable_sensor": True, "interface_list": ""}, "running", 1, "", [])
+check(len(none["interface_list"]) >= 1, "fallback iface when sysfs empty")
+check(any(x.get("enabled") for x in none["interface_list"]), "fallback enabled")
 
 src = official_source("et-pro", "abc")
 check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_code")
@@ -161,6 +166,11 @@ syno = _parse_syno_info("IP=10.0.0.8\nMAC=11:22:33:44:55:66\nHOSTNAME=cam\n")
 check(syno and syno[0][0] == "11:22:33:44:55:66" and syno[0][2] == "cam", "syno dhcpd.info")
 nsm = handle("SYNO.Core.Network.NSM.Device", "get", {}, conn)
 check(nsm["success"] and isinstance(nsm["data"]["devices"], list), "nsm device list")
+devlist = handle("SYNO.TPS.Device", "list", {}, conn)
+check(devlist["success"] and isinstance(devlist["data"]["device_list"], list), "tps device list")
+for row in devlist["data"]["device_list"]:
+    check(not str(row.get("mac") or "").startswith("02:42:"), "device list skips docker mac")
+check("default_detect" in devlist["data"], "device list default_detect")
 usb = handle("SYNO.Core.ExternalDevice.Storage.USB", "list", {}, conn)
 check(usb["success"] and isinstance(usb["data"]["devices"], list), "usb list")
 for dev in usb["data"]["devices"]:
