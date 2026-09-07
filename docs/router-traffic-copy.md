@@ -14,7 +14,12 @@ GRE is originated on the router (OUTPUT). The nft hook is **forward** only, so t
 
 ## NAS
 
-`/var/packages/ThreatPrevention/etc/mirror.conf` (shipped **disabled**; set `enabled=1` after OpenWrt and DSM GRE are in place):
+`/var/packages/ThreatPrevention/etc/mirror.conf` (shipped **disabled**). Choose the mode in **Settings → General → Capture source**:
+
+- **Listen on NAS LAN interfaces** — Suricata sees only traffic to/from this NAS (`ovs_eth0`).
+- **Receive a traffic copy from the router** — OpenWrt GRE-copies LAN↔WAN onto local `tps0`. Enter the **router LAN IPv4**. Optional NAS IP (empty = auto).
+
+Apply writes:
 
 ```
 enabled=1
@@ -70,4 +75,4 @@ Every WAN byte is copied again as GRE on the LAN toward the NAS. Outer GRE is la
 
 ## Disable
 
-Set `enabled=0` in `mirror.conf`, restart the package, capture returns to `ovs_eth0`. On OpenWrt remove `/etc/nftables.d/10-tps-mirror.nft` and the `network.tpsmirror` UCI section.
+Settings → General → **Listen on NAS LAN interfaces**, Apply. Capture returns to `ovs_eth0`. Or set `enabled=0` in `mirror.conf` and restart the package. On OpenWrt remove `/etc/nftables.d/10-tps-mirror.nft` and the `network.tpsmirror` UCI section.

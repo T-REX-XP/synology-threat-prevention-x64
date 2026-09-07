@@ -120,7 +120,8 @@ SYNO.SDS.TPS.Bridge = {
 		"SYNO.TPS.Notification", "SYNO.TPS.Notification.Filter", "SYNO.TPS.Sensor",
 		"SYNO.TPS.Sensor.Variables", "SYNO.TPS.Settings.Storage", "SYNO.TPS.Settings.Update",
 		"SYNO.TPS.Settings.Update.Schedule", "SYNO.TPS.Settings.Update.Source",
-		"SYNO.TPS.Settings.Telegram", "SYNO.TPS.Settings.Feed", "SYNO.TPS.Settings.Map",
+		"SYNO.TPS.Settings.Telegram", "SYNO.TPS.Settings.Mirror", "SYNO.TPS.Settings.Feed",
+		"SYNO.TPS.Settings.Map",
 		"SYNO.TPS.Signature", "SYNO.TPS.Signature.Classification", "SYNO.TPS.Signature.Policy",
 		"SYNO.TPS.Signature.Rule", "SYNO.TPS.Statistic.Device", "SYNO.TPS.Statistic.Trends",
 		"SYNO.Core.Network.NSM.Device", "SYNO.Core.SystemDB",
@@ -298,7 +299,7 @@ SYNO.SDS.TPS.Bridge = {
 					});
 					return;
 				}
-				opts.callback.call(opts.scope || window, true, payload);
+				opts.callback.call(opts.scope || window, true, payload, { compound: items });
 			}
 		}
 		Ext.each(items, function (item, idx) {
@@ -362,6 +363,65 @@ SYNO.SDS.TPS.Bridge = {
 		else { el.appendChild(document.createTextNode(css)); }
 		(document.head || document.getElementsByTagName("head")[0] || document.body).appendChild(el);
 	},
+	injectGridComboCss: function () {
+		/* Official RuleGrid actionRenderer paints a fake combo with
+		   x-form-trigger + syno-ux-combobox-trigger. DSM 7's combo_trigger.png
+		   is a 24x72 sprite (default / hover / click). The fake <img> has no
+		   height, so the cell shows two frames. The Ext 3 spacer GIF path
+		   (/scripts/ext-3/...) is also gone on DSM 7. */
+		if (document.getElementById("tps-grid-combo-css")) { return; }
+		var css = [
+			".x-grid3-cell .x-form-field-trigger-wrap,",
+			".x-grid3-cell .tps-grid-combo { position: relative; height: 24px; line-height: 22px; overflow: hidden; padding-right: 26px; }",
+			".x-grid3-cell .tps-grid-combo-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+			".x-grid3-cell .x-form-trigger.syno-ux-combobox-trigger,",
+			".x-grid3-cell .tps-grid-combo-trigger {",
+			"  position: absolute !important; top: 0 !important; right: 0 !important;",
+			"  width: 24px !important; height: 24px !important; border: 0 !important;",
+			"  background-repeat: no-repeat !important; background-position: 0 0 !important;",
+			"  background-color: transparent !important; box-shadow: none !important;",
+			"  box-sizing: border-box !important;",
+			"}",
+			".x-grid3-viewport .x-small-editor .x-form-trigger.syno-ux-combobox-trigger {",
+			"  height: 24px !important; background-position: 0 0 !important;",
+			"}"
+		].join("\n");
+		var el = document.createElement("style");
+		el.id = "tps-grid-combo-css";
+		el.type = "text/css";
+		if (el.styleSheet) { el.styleSheet.cssText = css; }
+		else { el.appendChild(document.createTextNode(css)); }
+		(document.head || document.getElementsByTagName("head")[0] || document.body).appendChild(el);
+	},
+	patchRuleGridCombo: function (Panel) {
+		function tryPatch() {
+			var P = Panel;
+			if (!P || !P.prototype) {
+				P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Ruleset &&
+					SYNO.SDS.TPS.Ruleset.RuleGridPanel;
+			}
+			if (!P || !P.prototype || !P.prototype.actionRenderer) { return false; }
+			if (P.prototype._tpsActionCombo) { return true; }
+			P.prototype._tpsActionCombo = true;
+			P.prototype.actionRenderer = function (c) {
+				var label = this.helper.T("ruleset", "action_" + String(c || "alert").toLowerCase());
+				return String.format(
+					'<div class="x-form-field-wrap x-form-field-trigger-wrap tps-grid-combo">' +
+					'<div class="tps-grid-combo-text">{0}</div>' +
+					'<img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="" ' +
+					'class="x-form-trigger x-form-arrow-trigger syno-ux-combobox-trigger tps-grid-combo-trigger"></div>',
+					Ext.util.Format.htmlEncode(label)
+				);
+			};
+			return true;
+		}
+		if (tryPatch()) { return; }
+		if (Panel) { return; }
+		var tries = 0;
+		var id = window.setInterval(function () {
+			if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
+		}, 25);
+	},
 	hookManagerRequest: function () {
 		/* Settings Device loadForm → getForm().submit({compound})
 		   → SYNO.API.Form.Action.Submit.run
@@ -373,14 +433,17 @@ SYNO.SDS.TPS.Bridge = {
 		   drop catalog entries. Host those APIs on tpsweb and intercept here. */
 		var me = this;
 		var hostedInfo = { path: "entry.cgi", minVersion: 1, maxVersion: 4 };
-		function fire(cb, scope, ok, data, raw) {
+		function fire(cb, scope, ok, data, raw, reqCompound) {
 			var envelope = data || {};
+			var extra = {};
+			var items = reqCompound && reqCompound.params ? reqCompound.params : reqCompound;
+			if (Ext.isArray(items)) { extra.compound = items; }
 			var fake = {
 				status: ok ? 200 : 500,
 				responseData: envelope,
 				responseText: Ext.encode({ success: !!ok, data: envelope })
 			};
-			if (cb) { cb.call(scope || window, ok, envelope, envelope, {}, fake); }
+			if (cb) { cb.call(scope || window, ok, envelope, extra, {}, fake); }
 		}
 		function hostedCompound(compound) {
 			var hit = false;
@@ -417,7 +480,7 @@ SYNO.SDS.TPS.Bridge = {
 				me.compound({
 					compound: compound,
 					scope: scope,
-					callback: function (ok, data) { fire(cb, scope, ok, data); }
+					callback: function (ok, data) { fire(cb, scope, ok, data, data, compound); }
 				});
 				return true;
 			}
@@ -1009,12 +1072,44 @@ SYNO.SDS.TPS.Bridge = {
 		if (composite && composite.setDisabled) {
 			composite.setDisabled(!data.auto_update);
 		}
+		if (data.last_updated && panel.setLastUpdatedDate) {
+			panel._tpsLastUpdated = data.last_updated;
+			panel.setLastUpdatedDate(data.last_updated);
+		}
+	},
+	applySourceData: function (panel, data) {
+		if (!panel || !data) { return; }
+		var form = panel.getForm && panel.getForm();
+		if (!form || !form.findField) { return; }
+		var use = form.findField("use_code");
+		var code = form.findField("code");
+		var src = data.use_code || data.source || "";
+		if (src === "et-pro" || src === "etpro") { src = "etPro"; }
+		if (src === "et-open" || src === "etopen") { src = "etOpen"; }
+		if (use && src && use.setValue) {
+			use.setValue(src);
+			panel._tpsUseCode = src;
+		}
+		if (code && code.setValue && data.code != null) {
+			code.setValue(data.code || "");
+		}
+		if (panel.onSelectSignatureSource && src) {
+			panel.onSelectSignatureSource(src);
+		}
 	},
 	applyScheduleFromResult: function (panel, resp) {
 		var me = this;
 		Ext.each((resp && resp.result) || [], function (e) {
-			if (e && e.api === "SYNO.TPS.Settings.Update.Schedule" && e.data) {
+			if (!e || !e.data) { return; }
+			if (e.api === "SYNO.TPS.Settings.Update.Schedule") {
 				me.applyScheduleData(panel, e.data);
+			}
+			if (e.api === "SYNO.TPS.Settings.Update.Source") {
+				me.applySourceData(panel, e.data);
+			}
+			if (e.api === "SYNO.TPS.Settings.Update" && e.data.last_updated && panel.setLastUpdatedDate) {
+				panel._tpsLastUpdated = e.data.last_updated;
+				panel.setLastUpdatedDate(e.data.last_updated);
 			}
 		});
 	},
@@ -1037,6 +1132,126 @@ SYNO.SDS.TPS.Bridge = {
 			weekday: w,
 			hour: h,
 			minute: m
+		};
+	},
+	captureModeIsCopy: function (panel) {
+		var form = panel && panel.getForm && panel.getForm();
+		var fld = form && form.findField && form.findField("capture_mode");
+		if (!fld) { return false; }
+		var v = fld.getGroupValue ? fld.getGroupValue() : (fld.getValue && fld.getValue());
+		return v === "copy";
+	},
+	readMirrorValues: function (panel) {
+		var form = panel && panel.getForm && panel.getForm();
+		function val(name, fallback) {
+			var fld = form && form.findField && form.findField(name);
+			if (!fld || !fld.getValue) { return fallback; }
+			var v = fld.getValue();
+			return (v === null || v === undefined) ? fallback : v;
+		}
+		var mode = "lan";
+		var fld = form && form.findField && form.findField("capture_mode");
+		if (fld) {
+			mode = (fld.getGroupValue ? fld.getGroupValue() : fld.getValue()) || "lan";
+		}
+		return {
+			capture_mode: mode === "copy" ? "copy" : "lan",
+			enabled: mode === "copy",
+			router_ip: String(val("router_ip", "") || "").replace(/^\s+|\s+$/g, ""),
+			local_ip: String(val("local_ip", "") || "").replace(/^\s+|\s+$/g, ""),
+			ifname: String(val("ifname", "tps0") || "tps0").replace(/^\s+|\s+$/g, "") || "tps0"
+		};
+	},
+	syncCaptureMode: function (panel) {
+		if (!panel || !panel.getForm) { return; }
+		var form = panel.getForm();
+		if (!form) { return; }
+		var copy = this.captureModeIsCopy(panel);
+		var sensor = form.findField("enable_sensor");
+		var sensorOn = !sensor || !sensor.getValue || !!sensor.getValue();
+		Ext.each(["router_ip", "local_ip"], function (name) {
+			var fld = form.findField(name);
+			if (!fld) { return; }
+			if (fld.setDisabled) { fld.setDisabled(!copy); }
+			if (name === "router_ip") {
+				fld.allowBlank = !copy;
+				if (!copy && fld.clearInvalid) { fld.clearInvalid(); }
+			}
+		});
+		if (panel.interfaceGrid && panel.interfaceGrid.setDisabled) {
+			panel.interfaceGrid.setDisabled(!sensorOn || copy);
+		}
+	},
+	applyMirrorData: function (panel, data) {
+		if (!panel || !data) { return; }
+		var form = panel.getForm && panel.getForm();
+		if (!form || !form.setValues) { return; }
+		form.setValues({
+			capture_mode: data.capture_mode || (data.enabled ? "copy" : "lan"),
+			router_ip: data.router_ip || "",
+			local_ip: data.local_ip || "",
+			ifname: data.ifname || "tps0"
+		});
+		var hint = form.findField("mirror_hint");
+		if (hint && hint.setValue) {
+			var copy = (data.capture_mode || (data.enabled ? "copy" : "lan")) === "copy";
+			var msg = "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router.";
+			if (copy && !data.tap_present) {
+				msg += " tps0 is not up yet — Apply, then restart Threat Prevention if the tunnel is missing.";
+			}
+			hint.setValue(msg);
+		}
+		this.syncCaptureMode(panel);
+	},
+	applyMirrorFromResult: function (panel, resp) {
+		var me = this;
+		Ext.each((resp && resp.result) || [], function (e) {
+			if (e && e.api === "SYNO.TPS.Settings.Mirror" && e.data) {
+				me.applyMirrorData(panel, e.data);
+			}
+		});
+	},
+	captureModeFieldset: function (panel) {
+		var me = this;
+		function onMode(fld, on) {
+			if (on) { me.syncCaptureMode(panel); me.prepareGeneralForm(panel); }
+		}
+		return {
+			xtype: "syno_fieldset",
+			title: "Capture source",
+			itemId: "tps_capture_mode",
+			webapi: { api: "SYNO.TPS.Settings.Mirror", methods: { get: "get", set: "set" }, version: 1 },
+			collapsible: false,
+			defaults: { labelWidth: 160 },
+			items: [
+				{
+					xtype: "syno_displayfield", hideLabel: true, htmlEncode: false,
+					value: "The NAS is not the gateway. Choose how Suricata sees packets."
+				},
+				{
+					xtype: "syno_radio", name: "capture_mode", inputValue: "lan", checked: true,
+					boxLabel: "Listen on NAS LAN interfaces — only traffic to or from this NAS",
+					listeners: { check: onMode }
+				},
+				{
+					xtype: "syno_radio", name: "capture_mode", inputValue: "copy",
+					boxLabel: "Receive a traffic copy from the router — LAN↔WAN (OpenWrt GRE)",
+					listeners: { check: onMode }
+				},
+				{ xtype: "hidden", name: "ifname", value: "tps0" },
+				{
+					xtype: "syno_textfield", name: "router_ip", fieldLabel: "Router IP",
+					indent: 1, allowBlank: true, disabled: true, value: "192.168.1.1"
+				},
+				{
+					xtype: "syno_textfield", name: "local_ip", fieldLabel: "NAS IP (optional)",
+					indent: 1, allowBlank: true, disabled: true, emptyText: "auto"
+				},
+				{
+					xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
+					value: "Requires OpenWrt apply-tps-mirror.sh and DSM Firewall GRE (protocol 47) from the router."
+				}
+			]
 		};
 	},
 	prepareGeneralForm: function (panel) {
@@ -1082,6 +1297,35 @@ SYNO.SDS.TPS.Bridge = {
 		}
 		var store = panel.interfaceStore;
 		if (!store) { return; }
+		var copy = me.captureModeIsCopy(panel);
+		if (copy) {
+			var tap = "tps0";
+			var ifname = form.findField("ifname");
+			if (ifname && ifname.getValue) {
+				tap = String(ifname.getValue() || "tps0").replace(/^\s+|\s+$/g, "") || "tps0";
+			}
+			var have = false;
+			store.each(function (rec) {
+				if (!rec) { return; }
+				if (rec.get("if_id") === tap) {
+					have = true;
+					rec.set("enabled", true);
+				} else {
+					rec.set("enabled", false);
+				}
+				if (rec.commit) { rec.commit(); }
+			});
+			if (!have) {
+				store.loadData({
+					interface_list: [{
+						if_id: tap, enabled: true, status: "connected",
+						type: "", additional: {}
+					}]
+				}, true);
+			}
+			me.syncCaptureMode(panel);
+			return;
+		}
 		if (store.getCount() === 0) {
 			store.loadData({
 				interface_list: [{
@@ -1101,6 +1345,7 @@ SYNO.SDS.TPS.Bridge = {
 				if (rec.commit) { rec.commit(); }
 			}
 		}
+		me.syncCaptureMode(panel);
 	},
 	snapFieldOriginal: function (fld) {
 		if (!fld || typeof fld.getValue !== "function") { return; }
@@ -1124,10 +1369,12 @@ SYNO.SDS.TPS.Bridge = {
 		Ext.each([
 			"enable_sensor", "enable_prevention", "enable_auto_export_events_during_postupgrade",
 			"network_security_mode", "auto_update", "weekday", "hour", "minute",
-			"use_code", "code", "update_status", "last_updated"
+			"use_code", "code", "update_status", "last_updated",
+			"capture_mode", "router_ip", "local_ip", "ifname"
 		], function (name) { snap(me.findNamed(panel, name) || form.findField(name)); });
 		if (form.findFields) {
 			Ext.each(form.findFields("network_security_mode") || [], snap);
+			Ext.each(form.findFields("capture_mode") || [], snap);
 		}
 		var store = panel.interfaceStore;
 		if (store) {
@@ -1143,7 +1390,16 @@ SYNO.SDS.TPS.Bridge = {
 		if (!form || !form.isValid || form.isValid._tpsGeneral) { return; }
 		var orig = form.isValid;
 		form.isValid = function () {
+			me.syncCaptureMode(panel);
 			me.prepareGeneralForm(panel);
+			if (me.captureModeIsCopy(panel)) {
+				var rip = form.findField("router_ip");
+				var v = rip && rip.getValue ? String(rip.getValue() || "").replace(/^\s+|\s+$/g, "") : "";
+				if (!v || !/^(?:25[0-5]|2[0-4]\d|[01]?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}$/.test(v)) {
+					if (rip && rip.markInvalid) { rip.markInvalid("Enter the router LAN IPv4"); }
+					return false;
+				}
+			}
 			return orig.apply(this, arguments);
 		};
 		form.isValid._tpsGeneral = true;
@@ -1184,6 +1440,11 @@ SYNO.SDS.TPS.Bridge = {
 						});
 					}
 					walk(cfg && cfg.items);
+					if (cfg && Ext.isArray(cfg.items) && !this._tpsCaptureSpliced) {
+						this._tpsCaptureSpliced = true;
+						cfg.items = cfg.items.slice();
+						cfg.items.splice(1, 0, me.captureModeFieldset(this));
+					}
 					return cfg;
 				};
 			}
@@ -1200,25 +1461,49 @@ SYNO.SDS.TPS.Bridge = {
 					me.bindTimeCombos(this);
 					var ret = origReturn.apply(this, arguments);
 					me.applyScheduleFromResult(this, a);
+					me.applyMirrorFromResult(this, a);
+					me.syncCaptureMode(this);
 					me.prepareGeneralForm(this);
 					me.clearGeneralDirty(this);
-					window.setTimeout(function () { me.clearGeneralDirty(self); }, 0);
-					window.setTimeout(function () { me.clearGeneralDirty(self); }, 50);
+					window.setTimeout(function () {
+						me.applyScheduleFromResult(self, a);
+						me.clearGeneralDirty(self);
+					}, 0);
+					window.setTimeout(function () {
+						me.applyScheduleFromResult(self, a);
+						me.clearGeneralDirty(self);
+					}, 50);
 					return ret;
 				};
 			}
 			var origStatus = P.prototype.setUpdateStatus;
 			if (origStatus) {
 				P.prototype.setUpdateStatus = function () {
+					var form = this.getForm && this.getForm();
+					var use = form && form.findField && form.findField("use_code");
+					var kept = (use && use.getValue && use.getValue()) || this._tpsUseCode;
 					var ret = origStatus.apply(this, arguments);
-					me.clearGeneralDirty(this, ["update_status", "last_updated"]);
+					if (use && kept && use.setValue) {
+						use.setValue(kept);
+						this._tpsUseCode = kept;
+					}
+					if (this._tpsLastUpdated && this.setLastUpdatedDate) {
+						var last = form && form.findField && form.findField("last_updated");
+						var cur = last && last.getValue && last.getValue();
+						if (!cur || cur === "--") {
+							this.setLastUpdatedDate(this._tpsLastUpdated);
+						}
+					}
+					me.clearGeneralDirty(this, ["update_status", "last_updated", "use_code", "code"]);
 					return ret;
 				};
 			}
 			var origLast = P.prototype.setLastUpdatedDate;
 			if (origLast) {
-				P.prototype.setLastUpdatedDate = function () {
-					var ret = origLast.apply(this, arguments);
+				P.prototype.setLastUpdatedDate = function (a) {
+					if (!a || a === "--") { a = "not_updated_yet"; }
+					this._tpsLastUpdated = a;
+					var ret = origLast.call(this, a);
 					me.clearGeneralDirty(this, ["last_updated"]);
 					return ret;
 				};
@@ -1235,13 +1520,43 @@ SYNO.SDS.TPS.Bridge = {
 					var out = origParams.apply(this, arguments);
 					if (c === "get") { return out; }
 					var vals = me.readScheduleValues(this);
-					Ext.each(out || [], function (f) {
-						if (!f || f.api !== "SYNO.TPS.Settings.Update.Schedule" || f.method !== "set") {
-							return;
-						}
-						f.params = Ext.apply({}, f.params || {}, vals);
+					var mirror = me.readMirrorValues(this);
+					var copy = me.captureModeIsCopy(this);
+					var form = this.getForm && this.getForm();
+					var dirtyMirror = false;
+					var hasMirrorSet = false;
+					Ext.each(["capture_mode", "router_ip", "local_ip", "ifname"], function (name) {
+						var fld = form && form.findField && form.findField(name);
+						if (fld && fld.isDirty && fld.isDirty()) { dirtyMirror = true; }
 					});
+					Ext.each(out || [], function (f) {
+						if (!f) { return; }
+						if (f.api === "SYNO.TPS.Settings.Update.Schedule" && f.method !== "get") {
+							f.params = Ext.apply({}, f.params || {}, vals);
+						}
+						if (f.api === "SYNO.TPS.Settings.Mirror" && f.method === "set") {
+							hasMirrorSet = true;
+							f.params = Ext.apply({}, f.params || {}, mirror);
+						}
+						if (f.api === "SYNO.TPS.Sensor" && f.method === "set" && copy) {
+							f.params = f.params || {};
+							f.params.interface_list = [{ if_id: mirror.ifname || "tps0", enabled: true }];
+						}
+					});
+					if (dirtyMirror && !hasMirrorSet) {
+						out = (out || []).concat([{
+							api: "SYNO.TPS.Settings.Mirror", method: "set", version: 1, params: mirror
+						}]);
+					}
 					return out;
+				};
+			}
+			var origEnable = P.prototype.onEnableSensorChecked;
+			if (origEnable) {
+				P.prototype.onEnableSensorChecked = function () {
+					var ret = origEnable.apply(this, arguments);
+					me.syncCaptureMode(this);
+					return ret;
 				};
 			}
 			var origDirty = P.prototype.extendFormDirty;
@@ -1306,6 +1621,9 @@ SYNO.SDS.TPS.Bridge = {
 			}
 			if (name === "SYNO.SDS.TPS.Settings.GeneralPanel") {
 				me.patchGeneralSettings(cls);
+			}
+			if (name === "SYNO.SDS.TPS.Ruleset.RuleGridPanel") {
+				me.patchRuleGridCombo(cls);
 			}
 			return cls;
 		};
@@ -2107,11 +2425,13 @@ SYNO.SDS.TPS.Bridge = {
 		if (me._installed) {
 			me.injectInfo();
 			me.injectModuleListCss();
+			me.injectGridComboCss();
 			me.hookManagerRequest();
 			return;
 		}
 		me.injectInfo();
 		me.injectModuleListCss();
+		me.injectGridComboCss();
 		me.hookManagerRequest();
 		function hookProto(cls, name, extra) {
 			if (!cls || !cls.prototype || !cls.prototype[name] || cls.prototype[name]._tpsBridge) { return; }
@@ -2237,6 +2557,7 @@ SYNO.SDS.TPS.Bridge = {
 		me.patchLogStorage();
 		me.patchOverviewPathlinks();
 		me.patchGeneralSettings();
+		me.patchRuleGridCombo();
 		me.injectSettingsTabs();
 		me.hookPolling();
 		if (Ext.Ajax && Ext.Ajax.request && !Ext.Ajax.request._tpsBridge) {

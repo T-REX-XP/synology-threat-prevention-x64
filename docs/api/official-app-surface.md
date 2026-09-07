@@ -122,5 +122,7 @@ Official `synoips.js` never calls these. [`tps-bridge.js`](../../spk/src/threatp
 | `Settings.Telegram` | `get` | `{enable_telegram,follow_mail,min_interval_telegram,has_token,chat_id,token:""}` — never returns the bot token |
 | `Settings.Telegram` | `set` | kv + `etc/telegram.conf` (`TOKEN=`/`CHAT=`, `0600`) |
 | `Settings.Telegram` | `test` | `sendMessage`; `{sent:true}` or error 100/104 |
+| `Settings.Mirror` | `get` | `{enabled,capture_mode: lan\|copy,router_ip,local_ip,ifname,tap_present}` from `etc/mirror.conf` |
+| `Settings.Mirror` | `set` | `capture_mode` `copy` requires router IPv4; writes `mirror.conf`, pins `tps0` or LAN, best-effort gretap; error 100 on bad IP |
 | `Settings.Feed` | `list` | `{feeds:[{id,name,url,enabled}]}` |
 | `Settings.Feed` | `add`/`update`/`delete` | HTTPS (or RFC1918 HTTP); name `[A-Za-z0-9._-]+`, not `et-*`; writes `etc/feeds.json` |

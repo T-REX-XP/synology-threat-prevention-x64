@@ -258,6 +258,7 @@ Injection points in [`tps-bridge.js`](../spk/src/threatprevention/package/ui/tps
 | --- | --- | --- |
 | `injectSettingsTabs` | `Settings.TabPanel` `initComponent` / `afterrender` | `add()` Rule feeds `FormPanel` |
 | `patchNotificationTelegram` | `Settings.NotificationPanel.fillConfig` | Telegram `syno_fieldset` on the official Notify tab |
+| `patchGeneralSettings` | `Settings.GeneralPanel.fillConfig` | Capture source radios (`Settings.Mirror`) before Monitored Interfaces |
 | `patchDisplayHtml` | `syno_displayfield` | DSM 7 html-encodes Overview HTML |
 | `patchMapSeverity` / `patchGmapsKey` / `patchOsmTiles` | Map panel / `GoogleMapLoader` | DSM 7 map quirks + optional key |
 | `patchLogStorage` / `patchDeviceCellClick` / `patchGmapObserver` | Storage / Overview / Map | Ext 3 vs DSM 7 Collection / MutationObserver |
@@ -278,7 +279,7 @@ Injection points in [`tps-bridge.js`](../spk/src/threatprevention/package/ui/tps
 
 Packer: [`spk/pack-spk.sh`](../spk/pack-spk.sh). Source `spk/src/threatprevention/package/ui/config` is a leftover webpack app config and is **not** what gets packed.
 
-PoC-only WebAPIs the official JS does not know about (`Settings.Telegram`, `Settings.Feed`, `Settings.Map`) are called from the bridge with the same `sendWebAPI` mixin. Contracts: [official-app-surface.md](api/official-app-surface.md).
+PoC-only WebAPIs the official JS does not know about (`Settings.Telegram`, `Settings.Feed`, `Settings.Map`, `Settings.Mirror`) are called from the bridge with the same `sendWebAPI` mixin. Contracts: [official-app-surface.md](api/official-app-surface.md).
 
 ---
 

@@ -297,9 +297,11 @@ def read_sensor():
                 pass
     elif ui:
         st = ui
+    mirror = read_mirror_conf()
     data = official_sensor(
         cfg, st, pid, cfg.get("interface_list") or "", list_ifaces(),
-        mirror_ifname=read_mirror_conf().get("ifname") or "",
+        mirror_ifname=mirror.get("ifname") or "",
+        mirror_enabled=bool(mirror.get("enabled")),
     )
     for item in data.get("interface_list") or []:
         item["ip_addr"] = iface_ipv4(item.get("if_id") or item.get("ifname") or "") or ""
@@ -324,14 +326,11 @@ def write_sensor(data):
         pin = iface.split()[0]
         mirror = read_mirror_conf()
         mname = mirror.get("ifname") or "tps0"
-        if mirror.get("enabled") and mname in iface.split():
+        if mirror.get("enabled"):
             pin = mname
-        with open(IFACE_FILE, "w") as fh:
-            fh.write(pin + "\n")
-        try:
-            os.chmod(IFACE_FILE, 0o644)
-        except OSError:
-            pass
+        elif pin == mname:
+            pin = next((n for n in iface.split() if n and n != mname), pin)
+        _pin_iface(pin)
     lines = [
         "enable_sensor=%s" % ("yes" if _truth(data.get("enable_sensor", True)) else "no"),
         "enable_prevention=%s" % ("yes" if _truth(data.get("enable_prevention", False)) else "no"),
@@ -386,6 +385,168 @@ def read_mirror_conf():
     if not out.get("ifname"):
         out["ifname"] = "tps0"
     return out
+
+
+_IPV4_RE = re.compile(
+    r"^(?:25[0-5]|2[0-4]\d|[01]?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3}$"
+)
+
+
+def _ipv4_ok(value):
+    return bool(value and _IPV4_RE.match(str(value).strip()))
+
+
+def _pin_iface(name):
+    name = (name or "").strip()
+    if not name:
+        return
+    os.makedirs(PKGETC, exist_ok=True)
+    with open(IFACE_FILE, "w") as fh:
+        fh.write(name + "\n")
+    try:
+        os.chmod(IFACE_FILE, 0o644)
+    except OSError:
+        pass
+
+
+def _pin_lan_fallback(tap="tps0"):
+    for name in list_ifaces():
+        if name and name != tap:
+            _pin_iface(name)
+            return
+    _pin_iface("ovs_eth0")
+
+
+def write_mirror_conf(data):
+    mode = str(data.get("capture_mode") or "").strip().lower()
+    if mode in ("copy", "mirror", "gretap"):
+        enabled = True
+    elif mode in ("lan", "listen", "nic"):
+        enabled = False
+    else:
+        enabled = _truth(data.get("enabled"))
+    router_ip = str(data.get("router_ip") or "").strip() or "192.168.1.1"
+    local_ip = str(data.get("local_ip") or "").strip()
+    ifname = str(data.get("ifname") or "tps0").strip() or "tps0"
+    if not re.match(r"^[A-Za-z0-9_.-]{1,15}$", ifname):
+        ifname = "tps0"
+    if enabled and not _ipv4_ok(router_ip):
+        return "router_ip"
+    if local_ip and not _ipv4_ok(local_ip):
+        return "local_ip"
+    os.makedirs(PKGETC, exist_ok=True)
+    lines = [
+        "# Copy LAN↔WAN traffic from the OpenWrt router into a local gretap for Suricata.",
+        "# 1 = create tps0 and capture on it. 0 = capture on the NAS LAN NIC (ovs_eth0).",
+        "enabled=%s" % ("1" if enabled else "0"),
+        "router_ip=%s" % router_ip,
+        "# Empty local_ip: pick the IPv4 used to reach router_ip.",
+        "local_ip=%s" % local_ip,
+        "ifname=%s" % ifname,
+    ]
+    with open(MIRROR_CONF, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+    try:
+        os.chmod(MIRROR_CONF, 0o644)
+    except OSError:
+        pass
+    return ""
+
+
+def mirror_status():
+    m = read_mirror_conf()
+    ifname = m.get("ifname") or "tps0"
+    return {
+        "enabled": bool(m.get("enabled")),
+        "capture_mode": "copy" if m.get("enabled") else "lan",
+        "router_ip": m.get("router_ip") or "192.168.1.1",
+        "local_ip": m.get("local_ip") or "",
+        "ifname": ifname,
+        "tap_present": os.path.exists("/sys/class/net/" + ifname),
+    }
+
+
+def _run_ip(args):
+    try:
+        return subprocess.call(
+            ["ip"] + list(args),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 1
+
+
+def _detect_local_ip(router):
+    if not router:
+        return ""
+    try:
+        out = subprocess.check_output(
+            ["ip", "-4", "route", "get", router],
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        ).decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    match = re.search(r"\bsrc\s+(\d+\.\d+\.\d+\.\d+)", out)
+    return match.group(1) if match else ""
+
+
+def _destroy_gretap(ifname):
+    if not ifname or not os.path.exists("/sys/class/net/" + ifname):
+        return
+    _run_ip(["link", "set", ifname, "down"])
+    _run_ip(["link", "del", ifname])
+
+
+def apply_gretap():
+    """Best-effort tps0 create. Package user often lacks CAP_NET_ADMIN."""
+    m = read_mirror_conf()
+    ifname = m.get("ifname") or "tps0"
+    if not m.get("enabled"):
+        _destroy_gretap(ifname)
+        return
+    router = m.get("router_ip") or ""
+    local_ip = m.get("local_ip") or _detect_local_ip(router)
+    if not router or not local_ip:
+        return
+    if os.path.exists("/sys/class/net/" + ifname):
+        _run_ip(["link", "set", ifname, "up"])
+        return
+    try:
+        subprocess.call(
+            ["modprobe", "ip_gre"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+    _run_ip(["link", "add", ifname, "type", "gretap", "remote", router, "local", local_ip, "ttl", "255"])
+    _run_ip(["link", "set", ifname, "up"])
+
+
+def settings_mirror(method, p):
+    if method == "get":
+        return ok(mirror_status())
+    if method == "set":
+        bad = write_mirror_conf(p or {})
+        if bad:
+            return err(100)
+        apply_gretap()
+        m = read_mirror_conf()
+        tap = m.get("ifname") or "tps0"
+        if m.get("enabled"):
+            _pin_iface(tap)
+        else:
+            _pin_lan_fallback(tap)
+        st, _pid = engine_status()
+        if st == "running":
+            stop_engine()
+            start_engine()
+        return ok(mirror_status())
+    return err(102)
 
 
 def _iface_enslaved(name):
@@ -655,6 +816,8 @@ def handle(api, method, params, conn):
         return ok({"key": read_gmaps_key()})
     if api == "SYNO.TPS.Settings.Telegram":
         return settings_telegram(conn, method, params)
+    if api == "SYNO.TPS.Settings.Mirror":
+        return settings_mirror(method, params)
     if api == "SYNO.TPS.Settings.Feed":
         return settings_feed(conn, method, params)
     if api == "SYNO.Core.Network.NSM.Device" and method == "get":
@@ -1210,6 +1373,7 @@ def schedule_payload(conn):
         "hour": hour_i,
         "minute": minute_i,
         "schedule_minute": sched,
+        "last_updated": kv_get(conn, "last_updated", "") or "not_updated_yet",
     }
 
 
@@ -1259,7 +1423,7 @@ def settings_update(conn, api, method, p):
                 kv_get(conn, "update_source", "et-open"),
                 kv_get(conn, "etpro_code", ""),
             )
-            return ok({})
+            return ok(official_source(kv_get(conn, "update_source", "et-open"), kv_get(conn, "etpro_code", "")))
     if api == "SYNO.TPS.Settings.Update":
         if method == "status":
             job = job_get(p.get("task_id"))

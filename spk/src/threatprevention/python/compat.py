@@ -294,7 +294,7 @@ def _collapse_ovs_ifaces(ifaces):
     return [row for row in ifaces if row.get("if_id") not in drop]
 
 
-def official_sensor(cfg, status, pid, iface, live=None, mirror_ifname=""):
+def official_sensor(cfg, status, pid, iface, live=None, mirror_ifname="", mirror_enabled=False):
     enabled = set()
     ifaces = []
     raw = cfg.get("interface_list") or iface or ""
@@ -337,7 +337,7 @@ def official_sensor(cfg, status, pid, iface, live=None, mirror_ifname=""):
     ifaces = _collapse_ovs_ifaces(ifaces)
     cap = str(iface or "").replace(",", " ").split()[:1]
     cap = cap[0] if cap else ""
-    if mirror_ifname and cap == mirror_ifname:
+    if mirror_ifname and (mirror_enabled or cap == mirror_ifname):
         present = any(x.get("if_id") == mirror_ifname for x in ifaces)
         if not present:
             ifaces.append(_iface_row(mirror_ifname, True))
@@ -800,7 +800,7 @@ def classify_update(ever_updated, reachable, remote_newer):
 def official_update_status(status, last_updated="", remote_version="", task_id=""):
     inner = {
         "status": status or "up_to_date",
-        "last_updated": last_updated or "",
+        "last_updated": last_updated or "not_updated_yet",
         "remote_version": remote_version or "",
     }
     if task_id:
