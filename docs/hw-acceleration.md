@@ -9,7 +9,7 @@ This package only wires matching: Hyperscan **or** portable `ac`/`bmh` (Settings
 On an installed NAS: Settings → General → **Hardware acceleration**, and DSM Help → **This NAS (Suricata IDS)**.
 
 ```
-packet → AF_PACKET (ovs_eth0 | tps0)
+packet → AF_PACKET (ovs_eth0)
               │
               ▼
      detect mpm/spm  →  Hyperscan (hs)  or  ac / bmh

@@ -311,8 +311,8 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			var hint = form.findField("mirror_hint");
 			if (hint && hint.setValue) {
 				var msg = (kind === "mikrotik")
-					? "MikroTik: import etc/mikrotik/apply-tps-mirror.rsc (TZSP UDP 37008). Allow that UDP from the router in DSM Firewall. Disable fasttrack or copies stay empty. See Help: Router traffic copy."
-					: "OpenWrt: run etc/openwrt/apply-tps-mirror.sh. Allow GRE (protocol 47) from the router in DSM Firewall. See Help: Router traffic copy.";
+					? "MikroTik: import etc/mikrotik/apply-tps-mirror.rsc (TZSP UDP 37008). Allow that UDP from the router in DSM Firewall. Disable fasttrack or copies stay empty."
+					: "OpenWrt: run etc/openwrt/apply-tps-mirror.sh. Allow GRE (protocol 47) from the router in DSM Firewall.";
 				if (copy && !data.tap_present) {
 					msg += " tps0 is not up yet — Apply, then restart Threat Prevention if the tap is missing.";
 				}
@@ -454,7 +454,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					},
 					{
 						xtype: "syno_displayfield", name: "mirror_hint", hideLabel: true, htmlEncode: false, indent: 1,
-						value: "OpenWrt: apply-tps-mirror.sh and DSM Firewall GRE (protocol 47). MikroTik: apply-tps-mirror.rsc and DSM Firewall UDP 37008. Restart the package after Apply so tps0 can be created. Full steps: Help → Router traffic copy."
+						value: "OpenWrt: apply-tps-mirror.sh and DSM Firewall GRE (protocol 47). MikroTik: apply-tps-mirror.rsc and DSM Firewall UDP 37008. Restart the package after Apply so tps0 can be created."
 					}
 				]
 			};
@@ -663,7 +663,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 								}
 							}, this);
 							cfg.items.splice(1, 0, me.captureModeFieldset(this));
-							cfg.items.splice(2, 0, me.accelFieldset(this));
+							cfg.items.push(me.accelFieldset(this));
 							var sensorFs = cfg.items[0];
 							if (sensorFs && sensorFs.webapi && sensorFs.webapi.api === "SYNO.TPS.Sensor" && sensorFs.items) {
 								sensorFs.items = (sensorFs.items || []).concat([{

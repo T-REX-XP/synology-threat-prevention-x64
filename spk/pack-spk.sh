@@ -134,14 +134,11 @@ PY
 info "DSM Help (helptoc + community pages + empty indexdb)"
 HELP_DIR="${SRC}/package/ui/help/enu"
 [ -f "${HELP_DIR}/threatprevention_dsm.html" ] || die "Missing ${HELP_DIR}/threatprevention_dsm.html"
-[ -f "${HELP_DIR}/threatprevention_router.html" ] || die "Missing ${HELP_DIR}/threatprevention_router.html"
-[ -f "${HELP_DIR}/images/router-traffic-copy.svg" ] || die "Missing ${HELP_DIR}/images/router-traffic-copy.svg"
 python3 - "${STAGING}/package/ui" "${HELP_DIR}" <<'PY'
 import json, os, shutil, sys
 ui, src_dir = sys.argv[1], sys.argv[2]
 pages = [
     ("threatprevention_dsm.html", "This NAS (Suricata IDS)"),
-    ("threatprevention_router.html", "Router traffic copy"),
 ]
 help_root = os.path.join(ui, "help")
 for name, _title in pages:
@@ -201,8 +198,7 @@ idx_path = os.path.join(ui, "index.conf")
 idx = json.load(open(idx_path, encoding="utf-8"))
 keys = list(idx.get("keywords") or [])
 for extra in (
-    "suricata", "ids", "gretap", "emerging threats",
-    "gre", "openwrt", "mikrotik", "tzsp", "traffic copy", "protocol 47", "nftables",
+    "suricata", "ids", "emerging threats",
     "hyperscan", "intel", "dpdk",
 ):
     if extra not in keys:

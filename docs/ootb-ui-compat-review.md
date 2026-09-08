@@ -49,7 +49,7 @@ tps-bridge (transport + dsm7 + settings-inject, inlined at pack time)
 tpsweb.py + compat.py
     │  SQLite events, compiler → suricata.rules
     ▼
-Suricata 8  AF_PACKET  -i ovs_eth0 | tps0
+Suricata 8  AF_PACKET  -i ovs_eth0
 ```
 
 ---
@@ -67,7 +67,7 @@ Verdict: **Keep** = load-bearing and shaped correctly. **Must-keep** = regressio
 | DSM 7 widgets | Fragile | Chart stubs, `htmlEncode`, sprite CSS, Maps/OSM | SRM widgets are missing or behave differently on DSM 7 Ext 3.4. Most Overview/Map/Storage bugs are host diffs, not Suricata. |
 | Forms | Poor | `isValid` / `isDirty` / `setTimeout` originalValue | Official Apply refuses empty iface grids and hidden ET Pro code. Dirty detection for schedule and capture mode is patched after the fact. |
 | Injected UI | Mixed | Telegram, extra feeds, capture/GRE mode | Two strategies: strip fields from official `Notification.set` vs fieldset `webapi` for Mirror. Inconsistent and easy to break Apply. |
-| Privilege | Blocked | `run-as: package` + manual `setcap` + nginx snippet | Unsigned DSM 7 cannot `run-as: root` (error 319). AF_PACKET and gretap need `CAP_NET_ADMIN` after every install. |
+| Privilege | Blocked | `run-as: package` + manual `setcap` + nginx snippet | Unsigned DSM 7 cannot `run-as: root` (error 319). AF_PACKET needs `CAP_NET_ADMIN` after every install. |
 
 ---
 
@@ -81,7 +81,7 @@ Verdict: **Keep** = load-bearing and shaped correctly. **Must-keep** = regressio
 | Request/Manager | `requestAjaxAPI` rewrite would send TPS to `entry.cgi`; hook intercepts hosted APIs before that |
 | `pollReg` | Replaced with `setInterval` calling tpsweb. Unregister clears numeric ids. Must copy `.Polling` onto `Request` |
 | `Event.list` | Immediate `{events}` became `{task_id}` + `list_status` poll — otherwise the Events grid spins forever |
-| `Sensor.get` | `running` → `engine_start`; live `/sys/class/net` merge; hide `ethN` when `ovs_ethN` exists; pin `tps0` in copy mode |
+| `Sensor.get` | `running` → `engine_start`; live `/sys/class/net` merge; hide `ethN` when `ovs_ethN` exists |
 | `htmlEncode` | DSM 7 encodes Overview HTML; `patchDisplayHtml` + pathlink capture click + skip restore when `<a>` already live |
 | Sprite | Selected sidebar used the white SRM frame on DSM 7 light-blue chrome; CSS forces `0 -24px` (blue) |
 | Maps | Google loader needs a key; OSM tiles proxied same-origin because DSM CSP is `img-src 'self'` |
@@ -120,7 +120,7 @@ These are the places the shim fights the official app instead of meeting the con
 
 **JSLoad prepend.** Do not register the bridge as its own `ui/config` module. Pack-time concat is the supported way to run before `Ext.define` of TPS classes. Chart stubs as a separate `type:lib` is also correct.
 
-**IDS topology.** The NAS is not the gateway. LAN listen vs OpenWrt GRE / MikroTik TZSP copy is a real product choice. Keep `mirror.conf` + `start-stop-status` tap create. Stop creating tunnels from tpsweb as the package user. Operator docs: [router-traffic-copy.md](router-traffic-copy.md), DSM Help **Router traffic copy**, `target/etc/openwrt/` and `target/etc/mikrotik/`.
+**IDS topology.** Capture is AF_PACKET on the NAS LAN (typically `ovs_eth0`). This package is not a gateway.
 
 **Hyperscan.** Default MPM/SPM is Intel Hyperscan when the binary has `libhs`. Settings **Hardware acceleration** writes `etc/accel.conf`. DPDK and NIC offload stay unwired. [hw-acceleration.md](hw-acceleration.md).
 
