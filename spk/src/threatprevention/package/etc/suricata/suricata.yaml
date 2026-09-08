@@ -68,6 +68,13 @@ unix-command:
   enabled: yes
   filename: /var/packages/ThreatPrevention/var/suricata.socket
 
+# Default policy: Intel Hyperscan MPM/SPM when the binary has libhs (this x86_64 build).
+# Settings → Hardware acceleration can switch to ac/bmh. start-stop-status also --set these.
+detect:
+  profile: medium
+  mpm-algo: hs
+  spm-algo: hs
+
 default-rule-path: /var/packages/ThreatPrevention/var/rules
 rule-files:
   - suricata.rules

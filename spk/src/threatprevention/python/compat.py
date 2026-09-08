@@ -26,6 +26,10 @@ SETCAP_CMD = (
 )
 
 
+def security_mode(value):
+    return "security" if str(value or "").strip().lower() == "security" else "availability"
+
+
 def capture_capable(getcap_text="", engine_running=False, log_tail=""):
     """Whether bin/suricata can open AF_PACKET (file caps or a live engine).
 
@@ -385,7 +389,7 @@ def official_sensor(cfg, status, pid, iface, live=None, mirror_ifname="", mirror
         "enable_auto_export_events_during_postupgrade": cfg.get(
             "enable_auto_export_events_during_postupgrade", False
         ),
-        "network_security_mode": "availability",
+        "network_security_mode": security_mode(cfg.get("network_security_mode")),
         "default_detect": cfg.get("default_detect", True),
         "interface": (next((x["if_id"] for x in ifaces if x.get("enabled")), "") or (ifaces[0]["if_id"] if ifaces else "")),
         "interface_list": ifaces,

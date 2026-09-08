@@ -245,21 +245,16 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			return (form && form.findField && form.findField(name)) || this.findNamed(panel, name);
 		},
 		applyIdsOnlyChrome: function (panel) {
-			/* Official drop-packet / security-mode radios imply NFQUEUE IPS. This
-			   package is AF_PACKET IDS only. Keep the widgets visible but off. */
+			/* Official drop-packet checkbox implies NFQUEUE IPS. This package
+			   is AF_PACKET IDS only. Default mode (availability vs security) is
+			   stored; it does not drop packets. Keep drop-packet off. */
 			if (!panel || !panel.getForm) { return; }
 			var me = this;
-			var form = panel.getForm();
 			var prev = this.namedField(panel, "enable_prevention");
 			if (prev) {
 				if (prev.setValue) { prev.setValue(false); }
 				me.setCmpEnabled(prev, false);
 			}
-			var modes = (form.findFields && form.findFields("network_security_mode")) || [];
-			Ext.each(modes, function (fld) {
-				me.setCmpEnabled(fld, false);
-				if (fld && fld.inputValue === "availability" && fld.setValue) { fld.setValue(true); }
-			});
 		},
 		syncCaptureMode: function (panel, forced) {
 			if (!panel || !panel.getForm) { return; }
@@ -332,6 +327,77 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					me.applyMirrorData(panel, e.data);
 				}
 			});
+		},
+		readAccelValues: function (panel) {
+			var form = panel && panel.getForm && panel.getForm();
+			var hs = true;
+			if (form && form.findField) {
+				var fld = form.findField("accel_hyperscan");
+				if (fld && fld.getValue) { hs = !!fld.getValue(); }
+			}
+			return { hyperscan: hs, dpdk: false, nic_offload: false };
+		},
+		applyAccelData: function (panel, data) {
+			if (!panel || !data) { return; }
+			var form = panel.getForm && panel.getForm();
+			if (!form || !form.setValues) { return; }
+			form.setValues({
+				accel_hyperscan: data.hyperscan !== false
+			});
+			var hint = form.findField("accel_hint");
+			if (hint && hint.setValue) {
+				var msg;
+				if (data.hyperscan_available) {
+					msg = data.hyperscan_active
+						? "Active: mpm-algo=hs, spm-algo=hs. Apply, then restart if the engine is running."
+						: "Hyperscan is in this binary. Enable it and Apply to use SIMD signature matching.";
+				} else {
+					msg = "This Suricata binary has no Hyperscan. Matching stays ac/bmh. DPDK and NIC offload are not wired.";
+				}
+				hint.setValue(msg);
+			}
+			var box = this.namedField(panel, "accel_hyperscan");
+			this.setCmpEnabled(box, !!data.hyperscan_available);
+		},
+		applyAccelFromResult: function (panel, resp) {
+			var me = this;
+			Ext.each((resp && resp.result) || [], function (e) {
+				if (e && e.api === "SYNO.TPS.Settings.Accel" && e.data) {
+					me.applyAccelData(panel, e.data);
+				}
+			});
+		},
+		accelFieldset: function () {
+			return {
+				xtype: "syno_fieldset",
+				title: "Hardware acceleration",
+				itemId: "tps_accel",
+				webapi: { api: "SYNO.TPS.Settings.Accel", methods: { get: "get", set: "set" }, version: 1 },
+				collapsible: false,
+				defaults: { labelWidth: 160 },
+				items: [
+					{
+						xtype: "syno_displayfield", hideLabel: true, htmlEncode: false,
+						value: "Default policy: Intel Hyperscan for signature matching (SIMD). DPDK and NIC flow offload are not wired on this IDS package."
+					},
+					{
+						xtype: "syno_checkbox", name: "accel_hyperscan", checked: true,
+						boxLabel: "Intel Hyperscan (MPM / SPM) — recommended"
+					},
+					{
+						xtype: "syno_checkbox", name: "accel_dpdk", checked: false, disabled: true,
+						boxLabel: "Intel DPDK userspace IO — not wired (capture stays AF_PACKET)"
+					},
+					{
+						xtype: "syno_checkbox", name: "accel_nic_offload", checked: false, disabled: true,
+						boxLabel: "NIC hardware flow offload / prefilter — not wired"
+					},
+					{
+						xtype: "syno_displayfield", name: "accel_hint", hideLabel: true, htmlEncode: false,
+						value: "Uses AVX2/AVX-512 when the CPU and libhs support it. Changing this restarts Suricata."
+					}
+				]
+			};
 		},
 		captureModeFieldset: function (panel) {
 			var me = this;
@@ -506,7 +572,8 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				"enable_sensor", "enable_prevention", "enable_auto_export_events_during_postupgrade",
 				"network_security_mode", "auto_update", "weekday", "hour", "minute",
 				"use_code", "code", "update_status", "last_updated",
-				"capture_mode", "router_kind", "router_ip", "local_ip", "ifname"
+				"capture_mode", "router_kind", "router_ip", "local_ip", "ifname",
+				"accel_hyperscan"
 			], function (name) { snap(me.findNamed(panel, name) || form.findField(name)); });
 			if (form.findFields) {
 				Ext.each(form.findFields("network_security_mode") || [], snap);
@@ -566,7 +633,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 								if (item.name === "code" || item.name === "weekday") {
 									item.allowBlank = true;
 								}
-								if (item.name === "enable_prevention" || item.name === "network_security_mode") {
+								if (item.name === "enable_prevention") {
 									item.disabled = true;
 								}
 								if (item.name === "hour" || item.name === "minute") {
@@ -592,6 +659,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 								}
 							}, this);
 							cfg.items.splice(1, 0, me.captureModeFieldset(this));
+							cfg.items.splice(2, 0, me.accelFieldset(this));
 							var sensorFs = cfg.items[0];
 							if (sensorFs && sensorFs.webapi && sensorFs.webapi.api === "SYNO.TPS.Sensor" && sensorFs.items) {
 								sensorFs.items = (sensorFs.items || []).concat([{
@@ -600,7 +668,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 									hideLabel: true,
 									htmlEncode: false,
 									indent: 1,
-									value: "This package is IDS only (AF_PACKET). Packets are not dropped; inline IPS is not wired."
+									value: "Drop high-risk packets is not available (IDS only). Default mode is saved; this engine does not drop packets when overloaded."
 								}]);
 							}
 						}
@@ -626,6 +694,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						var ret = origReturn.apply(this, arguments);
 						me.applyScheduleFromResult(this, a);
 						me.applyMirrorFromResult(this, a);
+						me.applyAccelFromResult(this, a);
 						me.applyIdsOnlyChrome(this);
 						me.syncCaptureMode(this);
 						me.prepareGeneralForm(this);
@@ -678,14 +747,19 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						if (c === "get") { return out; }
 						var vals = me.readScheduleValues(this);
 						var mirror = me.readMirrorValues(this);
+						var accel = me.readAccelValues(this);
 						var copy = me.captureModeIsCopy(this);
 						var form = this.getForm && this.getForm();
 						var dirtyMirror = false;
 						var hasMirrorSet = false;
+						var dirtyAccel = false;
+						var hasAccelSet = false;
 						Ext.each(["capture_mode", "router_kind", "router_ip", "local_ip", "ifname"], function (name) {
 							var fld = form && form.findField && form.findField(name);
 							if (fld && fld.isDirty && fld.isDirty()) { dirtyMirror = true; }
 						});
+						var afld = form && form.findField && form.findField("accel_hyperscan");
+						if (afld && afld.isDirty && afld.isDirty()) { dirtyAccel = true; }
 						Ext.each(out || [], function (f) {
 							if (!f) { return; }
 							if (f.api === "SYNO.TPS.Settings.Update.Schedule" && f.method !== "get") {
@@ -695,6 +769,10 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 								hasMirrorSet = true;
 								f.params = Ext.apply({}, f.params || {}, mirror);
 							}
+							if (f.api === "SYNO.TPS.Settings.Accel" && f.method === "set") {
+								hasAccelSet = true;
+								f.params = Ext.apply({}, f.params || {}, accel);
+							}
 							if (f.api === "SYNO.TPS.Sensor" && f.method === "set" && copy) {
 								f.params = f.params || {};
 								f.params.interface_list = [{ if_id: mirror.ifname || "tps0", enabled: true }];
@@ -703,6 +781,11 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						if (dirtyMirror && !hasMirrorSet) {
 							out = (out || []).concat([{
 								api: "SYNO.TPS.Settings.Mirror", method: "set", version: 1, params: mirror
+							}]);
+						}
+						if (dirtyAccel && !hasAccelSet) {
+							out = (out || []).concat([{
+								api: "SYNO.TPS.Settings.Accel", method: "set", version: 1, params: accel
 							}]);
 						}
 						return out;

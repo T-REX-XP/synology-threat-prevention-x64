@@ -8,6 +8,7 @@ Operator and research notes for the community DSM 7 Threat Prevention PoC (vanil
 | --- | --- |
 | [spk-deploy-and-update.md](spk-deploy-and-update.md) | Install, `setcap`, upgrade, uninstall, capture pin |
 | [router-traffic-copy.md](router-traffic-copy.md) | OpenWrt GRE or MikroTik TZSP copy of LAN↔WAN onto NAS `tps0` (IDS) |
+| [hw-acceleration.md](hw-acceleration.md) | Intel Hyperscan default; DPDK / NIC offload not wired |
 | [google-maps.md](google-maps.md) | Overview map / GeoIP (optional) |
 
 On an installed NAS, the same router steps ship in:

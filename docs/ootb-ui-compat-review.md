@@ -105,7 +105,7 @@ These are the places the shim fights the official app instead of meeting the con
 | P6 | Med | Chart stubs look like charts | `SYNO.SDS.Chart.*` SVG placeholders let Overview construct. Empty series used to look like a blank product graph. | Landed: `setChartItems`/`draw` plot official `[index,y]` series; all-zero / empty shows a DSM note. |
 | P7 | Med | Compound = N sequential HTTP posts | Settings Apply fans out each `SYNO.TPS.*` call. Order `Sensor.set` vs `Mirror.set` races capture pin. | Add one tpsweb compound method that applies the list server-side in a defined order (Mirror then Sensor). |
 | P8 | Med | Fake `Polling.List` admin collection | SignatureUpdater expected DSM job names `SYNO.TPS_Updater`. Bridge synthesizes a collection then rewrites `update()` to poll `Update.status`. | Keep the updater patch (it is the right contract) but drop the fake List once `update()` no longer calls `pollList`. |
-| P9 | Med | God files | `tpsweb.handle()` is a long if-ladder. Timing retries (25ms × 80) wait for `Ext.define`. | Bridge is split at pack time. `hookExtDefine` + `whenClass` skip those polls when the hook is installed. Split tpsweb routers still later. |
+| P9 | Med | God files | `tpsweb.handle()` was a long if-ladder. Timing retries waited for `Ext.define`. | Landed: `api_routes.py` dispatch. `hookExtDefine` + `whenClass` for Ext classes; `watchAssign` for SignatureUpdater (object literal). |
 | P10 | Med | gretap from the package user | UI writes `mirror.conf`; tpsweb `ip link add` often fails without `CAP_NET_ADMIN`. Tunnel only appears after `synopkg restart` as root. | Create `tps0` only in `start-stop-status`. UI set writes conf + pin; return `tap_present` honestly; tell the user to restart the package. |
 | P11 | Low | Two extra-feature patterns | Telegram stripped from `Notification.set`; Mirror uses fieldset `webapi`; Feeds is a new tab with `useDefaultBtn:false`. | One pattern: extra Settings tab for all community fields. Do not splice official `fillConfig` except for capture source if it must sit next to the iface grid. |
 | P12 | Low | HTTPS DSM mixed content | tpsweb is HTTP `:19557`. Same-origin nginx `/webman/tps-api` is the fix; leftover `:19557` fallback still exists in the bridge. | Remove the host:19557 fallback. Fail closed if `/webman/tps-api` (then same-origin legacy) is missing. |
@@ -139,15 +139,12 @@ These are the places the shim fights the official app instead of meeting the con
 | Landed | Transport | Drop `:19557` fallback | Bridge posts `/webman/tps-api`, then same-origin `/webman/3rdparty/ThreatPrevention/api`. No `http://host:19557`. |
 | Landed | Charts | Real Overview graphs or a stub label | `LineChart` / `PieChart` draw SVG from official `setChartItems` data. All-zero / empty series show a DSM note instead of a blank graph. |
 | Landed | Ops | setcap + nginx in one operator path | `postinst` prints the exact `sudo setcap`. Sensor.get includes `capture_capable`. Overview banner if cap missing. |
+| Landed | Code | Split tpsweb routers | `api_routes.py` maps `SYNO.TPS.*` to tpsweb implementations. `handle()` is a one-line dispatch. SignatureUpdater is intercepted with `watchAssign` (no 25ms poll). |
 | Exit | Product | Vue DSM app, Suricata-native API | Stop shipping `synoips.js`. Official UI is research-only and Synology copyright. |
 
 **Recommended next cuts if you stay on the shim**
 
-The “Now” honesty / Request / form / capture / compound / gretap cuts, plus the pack-time bridge split, envelope fixtures, `:19557` drop, Overview empty-chart labels, and `postinst` / Overview setcap path, are in this tree. Remaining:
-
-1. Split `tpsweb.handle()` routers; SignatureUpdater still uses a short `setInterval` wait because it is an object literal, not `Ext.define`.
-
-Those remove the remaining “feel broken” surface without a new UI.
+The review Later cuts (charts, setcap banner, `handle()` routers, Ext.define / SignatureUpdater waits) are in this tree. Further work on this PoC is the Exit fork: a Vue DSM app and a Suricata-native API, not more shim tightening.
 
 ---
 

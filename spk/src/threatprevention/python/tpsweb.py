@@ -35,6 +35,7 @@ from compat import (
     official_variables,
     official_weekday,
     parse_weekday,
+    security_mode,
     weekday_matches,
     classify_update,
     parse_event_id,
@@ -42,6 +43,7 @@ from compat import (
     severity_num,
     to_epoch,
 )
+from accel import accel_cli_sets, accel_status, apply_accel_yaml, write_accel_conf
 from compiler import compile_rules, import_rules, parse_header, parse_refs, reload_suricata
 from corehost import iface_ipv4, list_neighbors, nsm_device_list, systemdb_get, usb_list
 from feeds import add_feed, delete_feed, list_feeds, update_feed, write_feeds_json
@@ -262,6 +264,7 @@ def start_engine():
         SURICATA_BIN, "-c", YAML_PATH, "--pidfile", SURICATA_PID,
         "-D", "-i", iface, "-l", logdir, "--set", "af-packet.0.interface=" + iface,
     ]
+    cmd.extend(accel_cli_sets())
     try:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
@@ -306,7 +309,7 @@ def read_sensor():
         cfg["interface_list"] = open(IFACE_FILE).read().strip()
     cfg["enable_sensor"] = _truth(cfg.get("enable_sensor", True))
     cfg["enable_prevention"] = False
-    cfg["network_security_mode"] = "availability"
+    cfg["network_security_mode"] = security_mode(cfg.get("network_security_mode"))
     cfg["default_detect"] = _truth(cfg.get("default_detect", True))
     cfg["enable_auto_export_events_during_postupgrade"] = _truth(
         cfg.get("enable_auto_export_events_during_postupgrade", False)
@@ -369,11 +372,27 @@ def write_sensor(data):
         "enable_auto_export_events_during_postupgrade=%s" % (
             "yes" if _truth(data.get("enable_auto_export_events_during_postupgrade", False)) else "no"
         ),
-        "network_security_mode=availability",
+        "network_security_mode=%s" % security_mode(data.get("network_security_mode")),
         "interface_list=%s" % iface,
     ]
     with open(SENSOR_CONF, "w") as fh:
         fh.write("\n".join(lines) + "\n")
+
+
+def sensor_set(conn, params):
+    write_sensor(params)
+    kv_set(conn, "default_detect", "1" if _truth(params.get("default_detect", True)) else "0")
+    if _truth(params.get("enable_sensor", True)):
+        kv_set(conn, "engine_ui_status", "engine_init")
+        conn.commit()
+        if not start_engine():
+            kv_set(conn, "engine_ui_status", "")
+            conn.commit()
+    else:
+        stop_engine()
+        kv_set(conn, "engine_ui_status", "")
+        conn.commit()
+    return ok(read_sensor())
 
 
 def _truth(v):
@@ -519,6 +538,20 @@ def mirror_status():
         "tzsp_port": 37008,
         "tap_present": os.path.exists("/sys/class/net/" + ifname),
     }
+
+
+def settings_accel(method, p):
+    if method == "get":
+        return ok(accel_status())
+    if method == "set":
+        write_accel_conf(p or {})
+        apply_accel_yaml()
+        st, _pid = engine_status()
+        if st == "running":
+            stop_engine()
+            start_engine()
+        return ok(accel_status())
+    return err(102)
 
 
 def settings_mirror(method, p):
@@ -776,10 +809,11 @@ def event_row(r, conn=None):
 
 
 _COMPOUND_SET_ORDER = {
-    ("SYNO.TPS.Settings.Mirror", "set"): 0,
-    ("SYNO.TPS.Sensor", "set"): 1,
-    ("SYNO.TPS.Settings.Update.Schedule", "set"): 2,
-    ("SYNO.TPS.Settings.Update.Source", "set"): 3,
+    ("SYNO.TPS.Settings.Accel", "set"): 0,
+    ("SYNO.TPS.Settings.Mirror", "set"): 1,
+    ("SYNO.TPS.Sensor", "set"): 2,
+    ("SYNO.TPS.Settings.Update.Schedule", "set"): 3,
+    ("SYNO.TPS.Settings.Update.Source", "set"): 4,
 }
 
 
@@ -842,82 +876,8 @@ def handle_compound(params, conn):
 
 
 def handle(api, method, params, conn):
-    params = coerce_params(params)
-    if api == "SYNO.TPS.Event" and method == "list":
-        return event_list(conn, params)
-    if api == "SYNO.TPS.Event" and method == "get":
-        return event_get(conn, params)
-    if api == "SYNO.TPS.Event" and method == "list_status":
-        return event_list_status(params)
-    if api == "SYNO.TPS.Event.Offset" and method == "get":
-        return event_offset(conn, params)
-    if api == "SYNO.TPS.Event.Statistic" and method == "get":
-        return event_stat(conn, params)
-    if api == "SYNO.TPS.Event.Map" and method == "list":
-        return ok(official_map(conn, params.get("date_range")))
-    if api == "SYNO.TPS.Event.ExportFolder" and method == "get":
-        return ok({"export_folder": ensure_export_dir()})
-    if api == "SYNO.TPS.Sensor" and method == "get":
-        return ok(read_sensor())
-    if api == "SYNO.TPS.Sensor" and method == "set":
-        write_sensor(params)
-        kv_set(conn, "default_detect", "1" if _truth(params.get("default_detect", True)) else "0")
-        if _truth(params.get("enable_sensor", True)):
-            kv_set(conn, "engine_ui_status", "engine_init")
-            conn.commit()
-            if not start_engine():
-                kv_set(conn, "engine_ui_status", "")
-                conn.commit()
-        else:
-            stop_engine()
-            kv_set(conn, "engine_ui_status", "")
-            conn.commit()
-        return ok(read_sensor())
-    if api == "SYNO.TPS.Sensor.Variables" and method == "get":
-        return ok(sensor_vars())
-    if api == "SYNO.TPS.Signature" and method == "list":
-        return signature_classes(conn)
-    if api == "SYNO.TPS.Signature.Classification" and method == "list":
-        return signature_classes(conn)
-    if api == "SYNO.TPS.Signature.Rule" and method == "list":
-        return signature_rules(conn, params)
-    if api == "SYNO.TPS.Signature.Policy":
-        return signature_policy(conn, method, params)
-    if api.startswith("SYNO.TPS.Settings.Update"):
-        return settings_update(conn, api, method, params)
-    if api == "SYNO.TPS.Settings.Storage":
-        return settings_storage(conn, method, params)
-    if api == "SYNO.TPS.Device":
-        return devices(conn, method, params)
-    if api == "SYNO.TPS.Statistic.Device":
-        return stat_device(conn, method, params)
-    if api == "SYNO.TPS.Statistic.Trends" and method == "get":
-        return trends(conn, params)
-    if api == "SYNO.TPS.Notification":
-        return notification(conn, method, params)
-    if api == "SYNO.TPS.Notification.Filter":
-        return notification_filter(conn, method, params)
-    if api == "SYNO.TPS.Backup":
-        return backup_api(conn, method, params)
-    if api == "SYNO.TPS.Overview" and method == "get":
-        return overview(conn)
-    if api == "SYNO.TPS.Settings.Map" and method == "get":
-        return ok({"key": read_gmaps_key()})
-    if api == "SYNO.TPS.Compound" and method == "request":
-        return handle_compound(params, conn)
-    if api == "SYNO.TPS.Settings.Telegram":
-        return settings_telegram(conn, method, params)
-    if api == "SYNO.TPS.Settings.Mirror":
-        return settings_mirror(method, params)
-    if api == "SYNO.TPS.Settings.Feed":
-        return settings_feed(conn, method, params)
-    if api == "SYNO.Core.Network.NSM.Device" and method == "get":
-        return ok(nsm_device_list())
-    if api == "SYNO.Core.SystemDB" and method == "get":
-        return ok(systemdb_get())
-    if api == "SYNO.Core.ExternalDevice.Storage.USB" and method == "list":
-        return ok(usb_list())
-    return err(101)
+    from api_routes import dispatch
+    return dispatch(api, method, params, conn, sys.modules[__name__])
 
 
 def read_gmaps_key():

@@ -29,6 +29,70 @@ read_iface_file() {
 	tr -d '\r' < "${PKGETC}/interface" | awk 'NF { print $1; exit }'
 }
 
+ensure_accel_conf() {
+	mkdir -p "${PKGETC}"
+	if [ ! -f "${PKGETC}/accel.conf" ] && [ -f "${PKGDEST}/etc/accel.conf" ]; then
+		cp -f "${PKGDEST}/etc/accel.conf" "${PKGETC}/accel.conf" 2>/dev/null || true
+		chmod 644 "${PKGETC}/accel.conf" 2>/dev/null || true
+	fi
+}
+
+accel_kv() {
+	key="$1"
+	default="$2"
+	if [ ! -r "${PKGETC}/accel.conf" ]; then
+		echo "${default}"
+		return
+	fi
+	awk -F= -v k="${key}" -v d="${default}" '
+		BEGIN { found=0 }
+		/^[ \t]*#/ { next }
+		NF < 1 { next }
+		{
+			gsub(/^[ \t]+|[ \t]+$/, "", $1)
+			if ($1 == k) {
+				val=$0
+				sub(/^[^=]*=/, "", val)
+				gsub(/^[ \t]+|[ \t]+$/, "", val)
+				print val
+				found=1
+				exit
+			}
+		}
+		END { if (!found) print d }
+	' "${PKGETC}/accel.conf"
+}
+
+hyperscan_in_build() {
+	"${BIN}" --build-info 2>/dev/null | awk '
+		BEGIN { IGNORECASE=1 }
+		/hyperscan/ {
+			split($0, a, ":")
+			val = a[2]
+			gsub(/^[ \t]+|[ \t]+$/, "", val)
+			if (val ~ /^yes/) { print "1"; exit }
+			print "0"
+			exit
+		}
+		END { if (NR == 0) print "0" }
+	'
+}
+
+accel_detect_sets() {
+	ensure_accel_conf
+	hs="$(accel_kv hyperscan 1)"
+	avail="$(hyperscan_in_build)"
+	case "${hs}" in
+		1|yes|true|on)
+			if [ "${avail}" = "1" ]; then
+				echo "--set detect.mpm-algo=hs --set detect.spm-algo=hs"
+				return
+			fi
+			;;
+	esac
+	echo "--set detect.mpm-algo=ac --set detect.spm-algo=bmh"
+}
+
 ensure_mirror_conf() {
 	mkdir -p "${PKGETC}"
 	if [ ! -f "${PKGETC}/mirror.conf" ] && [ -f "${PKGDEST}/etc/mirror.conf" ]; then
@@ -285,7 +349,8 @@ start() {
 	suricata_ok=0
 	if [ -x "${BIN}" ] && [ ! -f "${PIDFILE}" ]; then
 		if "${BIN}" -c "${YAML}" --pidfile "${PIDFILE}" -D -i "${IFACE}" \
-			-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}"; then
+			-l "${LOGDIR}" --set "af-packet.0.interface=${IFACE}" \
+			$(accel_detect_sets); then
 			i=0
 			while [ "${i}" -lt 20 ]; do
 				if [ -f "${PIDFILE}" ] && kill -0 "$(cat "${PIDFILE}")" 2>/dev/null; then

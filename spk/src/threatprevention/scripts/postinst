@@ -42,6 +42,10 @@ if [ ! -f "${PKGETC}/mirror.conf" ] && [ -f "${PKGDEST}/etc/mirror.conf" ]; then
 	cp -f "${PKGDEST}/etc/mirror.conf" "${PKGETC}/mirror.conf" 2>/dev/null || true
 	chmod 644 "${PKGETC}/mirror.conf" 2>/dev/null || true
 fi
+if [ ! -f "${PKGETC}/accel.conf" ] && [ -f "${PKGDEST}/etc/accel.conf" ]; then
+	cp -f "${PKGDEST}/etc/accel.conf" "${PKGETC}/accel.conf" 2>/dev/null || true
+	chmod 644 "${PKGETC}/accel.conf" 2>/dev/null || true
+fi
 # Unsigned packages cannot declare file capabilities (synopkg 319). Print the
 # exact admin command so Package Center / synopkg logs have a copy-paste line.
 echo "Threat Prevention: after every install/upgrade, as admin run:" >&2

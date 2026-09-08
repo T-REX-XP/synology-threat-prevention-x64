@@ -74,7 +74,7 @@ Related: [official-app-surface.md](official-app-surface.md), [backend-replaceabi
 
 ## Counts (2026-09-07, tree 8.0.6-0032)
 
-- 21 `SYNO.TPS.*` APIs, 42 `.lib` methods — all have a tpsweb `handle()` branch.
+- 21 `SYNO.TPS.*` APIs, 42 `.lib` methods — routed from [`api_routes.py`](../../spk/src/threatprevention/python/api_routes.py) into tpsweb implementations.
 - 9 DSM-core / Entry.Request calls — passthrough only.
 - ~20 methods are official-shaped enough to drive a tab.
 - ~14 methods return a success envelope with missing or wrong fields.

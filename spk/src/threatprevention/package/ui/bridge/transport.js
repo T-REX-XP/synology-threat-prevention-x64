@@ -21,7 +21,8 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			"SYNO.TPS.Notification", "SYNO.TPS.Notification.Filter", "SYNO.TPS.Sensor",
 			"SYNO.TPS.Sensor.Variables", "SYNO.TPS.Settings.Storage", "SYNO.TPS.Settings.Update",
 			"SYNO.TPS.Settings.Update.Schedule", "SYNO.TPS.Settings.Update.Source",
-			"SYNO.TPS.Settings.Telegram", "SYNO.TPS.Settings.Mirror", "SYNO.TPS.Settings.Feed",
+			"SYNO.TPS.Settings.Telegram", "SYNO.TPS.Settings.Mirror", "SYNO.TPS.Settings.Accel",
+			"SYNO.TPS.Settings.Feed",
 			"SYNO.TPS.Settings.Map", "SYNO.TPS.Compound",
 			"SYNO.TPS.Signature", "SYNO.TPS.Signature.Classification", "SYNO.TPS.Signature.Policy",
 			"SYNO.TPS.Signature.Rule", "SYNO.TPS.Statistic.Device", "SYNO.TPS.Statistic.Trends",
@@ -64,6 +65,39 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			var id = window.setInterval(function () {
 				if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
 			}, 25);
+		},
+		watchAssign: function (nsPath, name, tryPatch) {
+			/* Object literals (SignatureUpdater) are not Ext.define. Intercept
+			   the assignment if install() ran before synoips.js finished. */
+			var parts = String(nsPath || "").split(".");
+			var o = window;
+			var i;
+			for (i = 0; i < parts.length; i++) {
+				if (!parts[i]) { continue; }
+				o[parts[i]] = o[parts[i]] || {};
+				o = o[parts[i]];
+			}
+			if (tryPatch()) { return; }
+			try {
+				var stored;
+				var desc = Object.getOwnPropertyDescriptor(o, name);
+				if (desc && desc.get && !desc.configurable) { return; }
+				if (desc && Object.prototype.hasOwnProperty.call(desc, "value")) {
+					stored = desc.value;
+				}
+				Object.defineProperty(o, name, {
+					configurable: true,
+					enumerable: true,
+					get: function () { return stored; },
+					set: function (val) {
+						stored = val;
+						tryPatch();
+					}
+				});
+				if (stored) { tryPatch(); }
+			} catch (e) {
+				if (window.Ext && Ext.onReady) { Ext.onReady(tryPatch); }
+			}
 		},
 		walkAppWindow: function (start) {
 			var c = start, n = 0;
@@ -303,10 +337,11 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 		},
 		orderCompound: function (items) {
 			var rank = {
-				"SYNO.TPS.Settings.Mirror|set": 0,
-				"SYNO.TPS.Sensor|set": 1,
-				"SYNO.TPS.Settings.Update.Schedule|set": 2,
-				"SYNO.TPS.Settings.Update.Source|set": 3
+				"SYNO.TPS.Settings.Accel|set": 0,
+				"SYNO.TPS.Settings.Mirror|set": 1,
+				"SYNO.TPS.Sensor|set": 2,
+				"SYNO.TPS.Settings.Update.Schedule|set": 3,
+				"SYNO.TPS.Settings.Update.Source|set": 4
 			};
 			var tagged = [];
 			Ext.each(items || [], function (it, i) {
@@ -623,11 +658,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				};
 				return true;
 			}
-			if (tryPatch()) { return; }
-			var n = 0;
-			var id = window.setInterval(function () {
-				if (tryPatch() || ++n > 80) { window.clearInterval(id); }
-			}, 25);
+			this.watchAssign("SYNO.SDS.TPS.Utils", "SignatureUpdater", tryPatch);
 		},
 		pickApi: function (opts) {
 			var p = (opts && (opts.params || opts.jsonData)) || {};

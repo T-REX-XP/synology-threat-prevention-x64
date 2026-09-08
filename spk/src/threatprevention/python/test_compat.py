@@ -38,6 +38,7 @@ from feeds import add_feed, feed_url_ok, list_feeds  # noqa: E402
 from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
+from api_routes import BY_API, EXACT, UPDATE_PREFIX  # noqa: E402
 from tpsweb import (  # noqa: E402
     SENSOR_CONF,
     _parse_multipart,
@@ -68,7 +69,8 @@ sensor = official_sensor(
 )
 check(sensor["status"] == "engine_start", "sensor status")
 check(sensor["prevention_enforced"] is False and sensor["ips_mode"] == "ids", "ids only")
-check(sensor["enable_prevention"] is False and sensor["network_security_mode"] == "availability", "ids chrome")
+check(sensor["enable_prevention"] is False, "ids chrome keeps drop-packet off")
+check(sensor["network_security_mode"] == "availability", "default mode is availability")
 check(capture_capable("suricata = cap_net_raw,cap_net_admin+ep") is True, "getcap text is capable")
 check(capture_capable("", True) is True, "running engine is capable")
 check(capture_capable("", False, "Error: Operation not permitted") is False, "EPERM without cap is not capable")
@@ -83,7 +85,7 @@ lied = official_sensor(
     "running", 1, "ovs_eth0", ["ovs_eth0"],
 )
 check(lied["enable_prevention"] is False, "sensor get ignores prevention checkbox")
-check(lied["network_security_mode"] == "availability", "sensor get ignores security mode")
+check(lied["network_security_mode"] == "security", "sensor get keeps default mode")
 check(sensor["interface"] == "ovs_eth0", "sensor interface")
 check(all(x["if_id"] != "eth0" for x in sensor["interface_list"]), "hide ovs-enslaved eth0 twin")
 check(any(x["if_id"] == "eth1" for x in official_sensor(
@@ -124,7 +126,7 @@ write_sensor({
 })
 sensor_txt = open(SENSOR_CONF, encoding="utf-8").read()
 check("enable_prevention=no" in sensor_txt, "write_sensor forces prevention off")
-check("network_security_mode=availability" in sensor_txt, "write_sensor forces availability")
+check("network_security_mode=security" in sensor_txt, "write_sensor keeps default mode")
 
 
 def _is_hosted(api):
@@ -194,6 +196,9 @@ check('String(api).indexOf("Polling") !== -1' in js, "bridge refuses Polling API
 check("isPollingCallback" in js and "compoundHasHosted" in js, "bridge keeps reg_ref guards")
 check("wrappedReq.Polling = origReq.Polling" in js, "Request wrap copies .Polling")
 check("gateMonitoredIfaces" not in js, "no interfaceGrid setDisabled monkeypatch")
+check('item.name === "enable_prevention"' in js, "drop-packet checkbox stays disabled")
+check('item.name === "enable_prevention" || item.name === "network_security_mode"' not in js, "default mode radios stay enabled")
+check("f.inputValue === \"availability\"" not in js, "do not force availability radio")
 check("me.clearGeneralDirty(this);" in js, "General form snaps originalValue once")
 check("setTimeout(function () { me.clearGeneralDirty" not in js, "no timer dirty-clears on General")
 check("fallbackBase" not in js, "no :19557 fallback helper")
@@ -202,7 +207,14 @@ check("return \"/webman/tps-api\"" in js, "same-origin tps-api is primary")
 check("whenClass:" in js, "bridge shares Ext.define waiter")
 check("Ext.define._tpsHook" in js, "whenClass skips poll if Ext.define is hooked")
 check(js.count("tries > 80") == 1, "one Ext.define poll helper")
+check("watchAssign:" in js, "bridge intercepts object-literal assigns")
+check("this.watchAssign(\"SYNO.SDS.TPS.Utils\", \"SignatureUpdater\"" in js,
+      "SignatureUpdater uses watchAssign not setInterval")
+check("++n > 80" not in js, "no SignatureUpdater 25ms poll")
 check("tps_cap_note" in js, "Overview banner when capture cap missing")
+check("SYNO.TPS.Settings.Accel" in js, "bridge hosts Accel API")
+check("Intel Hyperscan" in js, "General Hardware acceleration fieldset")
+check('"SYNO.TPS.Settings.Accel|set": 0' in js, "compound ranks Accel.set first")
 check(SETCAP_CMD in js, "Overview banner prints exact setcap")
 postinst = open(os.path.join(HERE, "..", "scripts", "postinst"), encoding="utf-8").read()
 check("sudo " + SETCAP_CMD in postinst, "postinst prints exact sudo setcap")
@@ -293,6 +305,14 @@ sens = handle("SYNO.TPS.Sensor", "get", {}, conn)
 check(sens["success"] and isinstance(sens["data"].get("interface_list"), list), "Sensor.get interface_list")
 check(sens["data"]["prevention_enforced"] is False and sens["data"]["ips_mode"] == "ids", "Sensor.get ids")
 check(isinstance(sens["data"].get("capture_capable"), bool), "Sensor.get capture_capable")
+check(("SYNO.TPS.Sensor", "get") in EXACT and ("SYNO.TPS.Event", "list") in EXACT, "exact route table")
+check("SYNO.TPS.Settings.Mirror" in BY_API and "SYNO.TPS.Signature.Policy" in BY_API, "by-api route table")
+check("SYNO.TPS.Settings.Accel" in BY_API, "accel route")
+check(UPDATE_PREFIX == "SYNO.TPS.Settings.Update", "update prefix")
+miss = handle("SYNO.TPS.Event", "nope", {}, conn)
+check(miss["success"] is False and miss["error"]["code"] == 101, "unknown Event method is 101")
+miss_api = handle("SYNO.TPS.NoSuch", "get", {}, conn)
+check(miss_api["error"]["code"] == 101, "unknown API is 101")
 svar = handle("SYNO.TPS.Sensor.Variables", "get", {}, conn)
 check(svar["success"] and "home_net" in svar["data"], "Variables.get home_net")
 pol = handle("SYNO.TPS.Signature.Policy", "list", {}, conn)
@@ -451,6 +471,24 @@ check(iface_pin == "tps0", "copy mode pins tps0")
 lan = handle("SYNO.TPS.Settings.Mirror", "set", {"capture_mode": "lan"}, conn)
 check(lan["success"] and lan["data"]["capture_mode"] == "lan", "mirror lan set")
 check(lan["data"]["enabled"] is False, "lan disables copy")
+
+from accel import apply_detect_algos  # noqa: E402
+check("mpm-algo: hs" in apply_detect_algos("", "hs", "hs"), "detect block appended")
+sample = "detect:\n  mpm-algo: ac\n  spm-algo: bmh\n"
+check("mpm-algo: hs" in apply_detect_algos(sample, "hs", "hs"), "detect keys replaced")
+acc = handle("SYNO.TPS.Settings.Accel", "get", {}, conn)
+check(acc["success"] and acc["data"]["hyperscan"] is True, "accel default hyperscan on")
+check(acc["data"]["dpdk"] is False and acc["data"]["nic_offload"] is False, "dpdk/offload not wired")
+check(acc["data"]["mpm_algo"] in ("hs", "ac"), "accel reports mpm")
+off = handle("SYNO.TPS.Settings.Accel", "set", {"hyperscan": False}, conn)
+check(off["success"] and off["data"]["hyperscan"] is False, "accel set off")
+check(off["data"]["mpm_algo"] == "ac" and off["data"]["spm_algo"] == "bmh", "off uses ac/bmh")
+on = handle("SYNO.TPS.Settings.Accel", "set", {"hyperscan": True, "dpdk": True, "nic_offload": True}, conn)
+check(on["success"] and on["data"]["dpdk"] is False and on["data"]["nic_offload"] is False, "accel ignores dpdk/offload")
+accel_txt = open(os.path.join(os.environ["TPS_PKGETC"], "accel.conf"), encoding="utf-8").read()
+check("hyperscan=1" in accel_txt and "dpdk=0" in accel_txt, "accel.conf default policy")
+yaml_txt = open(os.path.join(os.environ["TPS_PKGDEST"], "etc", "suricata", "suricata.yaml"), encoding="utf-8").read()
+check("mpm-algo:" in yaml_txt and "spm-algo:" in yaml_txt, "yaml detect algos written")
 
 ip_link_mut = []
 _orig_call = tpsweb_mod.subprocess.call

@@ -41,6 +41,14 @@
 </ul>
 <p>Monitored Interfaces should show <b>one</b> enabled capture device. In copy mode that is <code>tps0</code>, not <code>tps0</code> plus LAN 1.</p>
 
+<h2>Hardware acceleration</h2>
+<p>In <b>Settings</b> &gt; <b>General</b> &gt; <b>Hardware acceleration</b>:</p>
+<ul>
+	<li><b>Intel Hyperscan (MPM / SPM)</b> — default on. Uses SIMD (AVX2 / AVX-512) for signature matching (<code>mpm-algo: hs</code>, <code>spm-algo: hs</code>). Apply restarts Suricata. If this binary has no Hyperscan, matching stays <code>ac</code> / <code>bmh</code>.</li>
+	<li><b>Intel DPDK</b> and <b>NIC hardware flow offload</b> are listed but not wired. Capture stays AF_PACKET. This package does not bypass the kernel or prefilter on the NIC.</li>
+</ul>
+<p>Confirm with <code>suricata --build-info | grep -i hyperscan</code>. See the package docs <code>hw-acceleration.md</code> for details.</p>
+
 <h2>Signature updates</h2>
 <p>Use <b>Update Now</b> or the automatic schedule. The first download of ET Open can take several minutes. When it finishes, last-updated is stamped and status becomes up to date. Connection errors mean the NAS could not reach Emerging Threats.</p>
 
