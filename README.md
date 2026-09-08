@@ -12,6 +12,8 @@ This is a **research proof of concept**, not a product and not a Synology contri
 
 Current versions are in [`VERSION`](VERSION): **PKG_VERSION** is this SPK; **SURICATA_VERSION** is the upstream engine. They are independent.
 
+![Overview, Events, and Self-Defined Policy on DSM 7](docs/ui-walkthrough.gif)
+
 ## What this is (and is not)
 
 The official SRM app is a client for a 21-API `SYNO.TPS.*` stack (aarch64 CGI modules, PostgreSQL, synosuricata 6 IPS). Those modules will not load on DSM 7 x86_64.
