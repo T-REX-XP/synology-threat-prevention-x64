@@ -61,10 +61,10 @@ for nss in libnss_files.so.2 libnss_dns.so.2 libnss_compat.so.2; do
     fi
 done
 
-patchelf --set-interpreter "${INTERP_ON_NAS}" --set-rpath '$ORIGIN/../lib' "${BIN}"
+patchelf --set-interpreter "${INTERP_ON_NAS}" --set-rpath "${INTERP_ON_NAS%/*}" "${BIN}"
 for helper in suricatactl suricatasc; do
     if [ -f "${PREFIX}/bin/${helper}" ] && file "${PREFIX}/bin/${helper}" | grep -q ELF; then
-        patchelf --set-interpreter "${INTERP_ON_NAS}" --set-rpath '$ORIGIN/../lib' "${PREFIX}/bin/${helper}" || true
+        patchelf --set-interpreter "${INTERP_ON_NAS}" --set-rpath "${INTERP_ON_NAS%/*}" "${PREFIX}/bin/${helper}" || true
     fi
 done
 for so in "${LIBDIR}"/*.so*; do

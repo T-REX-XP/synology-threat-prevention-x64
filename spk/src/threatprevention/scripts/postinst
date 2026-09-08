@@ -48,6 +48,7 @@ if [ ! -f "${PKGETC}/accel.conf" ] && [ -f "${PKGDEST}/etc/accel.conf" ]; then
 fi
 # Unsigned packages cannot declare file capabilities (synopkg 319). Print the
 # exact admin command so Package Center / synopkg logs have a copy-paste line.
+ln -sfn "${PKGDEST}/lib" /var/lib/tps 2>/dev/null || true
 echo "Threat Prevention: after every install/upgrade, as admin run:" >&2
 echo "  sudo /usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep /var/packages/ThreatPrevention/target/bin/suricata" >&2
 echo "  sudo synopkg restart ThreatPrevention" >&2

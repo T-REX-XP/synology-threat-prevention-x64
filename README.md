@@ -36,13 +36,27 @@ Official ExtJS (`synoips.js`, texts, help) is **Synology copyright**. It is **no
 
 On the NAS (DSM 7 Intel/AMD). Package Center → Trust Level: allow unsigned packages.
 
-Always uses the latest installer from `main` and the latest engine GitHub Release:
+Always uses the latest installer from `main` and the latest engine GitHub Release.
+
+**Task Scheduler as root** (no SSH). Control Panel → Task Scheduler → Create → Scheduled Task → User-defined script:
+
+1. **User:** `root` (not your DSM login).
+2. **Schedule:** uncheck Enabled if you only want to run it once.
+3. **Task settings → User-defined script** — paste:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | bash
+```
+
+4. Create, select the task, **Run**. Watch **Action → View Result** for the log.
+
+Already root, so do not wrap the pipe in `sudo`. The installer downloads this repo, the prebuilt Suricata engine from GitHub Releases, the official SRM UI SPK, packs the community package, then `synopkg install` + `setcap`. Log out of DSM and back in afterwards.
+
+**SSH** (same command; `sudo` is required if you are not root):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | sudo bash
 ```
-
-That downloads this repo, the prebuilt Suricata engine from GitHub Releases, the official SRM UI SPK, packs the community package, then `synopkg install` + `setcap`. Log out of DSM and back in afterwards.
 
 `--tag` is optional. Pass it only to pin a specific engine release (`suricata-*-linux-amd64.tar.gz`); installer sources still come from `main`:
 
@@ -127,7 +141,7 @@ GitHub Actions compile natively on `ubuntu-24.04` (x86_64) and
 
 ## Install on the NAS (no compile)
 
-See [Install](#install) for the `curl | sudo bash` one-liner. From a checkout:
+See [Install](#install) for Task Scheduler as root, or the `curl | sudo bash` SSH one-liner. From a checkout:
 
 ```sh
 sudo ./install.sh

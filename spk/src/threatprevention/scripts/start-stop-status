@@ -4,6 +4,7 @@ PKGVAR="/var/packages/ThreatPrevention/var"
 PKGETC="/var/packages/ThreatPrevention/etc"
 PIDFILE="${PKGVAR}/suricata.pid"
 INGEST_PID="${PKGVAR}/ingest.pid"
+TPSWEB_PID="${PKGVAR}/tpsweb.pid"
 TZSP_PID="${PKGVAR}/tzsp.pid"
 BIN="${PKGDEST}/bin/suricata"
 YAML="${PKGDEST}/etc/suricata/suricata.yaml"
@@ -341,6 +342,9 @@ start() {
 		fi
 	fi
 	echo "starting suricata on ${IFACE}" >&2
+	# $ORIGIN RUNPATH is ignored under setcap; binaries packed from GitHub
+	# engine tarballs use /var/lib/tps -> target/lib (absolute, AT_SECURE-safe).
+	ln -sfn "${PKGDEST}/lib" /var/lib/tps 2>/dev/null || true
 	if command -v setcap >/dev/null 2>&1; then
 		setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep "${BIN}" 2>/dev/null || true
 	fi

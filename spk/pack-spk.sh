@@ -46,7 +46,8 @@ resolve_official() {
 }
 
 resolve_official
-[ -x "${ENGINE}/bin/suricata" ] || die "Missing ${ENGINE}/bin/suricata — run ./build.sh (or build/suricata-8/build.sh)"
+# -f not -x: DSM often mounts /tmp noexec, so test -x is false on a 0755 ELF.
+[ -f "${ENGINE}/bin/suricata" ] || die "Missing ${ENGINE}/bin/suricata — run ./build.sh (or build/suricata-8/build.sh)"
 [ -f "${ORIG_RULES}/emerging.rules.tar.gz" ] || die "Missing original rules tarball under ${ORIG_RULES}"
 [ -d "${SRC}" ] || die "Missing SPK sources in ${SRC}"
 
@@ -67,6 +68,24 @@ cp -a "${ENGINE}/lib/." "${STAGING}/package/lib/"
 cp -a "${ENGINE}/share/." "${STAGING}/package/share/"
 cp -a "${ENGINE}/build-info.txt" "${STAGING}/package/" 2>/dev/null || true
 cp -a "${ENGINE}/ldd.txt" "${STAGING}/package/" 2>/dev/null || true
+
+# Published engine tarballs still use RUNPATH $ORIGIN/../lib. File capabilities
+# put ld.so in secure mode, which ignores $ORIGIN, so the package user cannot
+# load liblz4. Original packer used an absolute rpath; rewrite in place to a
+# short path and point a symlink at target/lib (see start-stop-status / postinst).
+python3 - "${STAGING}/package/bin/suricata" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = bytearray(path.read_bytes())
+old = b"$ORIGIN/../lib"
+new = b"/var/lib/tps"
+n = data.find(old)
+if n < 0:
+    sys.exit(0)
+data[n:n + len(old)] = new + b"\0" * (len(old) - len(new))
+path.write_bytes(data)
+print("RUNPATH $ORIGIN/../lib -> /var/lib/tps", file=sys.stderr)
+PY
 
 info "Stage tps python (ingest / compiler / tpsweb)"
 mkdir -p "${STAGING}/package/lib/tps"
@@ -295,4 +314,4 @@ fi
 info "Built ${OUT_DIR}/${SPK_NAME}"
 tar tf "${OUT_DIR}/${SPK_NAME}"
 ls -lh "${OUT_DIR}/${SPK_NAME}"
-file "${OUT_DIR}/${SPK_NAME}"
+command -v file >/dev/null 2>&1 && file "${OUT_DIR}/${SPK_NAME}" || true

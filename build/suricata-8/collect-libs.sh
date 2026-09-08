@@ -37,8 +37,9 @@ while ((${#todo[@]})); do
 	todo=("${next[@]}")
 done
 
-# $ORIGIN so DSM can find vendored libs without LD_LIBRARY_PATH.
-patchelf --set-rpath '$ORIGIN/../lib' "${BIN}"
+# $ORIGIN is ignored when the binary has file capabilities (AT_SECURE).
+# Use the NAS install path so setcap + package user can still load liblz4.
+patchelf --set-rpath /var/packages/ThreatPrevention/target/lib "${BIN}"
 for so in "${LIBDIR}"/*.so*; do
 	[ -f "${so}" ] || continue
 	patchelf --set-rpath '$ORIGIN' "${so}" || true

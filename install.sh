@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Prepare and install Threat Prevention on a DSM 7 x86_64 NAS.
 #
-# One-liner (no git clone) — always latest installer + latest engine:
+# Task Scheduler as root (Control Panel → User-defined script, User: root):
+#   curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | bash
+# SSH (not already root):
 #   curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | sudo bash
 # Optional pin of the engine GitHub Release:
-#   … | sudo bash -s -- --tag v0.2.0
+#   … | bash -s -- --tag v0.2.0
 #
 # Does not compile Suricata. Fetches a prebuilt engine from GitHub Releases,
 # downloads the official SRM UI SPK, packs a community SPK, then synopkg
@@ -34,6 +36,9 @@ Usage: $0 [options]
 On a DSM 7 Intel/AMD NAS: fetch the prebuilt Suricata engine, assemble the
 SPK (official UI is downloaded here, not from GitHub), install, setcap.
 
+  # Task Scheduler as root:
+  curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh | bash
+  # SSH:
   curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh | sudo bash
 
   --repo owner/name       GitHub repo (default: ${DEFAULT_REPO})
