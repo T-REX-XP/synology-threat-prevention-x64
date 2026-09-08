@@ -11,6 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Load versions
-        run: . ./VERSION && echo "SURICATA_VERSION=${SURICATA_VERSION} PKG_VERSION=${PKG_VERSION}"
+        run: |
+          set -euo pipefail
+          . ./VERSION
+          echo "SURICATA_VERSION=${SURICATA_VERSION} ref=${GITHUB_REF_NAME}"
       - name: Backend envelope tests
         run: python3 spk/src/threatprevention/python/test_compat.py

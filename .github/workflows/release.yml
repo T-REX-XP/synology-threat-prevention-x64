@@ -3,7 +3,8 @@ name: Release engine
 # Native compile on GitHub-hosted Ubuntu (no Docker). Matrix: x86_64 + aarch64.
 # Packed SPK / official ExtJS are not attached. NAS: ./install.sh
 #
-# GitHub tag (v0.1.0) is the release label. Engine/SPK numbers come from VERSION.
+# GitHub tag (v0.2.0) is the release label. Engine number is SURICATA_VERSION
+# in VERSION. SPK INFO version is the git branch or tag (not VERSION).
 
 on:
   push:
@@ -23,6 +24,9 @@ jobs:
         run: |
           set -euo pipefail
           . ./VERSION
+          SCRIPT_DIR="$PWD"
+          # shellcheck source=spk/pkg-version.sh
+          . ./spk/pkg-version.sh
           echo "PKG_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
           echo "SURICATA_VERSION=${SURICATA_VERSION} PKG_VERSION=${PKG_VERSION}"
       - name: Backend envelope tests
@@ -50,7 +54,6 @@ jobs:
           . ./VERSION
           {
             echo "SURICATA_VERSION=${SURICATA_VERSION}"
-            echo "PKG_VERSION=${PKG_VERSION}"
             echo "ENGINE_ASSET=suricata-${SURICATA_VERSION}-${{ matrix.suffix }}.tar.gz"
           } >> "$GITHUB_ENV"
       - uses: actions/cache@v6
@@ -87,7 +90,6 @@ jobs:
           set -euo pipefail
           . ./VERSION
           echo "SURICATA_VERSION=${SURICATA_VERSION}" >> "$GITHUB_ENV"
-          echo "PKG_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v8
         with:
           pattern: suricata-engine-*
@@ -110,7 +112,7 @@ jobs:
             | x86_64 | `suricata-${{ env.SURICATA_VERSION }}-linux-amd64.tar.gz` |
             | aarch64 | `suricata-${{ env.SURICATA_VERSION }}-linux-arm64.tar.gz` |
 
-            Package: `${{ env.PKG_VERSION }}`. Built **natively** on GitHub-hosted Ubuntu (no Docker).
+            Package: `${{ github.ref_name }}`. Built **natively** on GitHub-hosted Ubuntu (no Docker).
 
             This release does **not** include a packed SPK or official Synology UI.
 

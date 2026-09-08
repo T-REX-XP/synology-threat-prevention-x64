@@ -4,7 +4,8 @@
 # shellcheck source=../VERSION
 . "${SCRIPT_DIR}/VERSION"
 : "${SURICATA_VERSION:?VERSION: missing SURICATA_VERSION}"
-: "${PKG_VERSION:?VERSION missing PKG_VERSION}"
+# shellcheck source=pkg-version.sh
+. "${SCRIPT_DIR}/spk/pkg-version.sh"
 
 # Default: Intel/AMD NAS. On a Synology ARM host, follow uname. Override with TPS_ARCH.
 if [ -z "${TPS_ARCH:-}" ]; then
@@ -267,11 +268,7 @@ download_engine_release() {
     local url
     url="$(github_engine_url "$repo" "$tag")"
     info "Downloading prebuilt engine from ${url}"
-    local curl_auth=()
-    if [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]; then
-        curl_auth=(-H "Authorization: Bearer ${GH_TOKEN:-${GITHUB_TOKEN}}")
-    fi
-    curl -fSL --retry 3 "${curl_auth[@]}" -o "${dest}.part" "$url" \
+    curl -fSL --retry 3 -o "${dest}.part" "$url" \
         || die "Failed to download ${ENGINE_ASSET} from ${url}
 Set TPS_GITHUB_REPO=owner/name, or pass --engine-tar /path/to/${ENGINE_ASSET}
 To compile instead: ./build.sh"
@@ -282,7 +279,7 @@ To compile instead: ./build.sh"
     mv "${dest}.part" "$dest"
 
     local sum_url="${url}.sha256"
-    if curl -fsSL "${curl_auth[@]}" -o "${dest}.sha256" "$sum_url"; then
+    if curl -fsSL -o "${dest}.sha256" "$sum_url"; then
         info "Verifying SHA-256"
         python3 - "$dest" "${dest}.sha256" <<'PY'
 import hashlib, sys

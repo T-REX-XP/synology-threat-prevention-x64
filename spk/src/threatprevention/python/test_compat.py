@@ -438,6 +438,10 @@ flags_only = handle("SYNO.TPS.Settings.Telegram", "set", {"enable_telegram": Fal
 check(flags_only["success"] and read_telegram_conf()["token"] == "123:ABC", "telegram flags-only keeps token")
 upd = handle("SYNO.TPS.Settings.Telegram", "set", {"token": "999:ZZZ", "chat_id": "-42"}, conn)
 check(upd["success"] and read_telegram_conf() == {"token": "999:ZZZ", "chat": "-42"}, "telegram set updates secrets")
+botp = handle("SYNO.TPS.Settings.Telegram", "set", {"bot_token": "888:BOT", "token": "csrfNoColon"}, conn)
+check(botp["success"] and read_telegram_conf()["token"] == "888:BOT", "bot_token wins over CSRF token")
+keep = handle("SYNO.TPS.Settings.Telegram", "set", {"bot_token": "********", "enable_telegram": True}, conn)
+check(keep["success"] and read_telegram_conf()["token"] == "888:BOT", "keep-mask does not wipe token")
 
 leases = _parse_isc_leases(
     'lease 192.168.1.50 {\n  hardware ethernet AA:BB:CC:DD:EE:FF;\n'

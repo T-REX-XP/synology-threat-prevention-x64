@@ -889,6 +889,40 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			};
 		},
 		telegramNames: ["enable_telegram", "tg_token", "tg_chat_id", "min_interval_telegram", "telegram_follow_mail"],
+		/* Password emptyText is ignored on DSM. Keep a mask in the value so Apply
+		   does not look like it wiped the token. Never POST this string. */
+		tgTokenKeep: "********",
+		isKeptTelegramToken: function (v) {
+			v = String(v || "").trim();
+			if (!v) { return true; }
+			return /^[\u2022*•]+$/.test(v);
+		},
+		fieldRaw: function (fld) {
+			if (!fld) { return ""; }
+			var raw = "";
+			try {
+				if (fld.el) {
+					var input = fld.el.dom;
+					if (input && String(input.tagName || "").toLowerCase() !== "input") {
+						input = (fld.el.child && fld.el.child("input", true)) ||
+							(fld.el.query && fld.el.query("input")[0]);
+					}
+					if (input && input.value) { raw = input.value; }
+				}
+			} catch (e) { /* ignore */ }
+			if (!raw && fld.getRawValue) { raw = fld.getRawValue(); }
+			if (!raw && fld.getValue) { raw = fld.getValue(); }
+			return raw == null ? "" : String(raw);
+		},
+		fillTelegramToken: function (fld, hasToken) {
+			if (!fld || !fld.setValue) { return; }
+			var v = hasToken ? this.tgTokenKeep : "";
+			fld.setValue(v);
+			fld.originalValue = v;
+			if (fld.startValue !== undefined) { fld.startValue = v; }
+			if (fld.emptyText !== undefined) { fld.emptyText = ""; }
+			if (fld.applyEmptyText) { fld.applyEmptyText(); }
+		},
 		patchNotificationTelegram: function (NP) {
 			var me = this;
 			if (NP.prototype._tpsTelegram) { return; }
@@ -952,7 +986,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				this._tpsIgnoreDirty = true;
 				var ret;
 				if (origProc) { ret = origProc.apply(this, arguments); }
-				me.loadTelegramInto(this);
+				if (!this._tpsTelegramSaving) { me.loadTelegramInto(this); }
 				return ret;
 			};
 			var origLoadSys = NP.prototype.loadSystemNotificationConfig;
@@ -976,7 +1010,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				defaults: {labelWidth: 180},
 				items: [
 					{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot", checked: false},
-					{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: "", emptyText: ""},
+					{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: ""},
 					{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1, value: ""},
 					{xtype: "syno_numberfield", name: "min_interval_telegram", fieldLabel: "Minimum interval (minutes)", indent: 1, maxValue: 60 * 24, allowDecimals: false, minValue: 0, value: 5},
 					{xtype: "syno_checkbox", name: "telegram_follow_mail", boxLabel: "Use the same classes as email", indent: 1, checked: true},
@@ -1011,6 +1045,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			if (opts.webapi) { drop(opts.webapi.params); }
 		},
 		telegramFromForm: function (panel) {
+			var me = this;
 			var f = panel && panel.getForm && panel.getForm();
 			if (!f) { return {}; }
 			function val(name, fallback) {
@@ -1020,14 +1055,9 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (xt.indexOf("check") !== -1) {
 					return fld.getValue ? fld.getValue() : fallback;
 				}
-				/* Password fields often still have "" until blur; raw DOM has the typed value. */
-				if (fld.getRawValue) {
-					var raw = fld.getRawValue();
-					if (raw !== undefined && raw !== null && String(raw).length) {
-						return raw;
-					}
-				}
-				return fld.getValue ? fld.getValue() : fallback;
+				var raw = me.fieldRaw(fld);
+				if (raw !== "") { return raw; }
+				return fallback;
 			}
 			var minutes = Number(val("min_interval_telegram", 5));
 			if (!isFinite(minutes) || minutes < 0) { minutes = 5; }
@@ -1038,7 +1068,8 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			};
 			var token = val("tg_token", "") || "";
 			var chat = val("tg_chat_id", "") || "";
-			if (token) { payload.token = token; }
+			/* DSM Ajax injects CSRF as `token`. Always send bot_token. */
+			if (token && !me.isKeptTelegramToken(token)) { payload.bot_token = token; }
 			if (chat) { payload.chat_id = chat; }
 			return payload;
 		},
@@ -1090,12 +1121,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				set("enable_telegram", !!data.enable_telegram);
 				set("telegram_follow_mail", data.follow_mail !== false);
 				set("tg_chat_id", data.chat_id || "");
-				set("tg_token", "");
-				var tok = f.findField("tg_token");
-				if (tok) {
-					tok.emptyText = data.has_token ? "Saved — leave blank to keep" : "";
-					if (tok.applyEmptyText) { tok.applyEmptyText(); }
-				}
+				me.fillTelegramToken(f.findField("tg_token"), !!data.has_token);
 				var sec = Number(data.min_interval_telegram);
 				if (!isFinite(sec) || sec < 0) { sec = 300; }
 				set("min_interval_telegram", Math.round(sec / 60));
@@ -1106,20 +1132,23 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 		},
 		saveTelegramFrom: function (panel) {
 			var me = this;
-			this.call("SYNO.TPS.Settings.Telegram", "set", 1, this.telegramFromForm(panel), function (ok) {
-				var f = panel.getForm && panel.getForm();
-				var token = f && f.findField("tg_token");
-				if (ok && token && token.setValue) {
-					token.setValue("");
-					token.emptyText = "Saved — leave blank to keep";
-					if (token.applyEmptyText) { token.applyEmptyText(); }
+			var payload = this.telegramFromForm(panel);
+			panel._tpsTelegramSaving = true;
+			this.call("SYNO.TPS.Settings.Telegram", "set", 1, payload, function (ok) {
+				panel._tpsTelegramSaving = false;
+				if (ok) {
+					me.loadTelegramInto(panel);
+					return;
 				}
 				me.clearTelegramDirty(panel);
 			});
 		},
 		testTelegram: function (panel) {
 			var p = this.telegramFromForm(panel);
-			this.call("SYNO.TPS.Settings.Telegram", "test", 1, {token: p.token, chat_id: p.chat_id}, function (ok) {
+			this.call("SYNO.TPS.Settings.Telegram", "test", 1, {
+				bot_token: p.bot_token || "",
+				chat_id: p.chat_id || ""
+			}, function (ok) {
 				var win = panel.findAppWindow && panel.findAppWindow();
 				var box = win && win.getMsgBox && win.getMsgBox();
 				var msg = ok ? "Telegram test message sent." : "Telegram test failed. Check bot token and chat ID.";

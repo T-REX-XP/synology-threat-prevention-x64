@@ -402,6 +402,36 @@ def _truth(v):
     return str(v).lower() in ("1", "true", "yes", "on")
 
 
+def _param_str(p, *keys):
+    for key in keys:
+        if key not in p:
+            continue
+        v = p.get(key)
+        if isinstance(v, (list, tuple)):
+            v = v[0] if v else ""
+        if v is None:
+            continue
+        s = str(v).strip()
+        if s:
+            return s
+    return ""
+
+
+def _telegram_token_from_params(p):
+    """Prefer bot_token. Ignore CSRF `token` and UI keep-mask (********)."""
+    raw = _param_str(p, "bot_token", "token")
+    if not raw:
+        return ""
+    if set(raw) <= set("*•\u2022"):
+        return ""
+    # DSM Ajax may overwrite a field named `token` with the CSRF SynoToken
+    # (no colon). Real Telegram bot tokens are "<id>:<secret>".
+    if ":" not in raw:
+        alt = _param_str(p, "bot_token")
+        return alt if ":" in alt else ""
+    return raw
+
+
 def kv_peek(key, default=""):
     try:
         conn = connect()
@@ -1803,9 +1833,7 @@ def settings_telegram(conn, method, p):
                 kv_set(conn, "min_interval_telegram", str(max(0, int(p.get("min_interval_telegram") or 300))))
             except (TypeError, ValueError):
                 kv_set(conn, "min_interval_telegram", "300")
-        token = p.get("token") if "token" in p else p.get("bot_token")
-        if isinstance(token, (list, tuple)):
-            token = token[0] if token else ""
+        token_s = _telegram_token_from_params(p)
         if "chat_id" in p:
             chat = p.get("chat_id")
         elif "chat" in p:
@@ -1814,7 +1842,6 @@ def settings_telegram(conn, method, p):
             chat = None
         if isinstance(chat, (list, tuple)):
             chat = chat[0] if chat else ""
-        token_s = "" if token is None else str(token).strip()
         chat_s = None if chat is None else str(chat).strip()
         if token_s or chat_s:
             write_telegram_conf(token_s or None, chat_s if chat_s else None)
@@ -1822,8 +1849,8 @@ def settings_telegram(conn, method, p):
         return ok({})
     if method == "test":
         cfg = read_telegram_conf()
-        token = (p.get("token") or "").strip() or cfg.get("token")
-        chat = (p.get("chat_id") or p.get("chat") or "").strip() or cfg.get("chat")
+        token = _telegram_token_from_params(p) or cfg.get("token")
+        chat = _param_str(p, "chat_id", "chat") or cfg.get("chat")
         if not token or not chat:
             return err(100)
         prefix = kv_get(conn, "subject_prefix", "Threat Prevention") or "Threat Prevention"
