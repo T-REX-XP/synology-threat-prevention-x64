@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html class="img-no-display">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<title>Router traffic copy</title>
+<link href="../../../../help/help.css" rel="stylesheet" type="text/css">
+<link href="../../../../help/scrollbar/flexcroll.css" rel="stylesheet" type="text/css">
+<script type="text/javascript" src="../../../../help/scrollbar/flexcroll.js"></script>
+<script type="text/javascript" src="../../../../help/scrollbar/initFlexcroll.js"></script>
+</head>
+<body>
+<h1>Router traffic copy</h1>
+<p>The NAS is not the gateway. Suricata on the LAN NIC only sees packets to or from this NAS. To inspect <b>LAN ↔ WAN</b> client traffic, the LAN gateway sends a copy toward the NAS. Suricata listens on local <code>tps0</code>. This is IDS only (no packet drop).</p>
+
+<p>OpenWrt uses a GRE tap. MikroTik RouterOS cannot peer with that tap (EoIP is a different GRE flavor), so it streams TZSP instead. Pick the matching option under Capture source.</p>
+
+<p><img src="images/router-traffic-copy.svg" alt="LAN clients exchange traffic with the WAN through the LAN gateway. OpenWrt copies it with nft dup over gretap (DSM Firewall GRE protocol 47). MikroTik copies it with sniff-tzsp on UDP 37008. The copy arrives on NAS tps0 and Suricata inspects it." style="max-width:100%;height:auto;"></p>
+
+<div class="section">
+<h4>Note:</h4>
+<ul>
+	<li>This package never rewrites the router. You copy the snippets from the NAS and run them on OpenWrt or MikroTik.</li>
+	<li>Do this only on a trusted LAN. Do not allow GRE or TZSP from the WAN.</li>
+	<li>Every WAN byte is copied again toward the NAS. Expect extra LAN load. MikroTik also needs fasttrack off for those flows (CPU cost).</li>
+	<li>Snippets live on the NAS at <code>/var/packages/ThreatPrevention/target/etc/openwrt/</code> and <code>…/etc/mikrotik/</code>.</li>
+</ul>
+</div>
+
+<h2>What you need</h2>
+<ul>
+	<li>OpenWrt (nftables / fw4) <b>or</b> MikroTik RouterOS as the LAN gateway.</li>
+	<li>This NAS on the same LAN, with Threat Prevention installed, <code>setcap</code> applied, and the package started. See <b>This NAS (Suricata IDS)</b>.</li>
+	<li>Administrator access to DSM Firewall and SSH on both the NAS and the router.</li>
+	<li>Example addresses used below: router <code>192.168.1.1</code>, NAS <code>192.168.1.130</code>. Substitute yours.</li>
+</ul>
+
+<h2>Recommended order</h2>
+<ol>
+	<li>Allow GRE (OpenWrt) or UDP 37008 (MikroTik) from the router to this NAS in DSM Firewall.</li>
+	<li>Install and run the matching router script (OpenWrt shell or MikroTik <code>.rsc</code>).</li>
+	<li>In Threat Prevention, choose <b>Receive a traffic copy from the router</b>, pick OpenWrt or MikroTik, enter the router LAN IPv4, and click <b>Apply</b>.</li>
+	<li>Restart this package so <code>tps0</code> is created.</li>
+	<li>Confirm capture and alerts.</li>
+</ol>
+
+<h4>To allow GRE on this NAS:</h4>
+<ol>
+	<li>Go to <b>Control Panel</b> &gt; <b>Security</b> &gt; <b>Firewall</b>.</li>
+	<li>Create a rule that allows <b>GRE</b> (IP protocol <b>47</b>) for OpenWrt, or <b>UDP 37008</b> for MikroTik, from the router LAN IPv4 (for example <code>192.168.1.1</code>) to this NAS.</li>
+	<li>Do not add a generic “allow GRE/TZSP from WAN” or from Any.</li>
+</ol>
+<p>Without this rule, <code>tps0</code> stays quiet even if the tunnel interface exists.</p>
+
+<h4>To copy LAN↔WAN traffic on OpenWrt:</h4>
+<ol>
+	<li>From the NAS, copy the folder <code>/var/packages/ThreatPrevention/target/etc/openwrt/</code> to the router (or copy <code>apply-tps-mirror.sh</code> alone).</li>
+	<li>On the router, install GRE support if needed: <code>opkg update && opkg install kmod-gre gre</code>.</li>
+	<li>Run the script with this NAS IPv4:
+		<p><code>NAS_IP=192.168.1.130 sh apply-tps-mirror.sh</code></p>
+	</li>
+	<li>Confirm the script printed the WAN L3 device it detected. For PPPoE that must be <code>pppoe-wan</code> (or the equivalent L3 name), not the underlying ethernet. If detection is wrong, rerun with <code>WAN_IF=pppoe-wan NAS_IP=192.168.1.130 sh apply-tps-mirror.sh</code>.</li>
+</ol>
+
+<h4>To apply the nft include by hand:</h4>
+<ol>
+	<li>Add the UCI gretap from <code>tps-mirror.network</code> (set <code>ipaddr</code> to the router LAN IP and <code>peeraddr</code> to the NAS). Reload network.</li>
+	<li>Copy <code>tps-mirror.nft.template</code> to <code>/etc/nftables.d/10-tps-mirror.nft</code>.</li>
+	<li>Replace <code>__WAN_IF__</code>, <code>__NAS_IP__</code>, and <code>__GRE_DEV__</code> (often <code>gre-tpsmirror</code>).</li>
+	<li>Run <code>/etc/init.d/firewall reload</code>.</li>
+</ol>
+<p>The nft hook is <b>forward</b> only, so the GRE copy (OUTPUT) is not re-mirrored. The include also returns <code>ip protocol gre</code>.</p>
+
+<h4>To copy LAN↔WAN traffic on MikroTik RouterOS:</h4>
+<ol>
+	<li>From the NAS, copy <code>/var/packages/ThreatPrevention/target/etc/mikrotik/</code> to the router.</li>
+	<li>Disable or narrow <code>fasttrack-connection</code>. Fasttracked flows never hit mangle, so the NAS stays silent.</li>
+	<li>Edit <code>NasIp</code>, <code>WanIf</code>, and <code>LanIf</code> in <code>apply-tps-mirror.rsc</code> (PPPoE WAN is often <code>pppoe-out1</code>; LAN is often <code>bridge</code>).</li>
+	<li>Upload the file and run <code>/import file-name=apply-tps-mirror.rsc</code>.</li>
+	<li>Confirm with <code>/ip firewall mangle print stats where comment~"tps-mirror"</code>.</li>
+</ol>
+<p>Do not use EoIP or <code>/interface gre</code> toward this NAS. Those will not appear on <code>tps0</code>.</p>
+
+<h4>To enable capture on this NAS:</h4>
+<ol>
+	<li>Open Threat Prevention &gt; <b>Settings</b> &gt; <b>General</b>.</li>
+	<li>Under <b>Capture source</b>, choose <b>Receive a traffic copy from the router</b>.</li>
+	<li>Choose <b>OpenWrt — GRE tap</b> or <b>MikroTik — TZSP</b>.</li>
+	<li>Enter the router LAN IPv4. Leave the optional NAS IP empty unless you must pin a specific address for OpenWrt GRE (empty uses the IPv4 that would be used to reach the router). MikroTik does not need a NAS IP field.</li>
+	<li>Click <b>Apply</b>.</li>
+	<li>Restart the package from Package Center, or <code>synopkg restart ThreatPrevention</code> after <code>setcap</code>. The tap is created at package start, not when you click Apply.</li>
+</ol>
+<p>Apply writes <code>/var/packages/ThreatPrevention/etc/mirror.conf</code> (<code>enabled=1</code>, <code>encap=gretap</code> or <code>tzsp</code>, <code>ifname=tps0</code>). Creating <code>tps0</code> needs <code>CAP_NET_ADMIN</code> (the same <code>setcap</code> as capture, or a restart as root via <code>synopkg</code>).</p>
+
+<h4>To confirm it is working:</h4>
+<ol>
+	<li>On the NAS: <code>ip link show tps0</code> — the tap exists and is UP.</li>
+	<li><code>cat /var/packages/ThreatPrevention/etc/interface</code> — one line, <code>tps0</code>.</li>
+	<li>Settings &gt; General &gt; Monitored Interfaces — one enabled device (<code>tps0</code>).</li>
+	<li>Generate LAN↔WAN traffic (a client browsing the Internet). Events should appear for that client, not only for the NAS itself.</li>
+	<li>If the tap is up but silent: re-check DSM Firewall (GRE vs UDP 37008), the WAN ifname, forward-only copy, and on MikroTik that fasttrack is off and <code>var/log/tzsp.log</code> is growing.</li>
+</ol>
+
+<h4>To disable the traffic copy:</h4>
+<ol>
+	<li>In Settings &gt; General, choose <b>Listen on NAS LAN interfaces</b> and click <b>Apply</b>.</li>
+	<li>Restart this package. Capture returns to <code>ovs_eth0</code> (or the LAN pin). <code>tps0</code> is removed on stop.</li>
+	<li>On OpenWrt: remove <code>/etc/nftables.d/10-tps-mirror.nft</code>, delete the <code>network.tpsmirror</code> UCI section, then reload network and firewall.</li>
+	<li>On MikroTik: <code>/ip firewall mangle remove [find comment~"tps-mirror"]</code>. Re-enable fasttrack if you disabled it.</li>
+</ol>
+</body>
+</html>

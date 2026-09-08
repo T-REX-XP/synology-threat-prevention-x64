@@ -82,18 +82,17 @@ Unsigned DSM 7 packages cannot ship file capabilities (`synopkg` error 319). **`
 
 ## After install
 
-1. **Log out of DSM and back in** so the Start Menu picks up the new app.
-2. Open **Threat Prevention**. On an SA6400, capture is **`ovs_eth0`** (the LAN bridge). `eth0` is the wrong device.
-3. Optional — replace the bundled 2021 rules with current ET Open:
+Open **Threat Prevention** from Package Center (**Open**) or the Start Menu. Log out of DSM only if the tile is missing or the UI looks stale.
 
-```sh
-sudo /var/packages/ThreatPrevention/scripts/update-rules.sh
-sudo synopkg restart ThreatPrevention
-```
+Everything else is in the app:
 
-Feed URLs live in `target/etc/rule-sources.json`. Override with `/var/packages/ThreatPrevention/etc/rule-sources.json`.
+| | |
+| --- | --- |
+| **Capture** | Already **`ovs_eth0`** on an SA6400 (the LAN bridge). `eth0` is an OVS slave and is not offered. Change the NIC under Settings → General if you need to. |
+| **Current rules** | Settings → **Update** → **Update Now** (ET Open by default). Extra sources: Settings → **Rule Feeds**. First download can take several minutes; the engine reloads when it finishes. |
+| **setcap** | `install.sh` already ran it. If Overview shows the capabilities banner, run that command once as admin — unsigned packages cannot apply file caps from the app. |
 
-Upgrade, `setcap` by hand, and troubleshooting: [docs/spk-deploy-and-update.md](docs/spk-deploy-and-update.md).
+Manual SPK install, upgrade, and troubleshooting: [docs/spk-deploy-and-update.md](docs/spk-deploy-and-update.md).
 
 ---
 
@@ -219,7 +218,7 @@ Index: [docs/README.md](docs/README.md).
 | [Compatibility layer](docs/backend-replaceability.md) | Why tpsweb exists |
 | [Shim review](docs/ootb-ui-compat-review.md) | What the bridge patches |
 
-On an installed NAS: DSM Help → **This NAS (Suricata IDS)**.
+On an installed NAS: DSM Help → **This NAS (Suricata IDS)** and **Router traffic copy**.
 
 ---
 

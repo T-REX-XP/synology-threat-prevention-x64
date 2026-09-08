@@ -34,7 +34,7 @@ Start Menu click
 | **Legacy ExtJS** (DSM 5–7 desktop, SRM apps) | Undocumented. Host: Ext 3.4 + `SYNO.SDS.*` | Official TPS UI |
 | **Current Vue** | `v-app-instance` / `v-app-window`, webpack, `config.define` | Not used |
 
-A third option, also official, is `type: url` in `ui/config` (iframe / 3rdparty HTML). Early community builds used that; **8.0.6-0018+** does not. A second `type: app` next to `SYNO.SDS.TPS.Application` fights the Start Menu.
+A third option, also official, is `type: url` in `ui/config` (iframe / 3rdparty HTML). Early community builds used that; this SPK does not. A second `type: app` next to `SYNO.SDS.TPS.Application` fights the Start Menu.
 
 On this NAS both stacks exist: Ext 3.4 + SDS bundles **and** `/usr/syno/synoman/scripts/vue` + `syno-vue-components`. `extjs-patch.bundle.js` even defines `SYNO.SDS.VuePanel` so a Vue page can sit inside an Ext window. **This SPK stays Ext-only.** Mixing Vue `v-app-window` and Ext `PageListAppWindow` in one `ui/config` is unsupported.
 
@@ -274,7 +274,7 @@ Injection points in [`bridge/`](../spk/src/threatprevention/package/ui/bridge/) 
 | Chart stubs | Own JSLoad module `tps-chart.js` |
 | Extra Settings | Runtime `TabPanel.add` + Notification `fillConfig` after official class exists |
 | Extra widgets | Same `syno_*` xtypes as official forms (`syno_checkbox`, `syno_textfield`, `syno_gridpanel`, …) |
-| API host | Mixins → `/webman/tps-api` → tpsweb. Core APIs stay `entry.cgi` |
+| API host | Mixins → `/webman/tps-api` → nginx → tpsweb. Core Notify compounds stay `entry.cgi`. NSM/USB/SystemDB are stubbed in tpsweb (SRM-only or missing on DSM 7). |
 | Leftover community SPA | `postinst` deletes `index.html` / `app.js` / `threatprevention.js` so the tile stays `SYNO.SDS.TPS.Application` |
 
 Packer: [`spk/pack-spk.sh`](../spk/pack-spk.sh). Source `spk/src/threatprevention/package/ui/config` is a leftover webpack app config and is **not** what gets packed.

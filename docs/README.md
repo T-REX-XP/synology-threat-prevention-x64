@@ -2,20 +2,20 @@
 
 Operator and internals for this DSM 7 Threat Prevention PoC. Start with the [root README](../README.md).
 
-Build from a clean clone: **`./build.sh`** (Docker). On a NAS, **`./install.sh`**
-fetches a prebuilt engine from GitHub Releases and does not compile. Official
-Synology UI is downloaded into `build/official/` at pack time and is not in git.
+Build from a clean clone: **`./build.sh`** (Docker) or **`./build.sh --from-release`** (unpack GitHub engine). On a NAS, **`./install.sh`** fetches a prebuilt engine from `/releases/latest/download/` and does not compile. Official Synology UI is downloaded into `build/official/` at pack time and is not in git.
+
+SPK / `INFO` version is the git **branch**, or **tag** when HEAD is detached (`spk/pkg-version.sh`). [`VERSION`](../VERSION) holds `SURICATA_VERSION` only.
 
 ## Operator
 
 | Doc | When to read it |
 | --- | --- |
-| [spk-deploy-and-update.md](spk-deploy-and-update.md) | Install, `setcap`, upgrade, uninstall |
+| [spk-deploy-and-update.md](spk-deploy-and-update.md) | Install, `setcap`, Update Now, upgrade, uninstall |
 | [router-traffic-copy.md](router-traffic-copy.md) | OpenWrt GRE or MikroTik TZSP copy of LAN↔WAN onto NAS `tps0` (IDS) |
 | [hw-acceleration.md](hw-acceleration.md) | Intel Hyperscan default; DPDK / NIC offload not wired |
 | [google-maps.md](google-maps.md) | Overview map / GeoIP (optional) |
 
-On an installed NAS: DSM Help → **This NAS (Suricata IDS)** (`setcap`, capture source, Hyperscan). Router copy scripts live in `target/etc/openwrt/` and `target/etc/mikrotik/`.
+On an installed NAS: DSM Help → **This NAS (Suricata IDS)** (`setcap`, capture source, Hyperscan). Open Threat Prevention from Package Center; Settings → **Update** → **Update Now** for current ET Open. Router copy scripts live in `target/etc/openwrt/` and `target/etc/mikrotik/`.
 
 ## Internals
 
@@ -26,10 +26,10 @@ On an installed NAS: DSM Help → **This NAS (Suricata IDS)** (`setcap`, capture
 | [dsm-extjs-sdk.md](dsm-extjs-sdk.md) | DSM 7 ExtJS load path, Help indexer |
 | [api/SYNO.TPS.contract.md](api/SYNO.TPS.contract.md) | `SYNO.TPS.*` envelopes |
 | [api/official-app-surface.md](api/official-app-surface.md) | What the official app calls |
-| [api/backend-port-backlog.md](api/backend-port-backlog.md) | Remaining API gaps |
+| [api/backend-port-backlog.md](api/backend-port-backlog.md) | Remaining API gaps (P3 out of scope) |
 | [native-app-plan.md](native-app-plan.md) | Pack layout / Start Menu app |
 | [spk-repack-evaluation.md](spk-repack-evaluation.md) | SPK packaging notes |
-| [x64-dsm-migration-plan.md](x64-dsm-migration-plan.md) | aarch64 SRM → x86_64 DSM |
+| [x64-dsm-migration-plan.md](x64-dsm-migration-plan.md) | aarch64 SRM → x86_64 DSM (historical plan + what shipped) |
 
 ## Research (official SRM SPK)
 

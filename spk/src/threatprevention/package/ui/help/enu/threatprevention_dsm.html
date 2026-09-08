@@ -16,7 +16,7 @@
 <div class="section">
 <h4>Note:</h4>
 <ul>
-	<li>This package inspects traffic to or from this NAS (AF_PACKET on the LAN interface, typically <code>ovs_eth0</code>). It is not a network gateway and does not drop packets.</li>
+	<li>This NAS is not the network gateway. Listening on LAN interfaces sees only traffic to or from the NAS unless you enable a router traffic copy. See <b>Router traffic copy</b> in this help set.</li>
 	<li>The Prevention / drop-packet options in Settings are stored but not enforced. Official Settings help still describes SRM IPS; ignore those drop-packet steps on this NAS.</li>
 	<li>Unsigned packages cannot declare file capabilities. After every install or upgrade, an administrator must apply <code>setcap</code> on <code>bin/suricata</code> or capture fails to start.</li>
 	<li>After UI-affecting upgrades, log out of DSM and log in again so the Start Menu reloads the app script.</li>
@@ -33,8 +33,13 @@
 	<li>Confirm <code>getcap …/target/bin/suricata</code> lists those capabilities and that <code>suricata.log</code> contains <code>Engine started</code>.</li>
 </ol>
 
-<h2>Capture</h2>
-<p>In <b>Settings</b> &gt; <b>General</b> &gt; <b>Monitored Interfaces</b>, enable the NAS LAN device (typically the OVS bridge <code>ovs_eth0</code>). Only traffic to or from this NAS is inspected.</p>
+<h2>Capture source</h2>
+<p>In <b>Settings</b> &gt; <b>General</b>:</p>
+<ul>
+	<li><b>Listen on NAS LAN interfaces</b> — Suricata listens on the NAS interfaces (typically the OVS LAN bridge <code>ovs_eth0</code>). Only traffic to or from this NAS is inspected.</li>
+	<li><b>Receive a traffic copy from the router</b> — OpenWrt GRE-copies or MikroTik TZSP-copies LAN↔WAN onto local <code>tps0</code>. Enter the router LAN IPv4 and pick OpenWrt or MikroTik. Allow GRE (protocol 47) or UDP 37008 from that router in DSM Firewall. Apply, then restart this package so the tap is created. Full steps: <b>Router traffic copy</b>.</li>
+</ul>
+<p>Monitored Interfaces should show <b>one</b> enabled capture device. In copy mode that is <code>tps0</code>, not <code>tps0</code> plus LAN 1.</p>
 
 <h2>Hardware acceleration</h2>
 <p>In <b>Settings</b> &gt; <b>General</b> &gt; <b>Hardware acceleration</b>:</p>

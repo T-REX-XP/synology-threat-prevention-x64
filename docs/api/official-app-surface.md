@@ -87,21 +87,21 @@ All admin-only. Versions as in `SYNO.TPS.lib`.
 | `Backup` | `backup` | `downloadWebAPI` → official `.dss` | Settings |
 | `Backup` | `restore` | upload `.dss` | Settings |
 
-## DSM-core APIs (passthrough, not tpsweb)
+## DSM-core APIs
 
-These are **not** `SYNO.TPS.*`. The bridge must send them to `/webapi/entry.cgi`.
+These are **not** `SYNO.TPS.*`. Mail/SMS/Push stay on `/webapi/entry.cgi`. NSM / SystemDB / USB are **stubbed in tpsweb** because those Core APIs are missing or SRM-only on DSM 7.
 
-| API | Method | Why the app calls it |
-| --- | --- | --- |
-| `SYNO.Core.Network` | `get` | LAN context in Sensor compound |
-| `SYNO.Core.Network.NSM.Device` | `get` v4 `connecttype=all` | device names / Mesh; skip `mesh_re` |
-| `SYNO.Core.SystemDB` | `get` | Storage panel `systemdb_shares` (USB volume pick) |
-| `SYNO.Core.ExternalDevice.Storage.USB` | `list` `additional=[all]` | max USB log volume |
-| `SYNO.Core.Notification.Mail.Conf` | `get` | mask Notify tab if mail unset |
-| `SYNO.Core.Notification.SMS.Conf` | `get` | same |
-| `SYNO.Core.Notification.Push.Conf` | `get` | same |
-| `SYNO.Core.Notification.Push.Mail` | `get` | same |
-| `SYNO.Entry.Request` | `request` | wraps the four Notify compounds |
+| API | Method | Where | Why the app calls it |
+| --- | --- | --- | --- |
+| `SYNO.Core.Network` | `get` | `entry.cgi` | LAN context in Sensor compound |
+| `SYNO.Core.Network.NSM.Device` | `get` v4 | tpsweb stub | device names / Mesh; skip `mesh_re` |
+| `SYNO.Core.SystemDB` | `get` | tpsweb stub | Storage panel `systemdb_shares` |
+| `SYNO.Core.ExternalDevice.Storage.USB` | `list` | tpsweb stub | max USB log volume |
+| `SYNO.Core.Notification.Mail.Conf` | `get` | `entry.cgi` | mask Notify tab if mail unset |
+| `SYNO.Core.Notification.SMS.Conf` | `get` | `entry.cgi` | same |
+| `SYNO.Core.Notification.Push.Conf` | `get` | `entry.cgi` | same |
+| `SYNO.Core.Notification.Push.Mail` | `get` | `entry.cgi` | same |
+| `SYNO.Entry.Request` | `request` | `entry.cgi` | wraps the four Notify compounds |
 
 Google Maps (`SYNO.SDS.TPS.Utils.GoogleMapLoader`) is not a WebAPI. Official URL has no `key=` → `NoApiKeys`. Ad blockers turn `mapsjs/gen_204` into `ERR_BLOCKED_BY_CLIENT`. Pins need GeoIP (`location[]`). See [google-maps.md](../google-maps.md).
 
@@ -119,7 +119,7 @@ Official `synoips.js` never calls these. [`bridge/`](../../spk/src/threatprevent
 | --- | --- | --- |
 | `Settings.Map` | `get` | `{key}` from `etc/gmaps.key` (not packed) |
 | `Settings.Map` | `tile` | GET `z,x,y` → OSM PNG via `/webman/tps-api` (DSM CSP `img-src`) |
-| `Settings.Telegram` | `get` | `{enable_telegram,follow_mail,min_interval_telegram,has_token,chat_id,token,bot_token}` — returns stored secrets for the admin form (UI masks them until Show values) |
+| `Settings.Telegram` | `get` | `{enable_telegram,follow_mail,min_interval_telegram,has_token,chat_id,token,bot_token}` — admin form; blank `set` keeps stored secrets |
 | `Settings.Telegram` | `set` | kv + `etc/telegram.conf` (`TOKEN=`/`CHAT=`, `0600`). Secrets via `bot_token` (not `token`, which DSM may overwrite with CSRF). Blank / `********` keep the stored token. |
 | `Settings.Telegram` | `test` | `sendMessage`; `{sent:true}` or error 100/104. Uses `bot_token` or stored conf. |
 | `Settings.Mirror` | `get` | `{enabled,capture_mode,router_kind,encap,router_ip,local_ip,ifname,tzsp_port,tap_present}` from `etc/mirror.conf` |
@@ -128,3 +128,4 @@ Official `synoips.js` never calls these. [`bridge/`](../../spk/src/threatprevent
 | `Settings.Accel` | `set` | `hyperscan` bool (default on); DPDK / NIC offload ignored (always false); writes yaml `detect.mpm-algo` and restarts Suricata |
 | `Settings.Feed` | `list` | `{feeds:[{id,name,url,enabled}]}`. Seeds OISF-index community sources **disabled**. |
 | `Settings.Feed` | `add`/`update`/`delete` | HTTPS (or RFC1918 HTTP); name `[A-Za-z0-9._-]+`, not `et-*`; writes `etc/feeds.json`. Toggle enable, then Update Now. |
+| `Compound` | `request` | Server-side Settings Apply: Accel → Mirror → Sensor → Schedule → Source. Result rows stay in request order. |

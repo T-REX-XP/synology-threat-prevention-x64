@@ -16,7 +16,7 @@ Default map center in `SYNO.SDS.TPS.Statistic.MapPanel` is Taipei (`25.050744`, 
 
 This is **not** a `SYNO.TPS.*` WebAPI. The console noise happens even on Overview.
 
-Map severity chips (`getSeverityIcons`) are HTML in a `syno_displayfield`. DSM 7 encodes them; `onSeverityAfterrender` then does `getElementById(…).onclick = …` on null and the spans show as raw markup. The inlined bridge turns off `htmlEncode` for official `syno-sds-ips-event-*` fragments (0027+).
+Map severity chips (`getSeverityIcons`) are HTML in a `syno_displayfield`. DSM 7 encodes them; `onSeverityAfterrender` then does `getElementById(…).onclick = …` on null and the spans show as raw markup. The inlined bridge turns off `htmlEncode` for official `syno-sds-ips-event-*` fragments.
 
 ## Console messages (ignore vs real)
 
@@ -24,10 +24,10 @@ Map severity chips (`getSeverityIcons`) are HTML in a `syno_displayfield`. DSM 7
 | --- | --- |
 | `Google Maps JavaScript API warning: NoApiKeys` | Official URL has no key. Expected. Map tiles stay blank or watermarked. |
 | `GET …/mapsjs/gen_204?csp_test=true net::ERR_BLOCKED_BY_CLIENT` | Browser extension (uBlock, privacy/ad block) dropped Google’s telemetry/CSP probe. Not a DSM or tpsweb failure. |
-| `d.first is not a function` in `gmapWarningHidden` | Official code treats MutationObserver records as Ext (`.first()`). DSM is native. Bridge replaces that helper from **0032**. |
+| `d.first is not a function` in `gmapWarningHidden` | Official code treats MutationObserver records as Ext (`.first()`). DSM is native. The bridge replaces that helper. |
 | `img-src` CSP blocks `tile.openstreetmap.org` | Official map type is OSM tiles. DSM’s CSP has no OSM host. Tiles stay blank; not tpsweb. |
 | `loaded directly without loading=async` | Google’s loader hint. Harmless. |
-| Empty map / no event pins | `Event.Map.list` `location[]` is empty until GeoIP (backlog T21). A key only buys tiles. Pins need a `GeoIP.dat` and **public** `ip_src` (LAN stays empty). Drop the file at `/var/packages/ThreatPrevention/etc/geoip/GeoIP.dat` or use DSM `/usr/share/GeoIP/GeoIP.dat`. |
+| Empty map / no event pins | `Event.Map.list` `location[]` is empty until GeoIP. A key only buys tiles. Pins need a `GeoIP.dat` and **public** `ip_src` (LAN stays empty). Drop the file at `/var/packages/ThreatPrevention/etc/geoip/GeoIP.dat` or use DSM `/usr/share/GeoIP/GeoIP.dat`. |
 
 `ERR_BLOCKED_BY_CLIENT` is the **browser**, not nginx or CSP. Allow `maps.googleapis.com` on the DSM host, or use a private window without blockers.
 
@@ -43,10 +43,10 @@ Google does not publish an unrestricted demo key. Do not paste a leaked or third
    - API restriction: Maps JavaScript API only.
 3. The Cloud project needs billing. There is a monthly free credit; it is not unlimited.
 
-The official JS still has no place to enter the key. From **0030** the bridge rewrites `GoogleMapLoader.GMAP_API_URL` when `/var/packages/ThreatPrevention/etc/gmaps.key` exists (one line, no spaces). The key stays **off git** and is **not** packed in the SPK. Reload the Threat Prevention window after dropping the file.
+The official JS still has no place to enter the key. The bridge rewrites `GoogleMapLoader.GMAP_API_URL` when `/var/packages/ThreatPrevention/etc/gmaps.key` exists (one line, no spaces). The key stays **off git** and is **not** packed in the SPK. Reload the Threat Prevention window after dropping the file.
 
 ## Related
 
-- Pins / country pies: [backend-port-backlog.md](api/backend-port-backlog.md) T20–T21. From 0028, `location[]` and `country_src` fill when a GeoIP Country `.dat` is present and `ip_src` is public.
+- Pins / country pies: [backend-port-backlog.md](api/backend-port-backlog.md) T20–T21. `location[]` and `country_src` fill when a GeoIP Country `.dat` is present and `ip_src` is public.
 - Official contract: [official-app-surface.md](api/official-app-surface.md).
 - Deploy console table: [spk-deploy-and-update.md](spk-deploy-and-update.md).

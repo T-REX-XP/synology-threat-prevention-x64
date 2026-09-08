@@ -201,7 +201,7 @@ install_spk() {
         info "getcap: $(as_root /usr/bin/getcap "$bin" 2>/dev/null || true)"
     fi
 
-    info "Log out of DSM and back in so the Start Menu loads synoips.js?v=$(pkg_ver)"
+    info "Open Threat Prevention from Package Center. Log out of DSM only if the Start Menu tile is missing (synoips.js?v=$(pkg_ver))."
 }
 
 main() {

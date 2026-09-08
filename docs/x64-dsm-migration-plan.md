@@ -10,6 +10,18 @@ The Cypress SPK cannot be retargeted. All 17 ELF objects are stripped aarch64; t
 
 A new package around **stock Suricata 8.0.6** is the viable path. Inline IPS only if the NAS forwards traffic; otherwise IDS on selected NICs.
 
+## What shipped (this tree)
+
+The plan below is the 2026-09-07 research note. The package that exists today:
+
+- Unsigned DSM 7 SPK (codecs-style tar, not pkgscripts-ng). SPK version = git branch or tag.
+- Official ExtJS window + `tpsweb` compatibility layer — **not** a native Vue SPA. See [native-app-plan.md](native-app-plan.md).
+- AF_PACKET IDS only. NFQUEUE is compiled into the engine binary but not wired.
+- glibc: vendor Ubuntu libs; RUNPATH `/var/lib/tps` under `setcap` (not `$ORIGIN`).
+- Rules: Settings → Update → Update Now (`suricata-update` / ET Open). Bundled 2021 tarball is bootstrap only.
+
+Operator path: [spk-deploy-and-update.md](spk-deploy-and-update.md).
+
 ## Engine choice
 
 | Item | Decision |
@@ -33,11 +45,15 @@ Build tree: `build/suricata-8/` (Docker `linux/amd64`). Install prefix: `/opt/tp
 
 ## DSM packaging (after the linux/amd64 binary exists)
 
+Original plan (not how this tree packs):
+
 1. Wrap `/opt/tps-suricata` in pkgscripts-ng for `x86_64` (or per-CPU arches).
 2. systemd `suricata.service`; eve socket under `/volume1/@appdata/ThreatPrevention`.
 3. Default IDS; IPS only when `ip_forward=1`.
 4. SQLite (or NAS pgsql) for events; Python 3 rotation.
-5. New DSM 7 WebAPI + UI — shipped in 8.0.6-0009 as `tpsweb` + native SPA. See [native-app-plan.md](native-app-plan.md) and [api/SYNO.TPS.contract.md](api/SYNO.TPS.contract.md).
+5. New DSM 7 WebAPI + UI.
+
+What actually shipped: codecs-style unsigned SPK (`spk/pack-spk.sh`), `start-stop-status` (not systemd), SQLite + eve ingest, `tpsweb` + official ExtJS bridge. See [What shipped](#what-shipped-this-tree).
 
 ## This repo’s first build
 
@@ -60,6 +76,6 @@ cd build/suricata-8
 
 Capture: NFQueue **yes**, AF_PACKET **yes**. GCC march native **no**. Hyperscan **yes** (package default `mpm-algo: hs`).
 
-**glibc caveat:** this binary was built on Ubuntu 24.04 (glibc 2.39). DSM 7 NAS images typically have an older glibc. Before installing on a NAS, rebuild with Synology `pkgscripts-ng` or an older distro matching the NAS libc (often Ubuntu 20.04 / Debian 11). Confirm with `ldd` on the target.
+**glibc:** Ubuntu 24.04 build vs DSM 2.36 is handled by vendoring libs in the SPK, not by rebuilding with pkgscripts-ng. Confirm `ldd` on the NAS only if you are debugging a missing `.so`. Under `setcap`, RUNPATH must be `/var/lib/tps` → `target/lib`.
 
 Runtime `.so` list is in `build/suricata-8/out/tps-suricata/ldd.txt` (`libnetfilter_queue`, `libhs`, `libpcap`, `libpcre2`, `libyaml`, `libjansson`, …).

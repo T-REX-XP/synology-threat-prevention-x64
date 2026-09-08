@@ -46,11 +46,11 @@ Shipped files:
 
 If Hyperscan is missing from the binary, the engine falls back to `ac` / `bmh` so it still starts.
 
-To turn it off: uncheck the box, Apply. Matching uses Aho-Corasick / Boyer-Moore.
+To turn it off: Settings → General → **Hardware acceleration** → portable `ac`/`bmh`, Apply. Matching uses Aho-Corasick / Boyer-Moore.
 
 ## Intel DPDK (not wired)
 
-Userspace packet I/O that bypasses the Linux kernel (Intel X710, E810, …). Suricata can use DPDK, but this package does **not**: DSM OVS, unsigned-package privileges, hugepages, and VFIO are out of scope. Capture remains AF_PACKET. The Settings checkbox stays disabled.
+Userspace packet I/O that bypasses the Linux kernel (Intel X710, E810, …). Suricata can use DPDK, but this package does **not**: DSM OVS, unsigned-package privileges, hugepages, and VFIO are out of scope. Capture remains AF_PACKET. Settings lists DPDK as a note, not a control.
 
 ## NIC hardware flow offload (not wired)
 

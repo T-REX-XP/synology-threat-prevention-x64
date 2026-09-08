@@ -30,7 +30,7 @@ INFO tricks that matter for DSM 7:
 | --- | --- | --- |
 | `os_min_ver=7.0-40000` | DSM 7, not SRM `firmware=5.2` | Package Center / synopkg accept it |
 | `arch=x86_64` | one SPK for all Intel/AMD | Cypress used `arch=cypress` (router SoC) |
-| `version=99.0.0-9999` | newer than official | TPS has no DSM official; we use `8.0.6-0001` (engine version) |
+| `version` | git branch or tag (`spk/pkg-version.sh`); override `TPS_PKG_VERSION` | Codecs used `99.0.0-9999` to beat an official package. This tree has no DSM official. |
 | `silent_install/upgrade=yes` | no wizard | original TPS had wizards; skip for v1 |
 | `maintainer=community` | unsigned | do not claim Synology Inc. |
 | `conf/privilege` `run-as: package` | install without code signing | DSM 7 blocks unsigned root packages |
@@ -42,21 +42,21 @@ Codecs also decrypts official SPKs and patches `libsynoame-license.so`. **That p
 | Keep | Drop |
 | --- | --- |
 | ET Open tarball, `signature.conf`, classification, thresholds, custom pass SID 1 | `bin/synosuricata`, `libsynotps`, `synotpsd`, all `SYNO.TPS.*.so` (aarch64) |
-| Package icons; official UI for **research PoC only** (8.0.6-0011) | aarch64 `SYNO.TPS.*.so`, `synosuricata`, `libsynotps` |
+| Package icons; official UI for **research PoC only** (downloaded at pack time) | aarch64 `SYNO.TPS.*.so`, `synosuricata`, `libsynotps` |
 | Policy semantics | Upstart, USB swap, `core_pattern`, ECM/NSS AppArmor |
 | | `support_topology=router bridge`, `start_dep_services=pgsql` |
 
 ## What this first SPK is (and is not)
 
-**Start Menu / official app:** 8.0.6-0011 packs official ExtJS + a Suricata compatibility layer. Complexity write-up: [backend-replaceability.md](backend-replaceability.md).
+**Start Menu / official app:** packs official ExtJS + a Suricata compatibility layer. Complexity write-up: [backend-replaceability.md](backend-replaceability.md).
 
-**Operator steps** (setcap after every install/upgrade, DSM logout for the tile, `update-rules.sh`): [spk-deploy-and-update.md](spk-deploy-and-update.md).
+**Operator steps** (`install.sh` does `setcap`; Settings → Update → Update Now for rules; log out only if the Start Menu tile is missing): [spk-deploy-and-update.md](spk-deploy-and-update.md).
 
 **Is not:** a shippable product, PostgreSQL/`synotpsd` parity, or NFQUEUE IPS. Default start is **AF_PACKET IDS**. Official UI in the PoC SPK is research-only.
 
-**glibc / libs (fixed in 8.0.6-0005):** Ubuntu 24.04 binary needs GLIBC 2.38/2.39; DSM 7.4 SA6400 has glibc 2.36 and no liblz4. The packer vendors Ubuntu libs plus `ld-linux` and sets an absolute rpath under `/var/packages/ThreatPrevention/target/lib`.
+**glibc / libs:** Ubuntu 24.04 binary needs GLIBC 2.38/2.39; DSM 7.4 SA6400 has glibc 2.36 and no liblz4. The packer vendors Ubuntu libs plus `ld-linux`. File caps put ld.so in secure mode, which ignores `$ORIGIN`, so pack rewrites RUNPATH to `/var/lib/tps` and `start-stop-status`/`postinst` symlink that to `target/lib`.
 
-**AF_PACKET:** unsigned DSM 7 packages cannot declare `run-as: root` or file capabilities in `conf/privilege` (error 319). After install, apply once as admin:
+**AF_PACKET:** unsigned DSM 7 packages cannot declare `run-as: root` or file capabilities in `conf/privilege` (error 319). `install.sh` applies caps. After a hand install, as admin:
 
 ```sh
 sudo setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep /var/packages/ThreatPrevention/target/bin/suricata
@@ -69,12 +69,13 @@ Default capture iface on SA6400 is `ovs_eth0` (eth0 is an OVS slave).
 
 ```sh
 ./build.sh
+# or, no Docker: ./build.sh --from-release
 ```
 
 That downloads the public `ThreatPrevention-cypress-1.3.3-0926.spk`, extracts
-UI / icons / bootstrap rules into `build/official/` (gitignored), builds
-Suricata 8, and writes `artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk`
-(unsigned POSIX tar; ~18 MiB with vendored libs). `spk/pack-spk.sh` is the
+UI / icons / bootstrap rules into `build/official/` (gitignored), builds or
+unpacks Suricata 8, and writes `artifact/ThreatPrevention-x86_64-<PKG_VERSION>.spk`
+(unsigned POSIX tar / ustar on macOS; vendored libs). `spk/pack-spk.sh` is the
 assembler only. CI publishes the engine tarball; NAS hosts use `./install.sh`.
 
 Unlike codecs, this tree does **not** decrypt SPKs or patch license

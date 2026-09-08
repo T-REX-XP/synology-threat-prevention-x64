@@ -21,9 +21,10 @@ Shipped with the package:
 
 | Where | What |
 | --- | --- |
-| [This file](router-traffic-copy.md) | Full operator reference (diagram, firewall, OpenWrt, MikroTik) |
+| DSM Help → **Router traffic copy** | Operator steps inside Help Center / the app **?** button |
 | `/var/packages/ThreatPrevention/target/etc/openwrt/` | `apply-tps-mirror.sh` and nft/UCI snippets |
 | `/var/packages/ThreatPrevention/target/etc/mikrotik/` | `apply-tps-mirror.rsc` |
+| [This file](router-traffic-copy.md) | Full operator reference |
 
 Example addresses below: router `192.168.1.1`, NAS `192.168.1.130`. Substitute yours. Do this only on a trusted LAN; do not allow GRE or TZSP from the WAN.
 

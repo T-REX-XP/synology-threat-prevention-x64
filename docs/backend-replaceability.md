@@ -17,14 +17,14 @@ To make the official app fully replaceable you still need:
 | Layer | Official | Vanilla Suricata 8 | PoC replacement |
 | --- | --- | --- | --- |
 | Desktop | ExtJS `synoips.js` + `ui/config` `type: app` | none | pack official UI + inlined `ui/bridge/*.js` ([dsm-extjs-sdk.md](dsm-extjs-sdk.md)) |
-| WebAPI transport | DSM `sendWebAPI` → `entry.cgi` → `.so` | none | bridge to `tpsweb :19557` |
+| WebAPI transport | DSM `sendWebAPI` → `entry.cgi` → `.so` | none | bridge → same-origin `/webman/tps-api` (nginx → tpsweb) |
 | 21 `SYNO.TPS.*` contracts | 8 aarch64 CGI modules + `libsynotps` | none | Python `tpsweb` + `compat.py` |
 | Event store | PostgreSQL `synotps` (Barnyard2 schema) | `eve.json` only | SQLite + `ingest.py` |
 | Policy compiler | `synotpsd` / `synotpstool` + `signature.conf` | rule files on disk | `compiler.py` → `var/rules/suricata.rules` |
 | Engine | `synosuricata` 6.0.4 NFQUEUE IPS | Suricata 8 AF_PACKET IDS | vendored linux/amd64 Suricata 8 |
 | Device / NSM | `SYNO.Core.Network.NSM.Device` + MAC table | none | ARP scrape; NSM join still missing |
-| Map / GeoIP | Event.Map + Google Maps loader (no API key) | none | empty stub; see [google-maps.md](google-maps.md) |
-| Notify / export | DSM mail + File Station export folder | none | persist flags only |
+| Map / GeoIP | Event.Map + Google Maps loader (no API key) | none | GeoIP Country `.dat` when present; optional `etc/gmaps.key` — [google-maps.md](google-maps.md) |
+| Notify / export | DSM mail + File Station export folder | none | persist filters; `synodsmnotify` if present; Telegram via `etc/telegram.conf`; export dir for File Station |
 | Inline block | NFQUEUE + `syno-bridge-nf-*` + USB swap | AF_PACKET IDS | **not replaced** |
 
 **Complexity class:** a compatibility layer is a few thousand lines and can light up Overview / Events / Policy / Statistics / Settings **read/write against eve + SQLite**. A **full** replacement of the Synology implementation (IPS, PostgreSQL, synotpsd, NSM, GeoIP, notifications, export, rule-DB build states) is a **product-sized backend**, not a Suricata config tweak.
@@ -116,7 +116,7 @@ Ruleset grid and concerned-devices use `SYNO.API.Store` (entry.cgi + `SYNO.API.I
 
 Backup uses `downloadWebAPI` (file download), not JSON in the Ext callback.
 
-HTTPS DSM → HTTP `:19557` is mixed content. PoC expects DSM on **HTTP :5000**.
+HTTPS DSM uses same-origin `/webman/tps-api`. The browser must not call `http://host:19557` (mixed content). tpsweb still listens on loopback `:19557` and a unix socket for nginx.
 
 ---
 
@@ -145,16 +145,17 @@ Score: **S** = Suricata-native (yaml / eve / suricatasc / suricata-update). **M*
 
 ---
 
-## 5. What this PoC implements (8.0.6-0024)
+## 5. What this PoC implements
 
-Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS). Official UI sources are packed as-is; they are not cloned or rebuilt.
+Compatibility layer on **vanilla Suricata 8** (AF_PACKET IDS; engine version in [`VERSION`](../VERSION)). Official UI is downloaded at pack time; it is not cloned or rebuilt. SPK version is the git branch or tag ([`spk/pkg-version.sh`](../spk/pkg-version.sh)).
 
-1. **Pack official UI** from `unpacked/package/ui/` (`synoips.js`, texts, help, icons).
-2. **`ui/bridge/*.js`** inlined into `synoips.js` at pack time (`transport.js`, `dsm7.js`, `settings-inject.js`) — `sendWebAPI`, `downloadWebAPI`, `pollReg`, `SYNO.API.Request`, `SYNO.API.Store`, `Ext.Ajax` → tpsweb.
-3. **`compat.py` + `tpsweb`** — official envelopes: Event `task_id` / `list_status`, Sensor state names + live ifaces, Signature `signatures` / Policy `list`, Statistic buckets, Source `use_code`, Storage `db_size_*` + clear `task_id`.
+1. **Pack official UI** from `build/official/` (`synoips.js`, texts, help, icons).
+2. **`ui/bridge/*.js`** prepended into `synoips.js` at pack time (`transport.js`, `dsm7.js`, `settings-inject.js`) — hosted `SYNO.TPS.*` via `/webman/tps-api`. Core compounds stay on `entry.cgi`. `.Polling` is copied if Request is wrapped.
+3. **`api_routes.py` + `compat.py` + `tpsweb`** — official envelopes: Event `task_id` / `list_status`, Sensor state names + live ifaces (OVS twins collapsed), Signature `signatures` / Policy `list`, Statistic buckets, Source `use_code`, Storage `db_size_*` + clear `task_id`. Community APIs: Telegram, Mirror, Accel, Feed, Compound.
 4. **`ingest.py`** — tail `eve.json` into SQLite (payload hex, L3/L4 headers, device `loading_score`).
 5. **`compiler.py`** — `signature.conf` + `policy_*` → `var/rules/suricata.rules` + reload.
 6. **`SYNO.TPS.lib`** copied for Info listing. **No** aarch64 `.so`.
+7. **Settings → Update → Update Now** runs `update-rules.sh` (ET Open/Pro + optional Rule Feeds), then import/compile/reload.
 
 `INFO.dsmappname=SYNO.SDS.TPS.Application`.
 
@@ -162,13 +163,11 @@ Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS). Official UI s
 
 - **Inline IPS / drop / per-device bypass** — needs NFQUEUE (or equivalent) and a gateway topology. This NAS is IDS-only.
 - **`build_signature_database` / `migrate_event` / PostgreSQL** — we skip those states; engine is `engine_start` or empty.
-- **Botnet / country / map** — empty arrays.
-- **NSM device names** — `SYNO.Core.Network.NSM.Device` still goes to DSM; we only scrape ARP.
-- **Notifications** — stored, not sent.
-- **Export folder / File Station**.
-- **Official `.dss` backup**.
-- **Unsigned package cannot `setcap` or `run-as: root`** — admin must still `setcap` after every install (error 319 otherwise).
-- **Mixed content** on HTTPS DSM.
+- **Botnet / country / map** — `country_src` / `location[]` fill when a GeoIP Country `.dat` is present and `ip_src` is public. LAN-only events stay empty. Maps tiles need an optional `etc/gmaps.key`.
+- **NSM device names** — `SYNO.Core.Network.NSM.Device` is stubbed (ARP scrape). Real SRM NSM is not on DSM 7.
+- **Notifications** — stored; `synodsmnotify` / Telegram when configured. DSM mail/SMS/push transport is Control Panel’s.
+- **Official `.dss` backup** — JSON backup only.
+- **Unsigned package cannot `setcap` or `run-as: root`** — `install.sh` applies caps; a hand-installed SPK needs admin `setcap` (error 319 otherwise).
 
 ---
 
@@ -195,11 +194,12 @@ Compatibility layer on **vanilla Suricata 8.0.6** (AF_PACKET IDS). Official UI s
 | `unpacked/package/webapi/SYNO.TPS.lib` | official method table |
 | `spk/src/threatprevention/package/ui/bridge/` | research hook (`transport.js`, `dsm7.js`, `settings-inject.js`) |
 | `spk/src/threatprevention/python/compat.py` | official envelopes |
+| `spk/src/threatprevention/python/api_routes.py` | `SYNO.TPS.*` dispatch |
 | `spk/src/threatprevention/python/tpsweb.py` | HTTP + unix API |
 | `docs/api/official-app-surface.md` | official JS + `.lib` inventory |
-| `docs/api/backend-port-backlog.md` | P0–P3 port list |
+| `docs/api/backend-port-backlog.md` | remaining gaps vs P3 out of scope |
 | `docs/api/SYNO.TPS.contract.md` | simplified community contract |
-| `docs/spk-deploy-and-update.md` | setcap / HTTP DSM / logout |
-| `docs/ootb-ui-compat-review.md` | hacks, poor implementations, how to improve the shim |
+| `docs/spk-deploy-and-update.md` | install, `setcap`, Update Now, troubleshooting |
+| `docs/ootb-ui-compat-review.md` | hacks, landed vs remaining shim debt |
 
 Do not publish `synoips.js` or the official texts/help as a community contribution.
