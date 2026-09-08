@@ -35,7 +35,8 @@ SPK (official UI is downloaded here, not from GitHub), install, setcap.
   bash -c "\$(curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh)"
 
   --repo owner/name       GitHub repo (default: ${DEFAULT_REPO})
-  --tag TAG               Source + engine release tag (default: latest / ${DEFAULT_BRANCH})
+  --tag TAG               Engine GitHub Release (default: latest). Installer
+                          sources always come from ${DEFAULT_BRANCH}.
   --engine-tar PATH       Use a local engine tarball
   --official-spk PATH     Use a local official Threat Prevention .spk
   --skip-install          Pack only (do not synopkg)
@@ -101,14 +102,15 @@ bootstrap_sources() {
     local repo="${GITHUB_REPO_ARG:-$DEFAULT_REPO}"
     local work url
     work="$(mktemp -d "${TMPDIR:-/tmp}/tps-install.XXXXXX")"
-    if [ "$RELEASE_TAG" != "latest" ]; then
-        url="https://github.com/${repo}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
-        info "Downloading ${repo} @ ${RELEASE_TAG}"
-    else
-        url="https://github.com/${repo}/archive/refs/heads/${DEFAULT_BRANCH}.tar.gz"
-        info "Downloading ${repo} @ ${DEFAULT_BRANCH}"
-    fi
+    # Always fetch installer sources from the branch this script lives on.
+    # --tag only pins the engine Release asset; pinning sources to an old tag
+    # would re-exec a broken unpacker (BusyBox tar -C) forever.
+    url="https://github.com/${repo}/archive/refs/heads/${DEFAULT_BRANCH}.tar.gz"
+    info "Downloading ${repo} @ ${DEFAULT_BRANCH}"
     info "  ${url}"
+    mkdir -p "$work"
+    # Pipe to tar with -C before the archive (stdin). Do not use tar -xzf FILE -C
+    # DEST: DSM BusyBox ignores -C after -f.
     curl -fsSL --retry 3 "$url" | tar -xz -C "$work" --strip-components=1
     [ -f "$work/install.sh" ] && [ -f "$work/VERSION" ] || die "GitHub archive is missing install.sh / VERSION"
     export TPS_GITHUB_REPO="$repo"

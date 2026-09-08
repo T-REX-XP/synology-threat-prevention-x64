@@ -1,8 +1,14 @@
 # Threat Prevention (DSM 7 PoC)
 
+[![Tests](https://img.shields.io/github/actions/workflow/status/T-REX-XP/synology-threat-prevention-x64/ci.yml?branch=main&label=tests)](https://github.com/T-REX-XP/synology-threat-prevention-x64/actions/workflows/ci.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/T-REX-XP/synology-threat-prevention-x64/release.yml?label=build)](https://github.com/T-REX-XP/synology-threat-prevention-x64/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/T-REX-XP/synology-threat-prevention-x64?label=release)](https://github.com/T-REX-XP/synology-threat-prevention-x64/releases/latest)
+
 Community **DSM 7 x86_64** package that runs **vanilla Suricata 8.0.6** on a Synology NAS and drives the official Threat Prevention ExtJS app through a compatibility backend.
 
 This is a **research proof of concept**, not a product and not a Synology contribution. It is **IDS only** (AF_PACKET). It does not drop packets (no NFQUEUE / IPS).
+
+**Disclaimer:** this has **not** been tested on a vanilla Synology NAS (stock DiskStation / typical DSM appliance). Runtime work was on an **SA6400** with Open vSwitch (`ovs_eth0`). Capture, NICs, and Package Center behavior will differ on other models.
 
 Current versions are in [`VERSION`](VERSION): **PKG_VERSION** is this SPK; **SURICATA_VERSION** is the upstream engine. They are independent.
 
@@ -34,10 +40,10 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat
 
 That downloads this repo, the prebuilt Suricata engine from GitHub Releases, the official SRM UI SPK, packs the community package, then `synopkg install` + `setcap`. Log out of DSM and back in afterwards.
 
-Pinned release:
+Pinned **engine** (installer always comes from `main`; `--tag` is the GitHub Release that holds `suricata-*-linux-amd64.tar.gz`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | bash -s -- --tag v0.1.0
+curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | bash -s -- --tag v0.2.0
 ```
 
 ## Features added vs the official app

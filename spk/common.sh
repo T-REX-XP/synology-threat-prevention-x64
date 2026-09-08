@@ -58,7 +58,31 @@ detect_github_repo() {
 }
 
 engine_ready() {
-    [ -x "${ENGINE_OUT}/tps-suricata/bin/suricata" ]
+    # -f not -x: DSM often mounts /tmp noexec, so test -x is false on a 0755 ELF.
+    [ -f "${ENGINE_OUT}/tps-suricata/bin/suricata" ]
+}
+
+# Extract archive into dest by cd'ing there. DSM BusyBox tar ignores -C when it
+# follows -f, so `tar -xzf file -C dest` silently unpacks into $PWD instead.
+extract_tar_into() {
+    local archive="$1"
+    local dest="$2"
+    [ -f "$archive" ] || die "Archive not found: ${archive}"
+    mkdir -p "$dest"
+    local abs
+    abs="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
+    (
+        cd "$dest" || exit 1
+        case "$archive" in
+            *.gz|*.tgz)
+                tar xzf "$abs" 2>/dev/null && exit 0
+                gzip -dc "$abs" | tar xf -
+                ;;
+            *)
+                tar xf "$abs"
+                ;;
+        esac
+    ) || die "Failed to extract ${archive} into ${dest}"
 }
 
 official_complete() {
@@ -172,9 +196,9 @@ extract_official() {
     export COPYFILE_DISABLE=1
     export COPY_EXTENDED_ATTRIBUTES_DISABLE=1
 
-    tar xf "$spk" -C "$tmp/spk"
+    extract_tar_into "$spk" "$tmp/spk"
     [ -f "$tmp/spk/package.tgz" ] || die "package.tgz missing inside official SPK"
-    tar xf "$tmp/spk/package.tgz" -C "$tmp/pkg"
+    extract_tar_into "$tmp/spk/package.tgz" "$tmp/pkg"
 
     rm -rf "$OFFICIAL_DIR"
     mkdir -p \
@@ -210,8 +234,15 @@ unpack_engine_tar() {
     mkdir -p "$ENGINE_OUT"
     rm -rf "${ENGINE_OUT}/tps-suricata"
     info "Unpacking ${tarpath}"
-    tar -xzf "$tarpath" -C "$ENGINE_OUT"
-    engine_ready || die "Engine tarball did not contain tps-suricata/bin/suricata"
+    extract_tar_into "$tarpath" "$ENGINE_OUT"
+    if [ -d "${ENGINE_OUT}/tps-suricata/bin" ]; then
+        chmod +x "${ENGINE_OUT}/tps-suricata/bin/"* 2>/dev/null || true
+    fi
+    if ! engine_ready; then
+        info "Archive top-level (first 30):"
+        tar tzf "$tarpath" 2>/dev/null | head -n 30 >&2 || tar tf "$tarpath" 2>/dev/null | head -n 30 >&2 || true
+        die "Engine tarball did not contain tps-suricata/bin/suricata"
+    fi
 }
 
 github_engine_url() {
