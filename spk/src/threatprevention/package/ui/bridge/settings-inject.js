@@ -1111,22 +1111,42 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			var Modal = (window.SYNO && SYNO.SDS && SYNO.SDS.ModalWindow) || Ext.Window;
 			var panel;
 			var store = new Ext.data.JsonStore({
+				pruneModifiedRecords: true,
 				fields: [
 					{name: "id"}, {name: "name"}, {name: "url"}, {name: "enabled"}
 				]
 			});
-			function reload() {
-				me.call("SYNO.TPS.Settings.Feed", "list", 1, {}, function (ok, data) {
-					var rows = [];
-					Ext.each((ok && data && data.feeds) || [], function (f) {
-						rows.push({
-							id: f.id,
-							name: f.name,
-							url: f.url,
-							enabled: !!f.enabled
-						});
+			function loadRows(feeds, pending) {
+				var rows = [];
+				Ext.each(feeds || [], function (f) {
+					rows.push({
+						id: f.id,
+						name: f.name,
+						url: f.url,
+						enabled: !!f.enabled
 					});
-					store.loadData(rows);
+				});
+				store.loadData(rows);
+				if (pending) {
+					store.each(function (r) {
+						var id = String(r.get("id"));
+						if (pending.hasOwnProperty(id)) {
+							r.set("enabled", pending[id]);
+						}
+					});
+				}
+			}
+			function pendingEnabled() {
+				var pending = {};
+				Ext.each(store.getModifiedRecords() || [], function (r) {
+					pending[String(r.get("id"))] = !!r.get("enabled");
+				});
+				return pending;
+			}
+			function reload(keep) {
+				var pending = keep ? pendingEnabled() : null;
+				me.call("SYNO.TPS.Settings.Feed", "list", 1, {}, function (ok, data) {
+					loadRows((ok && data && data.feeds) || [], pending);
 				});
 			}
 			function selected() {
@@ -1150,6 +1170,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			function openEditor(rec) {
 				var inner = new Form({
 					padding: "12px 20px 0px 12px",
+					useDefaultBtn: false,
 					defaults: {labelWidth: 120},
 					items: [
 						{xtype: "syno_textfield", name: "feed_name", fieldLabel: "Name", width: 320, value: rec ? rec.get("name") : ""},
@@ -1177,7 +1198,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 									return;
 								}
 								if (win.close) { win.close(); } else if (win.hide) { win.hide(); }
-								reload();
+								reload(true);
 							}
 							if (rec) {
 								me.call("SYNO.TPS.Settings.Feed", "update", 1, {id: rec.get("id"), name: name, url: url}, done);
@@ -1197,7 +1218,10 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			if (window.SYNO && SYNO.ux && SYNO.ux.EnableColumn) {
 				enableCol = new SYNO.ux.EnableColumn({
 					header: _T("common", "enabled") || "Enabled",
-					width: 100,
+					width: 56,
+					fixed: true,
+					resizable: false,
+					align: "center",
 					dataIndex: "enabled",
 					menuDisabled: true,
 					sortable: false
@@ -1221,7 +1245,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				{xtype: "syno_button", itemId: "feed_del", text: _T("common", "delete") || "Delete", disabled: true, handler: function () {
 					var rec = selected();
 					if (!rec) { return; }
-					me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: rec.get("id")}, function () { reload(); });
+					me.call("SYNO.TPS.Settings.Feed", "delete", 1, {id: rec.get("id")}, function () { reload(true); });
 				}},
 				"->",
 				{xtype: "syno_textfilter", iconStyle: "filter", store: store, localFilter: true, localFilterField: ["name", "url"]}
@@ -1245,32 +1269,71 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			};
 			if (enableCol) { gridCfg.plugins = [enableCol]; }
 			var grid = new Grid(gridCfg);
-			store.on("update", function (s, rec, op) {
-				if (!rec || rec.get("id") === undefined) { return; }
-				if (op && Ext.data && Ext.data.Record && op !== Ext.data.Record.EDIT) { return; }
-				me.call("SYNO.TPS.Settings.Feed", "update", 1, {
-					id: rec.get("id"),
-					enabled: !!rec.get("enabled")
-				}, function () { rec.commit(); });
-			});
+			function modifiedFeeds() {
+				var feeds = [];
+				Ext.each(store.getModifiedRecords() || [], function (r) {
+					feeds.push({ id: r.get("id"), enabled: !!r.get("enabled") });
+				});
+				return feeds;
+			}
+			var Helper = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.Helper;
 			panel = new Form({
 				title: "Rule Feeds",
 				itemId: "SYNO.SDS.TPS.Settings.FeedPanel",
 				cls: "syno-sds-ips-settings-device-panel",
 				padding: "0px 12px 0px 0px",
 				trackResetOnLoad: true,
-				useDefaultBtn: false,
+				useDefaultBtn: true,
+				helper: Helper,
 				layout: "vbox",
 				layoutConfig: {align: "stretch"},
 				items: [
 					{xtype: "container", layout: "form", autoHeight: true, items: [
-						{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: "Community sources from the OISF index are listed here, <b>off by default</b>. Enable the ones you want (or Add your own HTTPS URL). They apply on top of ET Open/Pro. Run Update Now on General after changes."}
+						{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: "Community sources from the OISF index are listed here, <b>off by default</b>. Enable the ones you want (or Add your own HTTPS URL), then <b>Apply</b>. They apply on top of ET Open/Pro. Run Update Now on General after Apply."}
 					]},
 					grid
 				],
-				listeners: {activate: reload}
+				listeners: {activate: function () { reload(false); }},
+				processParams: function (method, apis) {
+					apis = apis || [];
+					if (method === "set") {
+						apis.push({
+							api: "SYNO.TPS.Settings.Feed",
+							method: "save",
+							version: 1,
+							params: { feeds: modifiedFeeds() }
+						});
+					}
+					apis.push({ api: "SYNO.TPS.Settings.Feed", method: "list", version: 1 });
+					return apis;
+				},
+				processReturnData: function (ok, data) {
+					data = data || {};
+					if (data.has_fail) { return; }
+					var rows = null;
+					Ext.each(data.result || [], function (item) {
+						if (item && item.api === "SYNO.TPS.Settings.Feed" && item.method === "list" && item.data) {
+							rows = item.data.feeds;
+						}
+					});
+					if (!rows && data.feeds) { rows = data.feeds; }
+					if (rows) { loadRows(rows); }
+				}
 			});
-			me.hookFormDirtyGate(panel, {never: true});
+			var form = panel.getForm && panel.getForm();
+			if (form && !form._tpsFeedDirty) {
+				form._tpsFeedDirty = true;
+				var origDirty = form.isDirty;
+				form.isDirty = function () {
+					if ((store.getModifiedRecords() || []).length) { return true; }
+					return origDirty ? origDirty.apply(this, arguments) : false;
+				};
+				var origReset = form.reset;
+				form.reset = function () {
+					store.each(function (r) { r.reject(); });
+					return origReset ? origReset.apply(this, arguments) : this;
+				};
+			}
 			return panel;
 		}
 	};

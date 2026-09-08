@@ -1844,6 +1844,22 @@ def settings_feed(conn, method, p):
         conn.commit()
         write_feeds_json(conn)
         return ok({})
+    if method == "save":
+        items = p.get("feeds") or p.get("feed_list") or []
+        if not isinstance(items, list):
+            return err(100)
+        for item in items:
+            if not isinstance(item, dict):
+                return err(100)
+            try:
+                fid = int(item.get("id") or 0)
+            except (TypeError, ValueError):
+                return err(100)
+            if not update_feed(conn, fid, None, None, _truth(item.get("enabled"))):
+                return err(100)
+        conn.commit()
+        write_feeds_json(conn)
+        return ok({})
     if method == "delete":
         try:
             fid = int(p.get("id") or 0)

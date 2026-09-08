@@ -412,6 +412,14 @@ sh_text = open(os.path.join(HERE, "..", "scripts", "update-rules.sh"), encoding=
 check("emergingthreats.net" not in sh_text and "emergingthreatspro.com" not in sh_text,
       "no hardcoded et url in update-rules.sh")
 check(by_name["local-extra"]["enabled"] is True, "user-added feed stays enabled")
+off = handle("SYNO.TPS.Settings.Feed", "save", {"feeds": [{"id": fid, "enabled": False}]}, conn)
+check(off["success"], "feed save disables")
+by_name = {x["name"]: x for x in handle("SYNO.TPS.Settings.Feed", "list", {}, conn)["data"]["feeds"]}
+check(by_name["local-extra"]["enabled"] is False, "feed save roundtrip off")
+on = handle("SYNO.TPS.Settings.Feed", "save", {"feeds": [{"id": fid, "enabled": True}]}, conn)
+check(on["success"], "feed save enables")
+by_name = {x["name"]: x for x in handle("SYNO.TPS.Settings.Feed", "list", {}, conn)["data"]["feeds"]}
+check(by_name["local-extra"]["enabled"] is True, "feed save roundtrip on")
 nfeeds = len(list_feeds(conn))
 seed_catalog_feeds(conn)
 check(len(list_feeds(conn)) == nfeeds, "catalog seed is idempotent")

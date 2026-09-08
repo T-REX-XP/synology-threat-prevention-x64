@@ -165,7 +165,7 @@ Official TPS never writes `/webapi/entry.cgi` for `SYNO.TPS.*`. It calls host mi
 | `findAppWindow()` | almost every panel | owning `AppWindow` |
 | `getMsgBox()` | progress / error | `Desktop.getMsgBox` or the window |
 
-`webapi:{api,methods:{get,set},version}` on a `FormPanel` makes official Apply issue `get` then dirty `set`. Extra fields we inject on Notification **must not** join that dirty form: strip `enable_telegram` / token fields from `SYNO.TPS.Notification` `set` and call `SYNO.TPS.Settings.Telegram` ourselves. The Rule feeds tab uses `useDefaultBtn: false` so official Apply never sees it.
+`webapi:{api,methods:{get,set},version}` on a `FormPanel` makes official Apply issue `get` then dirty `set`. Extra fields we inject on Notification **must not** join that dirty form: strip `enable_telegram` / token fields from `SYNO.TPS.Notification` `set` and call `SYNO.TPS.Settings.Telegram` ourselves. The Rule feeds tab uses `useDefaultBtn: true` like Devices: enable toggles mark the grid dirty; Apply sends `SYNO.TPS.Settings.Feed.save`.
 
 **Bridge rule:** if you wrap `SYNO.API.Request`, copy `.Polling`. Replacing `Request` with a bare function deletes `Polling.List` and SignatureUpdater crashes. Same for `SYNO.Entry.Request.Polling`.
 
