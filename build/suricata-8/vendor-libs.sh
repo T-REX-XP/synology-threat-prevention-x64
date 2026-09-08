@@ -11,6 +11,11 @@ RPATH_ON_NAS="/var/packages/ThreatPrevention/target/lib"
 
 [ -x "${BIN}" ] || { echo "missing ${BIN}"; exit 1; }
 
+if [ -f "${LIBDIR}/ld-linux-x86-64.so.2" ]; then
+  echo "==> already vendored (${LIBDIR}/ld-linux-x86-64.so.2)"
+  exit 0
+fi
+
 echo "==> Collect runtime libs from ubuntu:24.04 linux/amd64 (cached, --pull never)"
 docker run --rm --pull never --platform linux/amd64 \
   -v "${ENGINE}:/opt/tps-suricata" \
@@ -18,7 +23,7 @@ docker run --rm --pull never --platform linux/amd64 \
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq patchelf \
+apt-get install -y -qq patchelf binutils \
   liblz4-1 libmagic1 libcap-ng0 libnet1 \
   libnetfilter-queue1 libnfnetlink0 libmnl0 \
   libjansson4 libyaml-0-2 libpcre2-8-0 zlib1g \
@@ -84,6 +89,15 @@ echo '=== ldd suricata ==='
 ldd \"\${BIN}\" || true
 echo '=== interpreter ==='
 readelf -l \"\${BIN}\" | grep interpreter || true
+
+strip --strip-unneeded \"\${BIN}\" || true
+for helper in suricatactl suricatasc; do
+  if [ -f \"\${PREFIX}/bin/\${helper}\" ] && file \"\${PREFIX}/bin/\${helper}\" | grep -q ELF; then
+    strip --strip-unneeded \"\${PREFIX}/bin/\${helper}\" || true
+  fi
+done
+echo '=== stripped ==='
+ls -lh \"\${BIN}\" \"\${PREFIX}/bin/suricatactl\" \"\${PREFIX}/bin/suricatasc\" 2>/dev/null || true
 "
 
 echo "==> Max GLIBC needed (should still be 2.39, satisfied by vendored libc)"

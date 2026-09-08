@@ -75,7 +75,7 @@ That downloads the public `ThreatPrevention-cypress-1.3.3-0926.spk`, extracts
 UI / icons / bootstrap rules into `build/official/` (gitignored), builds
 Suricata 8, and writes `artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk`
 (unsigned POSIX tar; ~18 MiB with vendored libs). `spk/pack-spk.sh` is the
-assembler only.
+assembler only. CI publishes the engine tarball; NAS hosts use `./install.sh`.
 
 Unlike codecs, this tree does **not** decrypt SPKs or patch license
 libraries. The aarch64 engine is replaced, not patched.

@@ -1,0 +1,14 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Backend envelope tests
+        run: python3 spk/src/threatprevention/python/test_compat.py

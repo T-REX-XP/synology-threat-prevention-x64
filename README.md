@@ -22,7 +22,7 @@ This repo replaces the engine and backend:
 | Desktop | ExtJS `synoips.js` | Same app, plus an inlined bridge |
 | Privilege | root / IPS | package user + admin `setcap` |
 
-Official ExtJS (`synoips.js`, texts, help) is **Synology copyright**. It is **not** in this Git tree. `./build.sh` downloads the public SRM package at pack time and extracts those files into `build/official/` (gitignored). Do not publish that tree.
+Official ExtJS (`synoips.js`, texts, help) is **Synology copyright**. It is **not** in this Git tree and **not** on GitHub Releases. `./install.sh` (NAS) or `./build.sh` (developer) downloads the public SRM package at pack time into `build/official/` (gitignored). Do not publish that tree.
 
 ## Features added vs the official app
 
@@ -61,11 +61,14 @@ These are community additions on top of the official ExtJS window. They are not 
 ## Repository layout
 
 ```
-build.sh                      Public entry: download official SPK, build engine, pack
+install.sh                    NAS: fetch prebuilt engine, pack SPK, synopkg
+build.sh                      Developer: compile Suricata via Docker, then pack
 spk/src/threatprevention/      Community package (python, bridge, scripts, yaml)
-spk/pack-spk.sh               Assembler (called by build.sh)
-build/suricata-8/             Docker build for Suricata 8 (output is local)
-build/cache/                  Downloaded official .spk (gitignored)
+spk/pack-spk.sh               Assembler
+spk/common.sh                 Shared download / extract helpers
+build/suricata-8/             Docker recipe for Suricata 8
+.github/workflows/           CI tests + engine release artifacts
+build/cache/                  Downloaded official .spk / engine tar (gitignored)
 build/official/               Extracted UI / icons / bootstrap rules (gitignored)
 docs/                         Operator + internals
 artifact/                     Built community .spk (gitignored)
@@ -73,53 +76,47 @@ artifact/                     Built community .spk (gitignored)
 
 `ui/` is an unused experimental SPA. It is not packed.
 
-Official Synology files never live in git. `./build.sh` fetches
-`ThreatPrevention-cypress-1.3.3-0926.spk` from Synology’s public package
-mirrors and copies only what packing needs (ExtJS, icons, ET bootstrap
-tarball, `SYNO.TPS.lib`). aarch64 `synosuricata` and `SYNO.TPS.*.so` are
-discarded.
+Official Synology files never live in git **or in GitHub Releases**. CI publishes
+only `suricata-8.0.6-linux-amd64.tar.gz`. The NAS installer fetches that tarball
+plus the public `ThreatPrevention-cypress-1.3.3-0926.spk` and copies only what
+packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
+`synosuricata` and `SYNO.TPS.*.so` are discarded.
 
 ## Requirements
 
-- DSM **7.0+** Intel/AMD NAS (`arch=x86_64`). Will not run on ARM.
-- Docker (Suricata 8 linux/amd64 + strip)
-- `curl`, `tar`, `python3`
+**NAS install (`./install.sh`)**
+- DSM **7.0+** Intel/AMD (`arch=x86_64`). Will not run on ARM.
+- `curl`, `tar`, `python3` (no Docker)
 - Package Center → Trust Level: allow unsigned packages
+- A GitHub Release that includes `suricata-8.0.6-linux-amd64.tar.gz`
 
-## Build
+**Developer rebuild (`./build.sh`)**
+- Docker (compile Suricata 8 linux/amd64)
+
+## Install on the NAS (no compile)
+
+Tag a release so CI uploads the engine, clone this repo on the NAS, then:
 
 ```sh
-./build.sh
-# artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk
+sudo ./install.sh
+# or: sudo ./install.sh --repo owner/name --tag v8.0.6-0067
 ```
+
+That downloads the prebuilt Suricata tarball, downloads the official SRM UI
+package, packs `artifact/ThreatPrevention-x86_64-*.spk`, runs `synopkg install`,
+and `setcap`. Log out of DSM and back in so the Start Menu loads
+`synoips.js?v=8.0.6-0067`.
 
 | Flag | Meaning |
 | --- | --- |
-| `--skip-engine` | Reuse `build/suricata-8/out` |
-| `--official-spk PATH` | Use a local official `.spk` instead of downloading |
-| `--force` | Re-extract `build/official/` |
-| `--skip-tests` | Skip `python/test_compat.py` |
+| `--skip-install` | Pack only |
+| `--engine-tar PATH` | Use a local engine tarball |
+| `--official-spk PATH` | Use a local official `.spk` |
 
-If the download mirrors are blocked, drop the official SPK at
-`build/cache/ThreatPrevention-cypress-1.3.3-0926.spk` and re-run.
+Default capture interface on SA6400 is **`ovs_eth0`**. `eth0` is the wrong device.
 
-This script does **not** decrypt packages or patch Synology binaries.
-The closed SRM engine is replaced with vanilla Suricata 8.
-
-## Install
-
-```sh
-scp -O artifact/ThreatPrevention-x86_64-8.0.6-0067.spk admin@nas:/tmp/
-ssh admin@nas
-sudo synopkg install /tmp/ThreatPrevention-x86_64-8.0.6-0067.spk
-sudo /usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep \
-  /var/packages/ThreatPrevention/target/bin/suricata
-sudo synopkg restart ThreatPrevention
-```
-
-Unsigned DSM 7 packages cannot declare `run-as: root` or file capabilities (`synopkg` error 319). **`setcap` is required after every install or upgrade.** Then log out of DSM and back in so the Start Menu loads `synoips.js?v=8.0.6-0067`.
-
-Default capture interface on SA6400 is **`ovs_eth0`** (the LAN bridge). `eth0` is the wrong device.
+Unsigned DSM 7 packages cannot declare `run-as: root` or file capabilities
+(`synopkg` error 319). **`setcap` is required after every install or upgrade.**
 
 Optional: pull current ET Open (do not convert the 2021 bundled dump):
 
@@ -131,6 +128,34 @@ sudo synopkg restart ThreatPrevention
 Feed URLs: `target/etc/rule-sources.json`. Override with `/var/packages/ThreatPrevention/etc/rule-sources.json`.
 
 Full operator notes: [docs/spk-deploy-and-update.md](docs/spk-deploy-and-update.md).
+
+## Build from source (developers / CI)
+
+```sh
+./build.sh
+# artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk
+```
+
+CI (`.github/workflows/release.yml`) on tag `v*` builds the engine tarball only:
+
+```
+artifact/suricata-8.0.6-linux-amd64.tar.gz
+artifact/suricata-8.0.6-linux-amd64.tar.gz.sha256
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--from-release` | Unpack engine from GitHub Releases (no Docker) |
+| `--skip-engine` | Reuse `build/suricata-8/out` |
+| `--official-spk PATH` | Use a local official `.spk` instead of downloading |
+| `--force` | Re-extract `build/official/` |
+| `--skip-tests` | Skip `python/test_compat.py` |
+
+If the Synology mirrors are blocked, drop the official SPK at
+`build/cache/ThreatPrevention-cypress-1.3.3-0926.spk` and re-run.
+
+This script does **not** decrypt packages or patch Synology binaries.
+The closed SRM engine is replaced with vanilla Suricata 8.
 
 ## Tests
 
@@ -153,7 +178,7 @@ See [docs/README.md](docs/README.md).
 
 Community-written files in this repository are under the [MIT License](LICENSE).
 
-- **Synology** owns the official ExtJS app, strings, help, and SRM binaries. They are not in this repository. Do not copy them into a public fork.
+- **Synology** owns the official ExtJS app, strings, help, and SRM binaries. They are not in this repository and are not attached to GitHub Releases. Do not copy them into a public fork.
 - **Suricata** is GPLv2 (built from upstream, not vendored as source here).
 - **PyYAML** is MIT; a copy is under `spk/src/threatprevention/vendor/`.
 - Emerging Threats rule tarball used at pack time comes from the official SPK; we do not ship it in git.

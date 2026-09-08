@@ -21,15 +21,16 @@ Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
 | Alerts | `/var/packages/ThreatPrevention/var/log/eve.json` |
 | Rule update log | `/var/packages/ThreatPrevention/var/log/suricata-update.log` |
 
-Rebuild the SPK on a Mac/Linux host with Docker. Official UI/icons/rules are
-fetched at build time (not stored in git):
+On the NAS, prefer **`./install.sh`**: it downloads a prebuilt Suricata tarball
+from GitHub Releases (no Docker), fetches official UI at pack time, then
+`synopkg install` + `setcap`.
+
+Developer rebuild on a Mac/Linux host with Docker:
 
 ```sh
 ./build.sh
 # artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk
 ```
-
-`--skip-engine` reuses an existing Suricata tree. See the root README.
 
 ---
 

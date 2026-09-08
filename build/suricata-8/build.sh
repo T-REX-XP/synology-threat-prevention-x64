@@ -18,9 +18,12 @@ docker buildx build \
   --progress=plain \
   "${ROOT}"
 
+echo "==> vendor Ubuntu libs + strip (DSM glibc 2.36)"
+"${ROOT}/vendor-libs.sh"
+
 ARCHIVE="${ARTIFACT}/suricata-8.0.6-linux-amd64.tar.gz"
 tar -C "${OUT}" -czf "${ARCHIVE}" tps-suricata
-echo "==> wrote ${ARCHIVE}"
+echo "==> wrote ${ARCHIVE} (vendored + stripped — GitHub release asset)"
 ls -lh "${ARCHIVE}" "${OUT}/tps-suricata/bin/suricata" 2>/dev/null || ls -lh "${OUT}"
 if [[ -f "${OUT}/tps-suricata/build-info.txt" ]]; then
   echo "==> build-info"

@@ -12,9 +12,10 @@ The official Threat Prevention ExtJS application (`synoips.js`), `ui/texts`,
 official help, icons as shipped in the SRM SPK, and aarch64 `SYNO.TPS.*.so`
 modules are copyright Synology Inc. They are **not** part of this Git repository.
 
-`./build.sh` downloads the public Package Center SPK into `build/cache/` and
-extracts UI / icons / bootstrap rules into `build/official/`. Those
-directories are gitignored. Do not add them to git or to a public release.
+GitHub Releases contain only the community Suricata engine tarball. They do
+**not** include a packed SPK or official ExtJS. `./install.sh` on the NAS
+downloads the public Package Center SPK into `build/cache/` and extracts UI /
+icons / bootstrap rules into `build/official/`. Those directories are gitignored.
 
 ## Suricata
 

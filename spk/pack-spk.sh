@@ -40,6 +40,8 @@ resolve_official
 
 if [ ! -f "${ENGINE}/lib/ld-linux-x86-64.so.2" ]; then
   info "Vendor Ubuntu 24.04 libs (DSM glibc is 2.36; binary needs 2.39)"
+    command -v docker >/dev/null 2>&1 \
+      || die "Engine tarball is missing vendored libs and Docker is not available. Use a GitHub release suricata-8.0.6-linux-amd64.tar.gz or run ./build.sh on a Docker host."
   "${ROOT}/build/suricata-8/vendor-libs.sh"
 fi
 
