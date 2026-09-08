@@ -4,7 +4,7 @@ Community **DSM 7 x86_64** package that runs **vanilla Suricata 8.0.6** on a Syn
 
 This is a **research proof of concept**, not a product and not a Synology contribution. It is **IDS only** (AF_PACKET). It does not drop packets (no NFQUEUE / IPS).
 
-Current package version: **8.0.6-0067**.
+Current package version is in [`VERSION`](VERSION) (`SURICATA_VERSION` + `PKG_RELEASE`). Bump that file; scripts and GitHub Actions read it.
 
 ## What this is (and is not)
 
@@ -61,6 +61,7 @@ These are community additions on top of the official ExtJS window. They are not 
 ## Repository layout
 
 ```
+VERSION                       SURICATA_VERSION + PKG_RELEASE (scripts + CI)
 install.sh                    NAS: fetch prebuilt engine, pack SPK, synopkg
 build.sh                      Developer: compile Suricata via Docker, then pack
 spk/src/threatprevention/      Community package (python, bridge, scripts, yaml)
@@ -77,9 +78,10 @@ artifact/                     Built community .spk (gitignored)
 `ui/` is an unused experimental SPA. It is not packed.
 
 Official Synology files never live in git **or in GitHub Releases**. CI publishes
-only `suricata-8.0.6-linux-amd64.tar.gz`. The NAS installer fetches that tarball
-plus the public `ThreatPrevention-cypress-1.3.3-0926.spk` and copies only what
-packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
+the engine tarball named from [`VERSION`](VERSION)
+(`suricata-<SURICATA_VERSION>-linux-amd64.tar.gz`). The NAS installer fetches that
+tarball plus the public `ThreatPrevention-cypress-1.3.3-0926.spk` and copies only
+what packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
 `synosuricata` and `SYNO.TPS.*.so` are discarded.
 
 ## Requirements
@@ -88,7 +90,7 @@ packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
 - DSM **7.0+** Intel/AMD (`arch=x86_64`). Will not run on ARM.
 - `curl`, `tar`, `python3` (no Docker)
 - Package Center → Trust Level: allow unsigned packages
-- A GitHub Release that includes `suricata-8.0.6-linux-amd64.tar.gz`
+- A GitHub Release that includes the engine tarball from [`VERSION`](VERSION)
 
 **Developer rebuild (`./build.sh`)**
 - Docker (compile Suricata 8 linux/amd64)
@@ -99,7 +101,8 @@ Tag a release so CI uploads the engine, clone this repo on the NAS, then:
 
 ```sh
 sudo ./install.sh
-# or: sudo ./install.sh --repo owner/name --tag v8.0.6-0067
+# tag must match VERSION, e.g. v8.0.6-0067
+# sudo ./install.sh --repo owner/name --tag v8.0.6-0067
 ```
 
 That downloads the prebuilt Suricata tarball, downloads the official SRM UI
@@ -133,14 +136,14 @@ Full operator notes: [docs/spk-deploy-and-update.md](docs/spk-deploy-and-update.
 
 ```sh
 ./build.sh
-# artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk
+# artifact/ThreatPrevention-x86_64-<SURICATA_VERSION>-<PKG_RELEASE>.spk
 ```
 
-CI (`.github/workflows/release.yml`) on tag `v*` builds the engine tarball only:
+CI (`.github/workflows/release.yml`) on tag `v<PKG_VERSION>` builds the engine tarball from [`VERSION`](VERSION):
 
 ```
-artifact/suricata-8.0.6-linux-amd64.tar.gz
-artifact/suricata-8.0.6-linux-amd64.tar.gz.sha256
+artifact/suricata-<SURICATA_VERSION>-linux-amd64.tar.gz
+artifact/suricata-<SURICATA_VERSION>-linux-amd64.tar.gz.sha256
 ```
 
 | Flag | Meaning |

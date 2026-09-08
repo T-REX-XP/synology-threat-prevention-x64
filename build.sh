@@ -128,7 +128,7 @@ ensure_engine() {
         info "Skipping Suricata Docker build"
         return
     fi
-    info "Building Suricata ${SURICATA_VER} (linux/amd64 via Docker)"
+    info "Building Suricata ${SURICATA_VERSION} (linux/amd64 via Docker)"
     "${SCRIPT_DIR}/build/suricata-8/build.sh"
 }
 

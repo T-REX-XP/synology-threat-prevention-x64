@@ -1,13 +1,17 @@
 # Shared helpers for build.sh and install.sh. SCRIPT_DIR must be the repo root.
 # shellcheck shell=bash
 
+# shellcheck source=../VERSION
+. "${SCRIPT_DIR}/VERSION"
+: "${SURICATA_VERSION:?VERSION: missing SURICATA_VERSION}"
+: "${PKG_RELEASE:?VERSION missing PKG_RELEASE}"
+PKG_VERSION="${SURICATA_VERSION}-${PKG_RELEASE}"
+ENGINE_ASSET="suricata-${SURICATA_VERSION}-linux-amd64.tar.gz"
+
 OFFICIAL_PKG="ThreatPrevention"
 OFFICIAL_VER="1.3.3-0926"
 OFFICIAL_ARCH="cypress"
 OFFICIAL_SPK_NAME="${OFFICIAL_PKG}-${OFFICIAL_ARCH}-${OFFICIAL_VER}.spk"
-
-SURICATA_VER="8.0.6"
-ENGINE_ASSET="suricata-${SURICATA_VER}-linux-amd64.tar.gz"
 
 CACHE_DIR="${SCRIPT_DIR}/build/cache"
 OFFICIAL_DIR="${SCRIPT_DIR}/build/official"
@@ -19,7 +23,7 @@ die()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*" >&2; }
 
 pkg_ver() {
-    grep '^version=' "${SRC_DIR}/INFO" | cut -d= -f2 | tr -d '"'
+    echo "${PKG_VERSION}"
 }
 
 spk_path() {

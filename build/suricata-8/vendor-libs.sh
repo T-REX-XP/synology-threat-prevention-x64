@@ -16,8 +16,8 @@ if [ -f "${LIBDIR}/ld-linux-x86-64.so.2" ]; then
   exit 0
 fi
 
-echo "==> Collect runtime libs from ubuntu:24.04 linux/amd64 (cached, --pull never)"
-docker run --rm --pull never --platform linux/amd64 \
+echo "==> Collect runtime libs from ubuntu:24.04 linux/amd64"
+docker run --rm --pull missing --platform linux/amd64 \
   -v "${ENGINE}:/opt/tps-suricata" \
   ubuntu:24.04 bash -lc "
 set -euo pipefail

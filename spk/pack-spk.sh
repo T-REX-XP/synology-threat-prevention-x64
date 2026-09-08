@@ -4,11 +4,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=../VERSION
+. "${ROOT}/VERSION"
+: "${SURICATA_VERSION:?VERSION: missing SURICATA_VERSION}"
+: "${PKG_RELEASE:?VERSION missing PKG_RELEASE}"
+PKG_VERSION="${SURICATA_VERSION}-${PKG_RELEASE}"
+ENGINE_ASSET="suricata-${SURICATA_VERSION}-linux-amd64.tar.gz"
+
 SRC="${ROOT}/spk/src/threatprevention"
 ENGINE="${ROOT}/build/suricata-8/out/tps-suricata"
 STAGING="${ROOT}/build/spk/staging"
 OUT_DIR="${ROOT}/artifact"
-PKG_VER="$(grep '^version=' "${SRC}/INFO" | cut -d= -f2 | tr -d '"')"
+PKG_VER="${PKG_VERSION}"
 SPK_NAME="ThreatPrevention-x86_64-${PKG_VER}.spk"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -41,14 +48,14 @@ resolve_official
 if [ ! -f "${ENGINE}/lib/ld-linux-x86-64.so.2" ]; then
   info "Vendor Ubuntu 24.04 libs (DSM glibc is 2.36; binary needs 2.39)"
     command -v docker >/dev/null 2>&1 \
-      || die "Engine tarball is missing vendored libs and Docker is not available. Use a GitHub release suricata-8.0.6-linux-amd64.tar.gz or run ./build.sh on a Docker host."
+      || die "Engine tarball is missing vendored libs and Docker is not available. Use a GitHub release ${ENGINE_ASSET} or run ./build.sh on a Docker host."
   "${ROOT}/build/suricata-8/vendor-libs.sh"
 fi
 
 rm -rf "${STAGING}"
 mkdir -p "${STAGING}/package" "${OUT_DIR}"
 
-info "Stage Suricata 8.0.6 engine"
+info "Stage Suricata ${SURICATA_VERSION} engine"
 mkdir -p "${STAGING}/package/bin" "${STAGING}/package/lib" "${STAGING}/package/share"
 cp -a "${ENGINE}/bin/." "${STAGING}/package/bin/"
 cp -a "${ENGINE}/lib/." "${STAGING}/package/lib/"
@@ -248,7 +255,10 @@ EXTRACT_KB="$(du -sk "${STAGING}/package" | awk '{print $1}')"
 
 info "Write INFO"
 {
-  cat "${SRC}/INFO"
+  sed \
+    -e "s/^version=.*/version=\"${PKG_VERSION}\"/" \
+    -e "s/vanilla Suricata [0-9][0-9.]*/vanilla Suricata ${SURICATA_VERSION}/" \
+    "${SRC}/INFO"
   echo "extractsize=\"${EXTRACT_KB}\""
   echo "create_time=\"$(date -u +%Y%m%d-%H:%M:%S)\""
 } > "${STAGING}/INFO"

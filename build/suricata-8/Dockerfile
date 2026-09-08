@@ -1,4 +1,5 @@
-# Suricata 8.0.6 for DSM 7 x86_64.
+# Suricata for DSM 7 x86_64. SURICATA_VERSION is passed from repo VERSION
+# via build/suricata-8/build.sh --build-arg.
 # Build on Debian 12 so the binary needs at most glibc 2.36 (DSM 7.4 SA6400).
 # Capture: AF_PACKET + NFQUEUE. Private libs vendored next to the binary.
 

@@ -1,0 +1,6 @@
+# Source of truth for engine + SPK version.
+# Sourced by build.sh, install.sh, pack-spk.sh, build/suricata-8/build.sh,
+# and GitHub Actions. Bump PKG_RELEASE for each SPK; bump SURICATA_VERSION
+# when the engine tarball changes.
+SURICATA_VERSION=8.0.6
+PKG_RELEASE=0067

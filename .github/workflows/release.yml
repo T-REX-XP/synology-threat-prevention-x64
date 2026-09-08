@@ -2,6 +2,10 @@ name: Release engine
 
 # Prebuild Suricata (linux/amd64 + vendored libs). Do not attach a packed SPK:
 # that would ship Synology ExtJS. NAS hosts run ./install.sh to assemble + install.
+#
+# Versions come from repo-root VERSION (SURICATA_VERSION, PKG_RELEASE).
+# Tag as v${SURICATA_VERSION}-${PKG_RELEASE} (e.g. v8.0.6-0067).
+# workflow_dispatch builds the tarball as a workflow artifact only.
 
 on:
   push:
@@ -17,27 +21,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Load versions
+        run: . ./VERSION && echo "SURICATA_VERSION=${SURICATA_VERSION} PKG_RELEASE=${PKG_RELEASE}"
       - name: Backend envelope tests
         run: python3 spk/src/threatprevention/python/test_compat.py
 
   engine:
     needs: tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+      - name: Load versions
+        run: |
+          set -euo pipefail
+          . ./VERSION
+          {
+            echo "SURICATA_VERSION=${SURICATA_VERSION}"
+            echo "PKG_RELEASE=${PKG_RELEASE}"
+            echo "PKG_VERSION=${SURICATA_VERSION}-${PKG_RELEASE}"
+            echo "ENGINE_ASSET=suricata-${SURICATA_VERSION}-linux-amd64.tar.gz"
+          } >> "$GITHUB_ENV"
+      - name: Check tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          expected="v${PKG_VERSION}"
+          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} != ${expected} (from VERSION). Bump VERSION or retag."
+            exit 1
+          fi
       - uses: docker/setup-buildx-action@v3
+      - name: Pull Ubuntu image for vendor-libs
+        run: docker pull --platform linux/amd64 ubuntu:24.04
       - name: Build Suricata, vendor libs, strip, tarball
         run: ./build/suricata-8/build.sh
       - name: SHA-256
         run: |
           cd artifact
-          sha256sum suricata-8.0.6-linux-amd64.tar.gz | tee suricata-8.0.6-linux-amd64.tar.gz.sha256
+          sha256sum "${ENGINE_ASSET}" | tee "${ENGINE_ASSET}.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: suricata-engine
           path: |
-            artifact/suricata-8.0.6-linux-amd64.tar.gz
-            artifact/suricata-8.0.6-linux-amd64.tar.gz.sha256
+            artifact/${{ env.ENGINE_ASSET }}
+            artifact/${{ env.ENGINE_ASSET }}.sha256
           if-no-files-found: error
       - name: GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -45,10 +72,12 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifact/suricata-8.0.6-linux-amd64.tar.gz
-            artifact/suricata-8.0.6-linux-amd64.tar.gz.sha256
+            artifact/${{ env.ENGINE_ASSET }}
+            artifact/${{ env.ENGINE_ASSET }}.sha256
           body: |
-            Prebuilt **Suricata 8.0.6** (linux/amd64) with vendored libs for DSM 7.
+            Prebuilt **Suricata ${{ env.SURICATA_VERSION }}** (linux/amd64) with vendored libs for DSM 7.
+
+            Package: `${{ env.PKG_VERSION }}`. Asset: `${{ env.ENGINE_ASSET }}`.
 
             This release does **not** include a packed SPK or official Synology UI.
 
@@ -56,6 +85,6 @@ jobs:
 
             ```
             git clone https://github.com/${{ github.repository }}.git
-            cd syno-router-review
-            sudo ./install.sh --repo ${{ github.repository }}
+            cd ${{ github.event.repository.name }}
+            sudo ./install.sh --repo ${{ github.repository }} --tag v${{ env.PKG_VERSION }}
             ```
