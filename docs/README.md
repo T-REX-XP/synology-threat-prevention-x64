@@ -11,10 +11,11 @@ Synology UI is downloaded into `build/official/` at pack time and is not in git.
 | Doc | When to read it |
 | --- | --- |
 | [spk-deploy-and-update.md](spk-deploy-and-update.md) | Install, `setcap`, upgrade, uninstall |
+| [router-traffic-copy.md](router-traffic-copy.md) | OpenWrt GRE or MikroTik TZSP copy of LAN↔WAN onto NAS `tps0` (IDS) |
 | [hw-acceleration.md](hw-acceleration.md) | Intel Hyperscan default; DPDK / NIC offload not wired |
 | [google-maps.md](google-maps.md) | Overview map / GeoIP (optional) |
 
-On an installed NAS: DSM Help → **This NAS (Suricata IDS)**.
+On an installed NAS: DSM Help → **This NAS (Suricata IDS)** (`setcap`, capture source, Hyperscan). Router copy scripts live in `target/etc/openwrt/` and `target/etc/mikrotik/`.
 
 ## Internals
 

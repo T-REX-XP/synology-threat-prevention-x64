@@ -1821,7 +1821,8 @@ def settings_telegram(conn, method, p):
             "min_interval_telegram": int(kv_get(conn, "min_interval_telegram", "300") or 300),
             "has_token": bool(cfg.get("token")),
             "chat_id": cfg.get("chat") or "",
-            "token": "",
+            "token": cfg.get("token") or "",
+            "bot_token": cfg.get("token") or "",
         })
     if method == "set":
         if "enable_telegram" in p:

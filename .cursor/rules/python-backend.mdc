@@ -1,0 +1,14 @@
+---
+description: tpsweb dispatch, envelopes, and secret-preserving settings writes
+globs: spk/src/threatprevention/python/**/*.py
+alwaysApply: false
+---
+
+# Python backend
+
+- New `SYNO.TPS.*` methods go in `api_routes.py` plus a tpsweb handler. Do not grow `handle()` if-ladders.
+- Official JSON shapes live in `compat.py`. Add a `test_compat.py` check per new Store root or FormPanel get.
+- Settings writes that touch `etc/*.conf`: empty string means leave existing values. Atomic replace, not truncate-then-write.
+- Telegram token is never returned by `get` (`has_token` + empty `token`).
+- IDS honesty: Sensor get/set keep `enable_prevention` off and `prevention_enforced: false`.
+- gretap/`tps0` is created in `start-stop-status`, not as the package user from tpsweb.

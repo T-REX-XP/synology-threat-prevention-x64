@@ -119,7 +119,7 @@ Official `synoips.js` never calls these. [`bridge/`](../../spk/src/threatprevent
 | --- | --- | --- |
 | `Settings.Map` | `get` | `{key}` from `etc/gmaps.key` (not packed) |
 | `Settings.Map` | `tile` | GET `z,x,y` → OSM PNG via `/webman/tps-api` (DSM CSP `img-src`) |
-| `Settings.Telegram` | `get` | `{enable_telegram,follow_mail,min_interval_telegram,has_token,chat_id,token:""}` — never returns the bot token |
+| `Settings.Telegram` | `get` | `{enable_telegram,follow_mail,min_interval_telegram,has_token,chat_id,token,bot_token}` — returns stored secrets for the admin form (UI masks them until Show values) |
 | `Settings.Telegram` | `set` | kv + `etc/telegram.conf` (`TOKEN=`/`CHAT=`, `0600`). Secrets via `bot_token` (not `token`, which DSM may overwrite with CSRF). Blank / `********` keep the stored token. |
 | `Settings.Telegram` | `test` | `sendMessage`; `{sent:true}` or error 100/104. Uses `bot_token` or stored conf. |
 | `Settings.Mirror` | `get` | `{enabled,capture_mode,router_kind,encap,router_ip,local_ip,ifname,tzsp_port,tap_present}` from `etc/mirror.conf` |

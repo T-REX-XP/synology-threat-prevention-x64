@@ -1,0 +1,15 @@
+---
+description: Official ExtJS is wrap-only; keep DSM desktop polling intact
+globs: spk/src/threatprevention/package/ui/**/*.js
+alwaysApply: false
+---
+
+# Official UI bridge
+
+Never edit `unpacked/package/ui/synoips.js` or `build/official/**`. Change only `bridge/transport.js`, `dsm7.js`, `settings-inject.js`. Pack prepends those three files into `synoips.js`.
+
+- Hijack `sendWebAPI` / Store / `pollReg` for **hosted** `SYNO.TPS.*` only.
+- Do not wrap `SYNO.API.Request` without copying `.Polling`. Desktop `pollingCompoundCallack` needs `data.reg_ref`.
+- No `http://host:19557` fallback. POST `/webman/tps-api`, then same-origin package API.
+- Extra Settings fields: omit empty secrets on save; password fields use `getRawValue`. Do not write `telegram.conf` with blank TOKEN/CHAT.
+- Chart stubs live in `tps-chart.js` (`type:lib`). Do not hang Chart class names on `synoips.js`.

@@ -21,11 +21,12 @@ Research proof of concept — **IDS only** (watch traffic). It does **not** drop
 
 1. [Install on the NAS](#install-on-the-nas)
 2. [After install](#after-install)
-3. [What you get](#what-you-get)
-4. [Build from source](#build-from-source)
-5. [Repository](#repository)
-6. [Documentation](#documentation)
-7. [License](#license)
+3. [Copy LAN↔WAN traffic from the router](#copy-lanwan-traffic-from-the-router)
+4. [What you get](#what-you-get)
+5. [Build from source](#build-from-source)
+6. [Repository](#repository)
+7. [Documentation](#documentation)
+8. [License](#license)
 
 ---
 
@@ -96,6 +97,33 @@ Upgrade, `setcap` by hand, and troubleshooting: [docs/spk-deploy-and-update.md](
 
 ---
 
+## Copy LAN↔WAN traffic from the router
+
+The NAS is not the gateway. Capture on `ovs_eth0` only sees packets **to/from this NAS**. To inspect client internet traffic, the LAN gateway sends a **copy** of FORWARD (LAN↔WAN) onto local `tps0`. IDS only — nothing is dropped.
+
+![LAN clients exchange traffic with the WAN through the LAN gateway. OpenWrt copies it with nft dup over gretap (DSM Firewall GRE protocol 47). MikroTik copies it with sniff-tzsp on UDP 37008. The copy arrives on NAS tps0 and Suricata inspects it.](docs/router-traffic-copy.svg)
+
+| Gateway | On the router | On the NAS | DSM Firewall (from router LAN IP only) |
+| --- | --- | --- | --- |
+| **OpenWrt** | `gretap` + nft `dup` on **forward** | Linux `gretap` (`tps0`) | GRE, IP protocol **47** |
+| **MikroTik** | mangle `sniff-tzsp` on **forward** | TAP `tps0` + TZSP (UDP **37008**) | UDP **37008** |
+
+Do this only on a trusted LAN. Do not allow GRE or TZSP from the WAN. The SPK never rewrites the router — copy the snippets from the NAS and run them on the gateway.
+
+**Order:** DSM Firewall → router script → Settings → **Receive a traffic copy from the router** → Apply → `synopkg restart` → verify `tps0`.
+
+```sh
+# OpenWrt — copy target/etc/openwrt/ to the router first
+NAS_IP=192.168.1.130 sh apply-tps-mirror.sh
+
+# MikroTik — edit NasIp / WanIf / LanIf, then:
+# /import file-name=apply-tps-mirror.rsc
+```
+
+Full steps, MTU notes, disable, and troubleshooting: [docs/router-traffic-copy.md](docs/router-traffic-copy.md).
+
+---
+
 ## What you get
 
 Official SRM Threat Prevention is a client for a 21-API `SYNO.TPS.*` stack (aarch64 CGI, PostgreSQL, synosuricata 6 IPS). Those modules do not load on DSM 7 x86_64. This package keeps the official ExtJS window and replaces the engine and backend.
@@ -110,7 +138,7 @@ Official SRM Threat Prevention is a client for a 21-API `SYNO.TPS.*` stack (aarc
 | Desktop | ExtJS `synoips.js` | Same app + inlined bridge |
 | Privilege | root / IPS | package user + admin `setcap` |
 
-**Settings (community):** hardware acceleration (Hyperscan vs portable `ac`/`bmh`), AF_PACKET capture, extra rule feeds from `rule-sources.json`, Telegram alerts, savable default mode. Apply is a server-side compound so capture / accel / schedule land in a defined order.
+**Settings (community):** hardware acceleration (Hyperscan vs portable `ac`/`bmh`), AF_PACKET capture or a router traffic copy onto `tps0`, extra rule feeds from `rule-sources.json`, Telegram alerts, savable default mode. Apply is a server-side compound so capture / accel / schedule land in a defined order.
 
 **Desktop (community):** DSM 7 chart stubs, Devices via `SYNO.Core.Network.NSM.Device`, GeoIP / optional OSM tiles, File Station export share, Update Now polling the real `suricata-update` job.
 
@@ -186,6 +214,7 @@ Index: [docs/README.md](docs/README.md).
 | Doc | When to read it |
 | --- | --- |
 | [Deploy / upgrade](docs/spk-deploy-and-update.md) | `setcap`, upgrade, troubleshooting |
+| [Router traffic copy](docs/router-traffic-copy.md) | OpenWrt GRE or MikroTik TZSP onto `tps0` |
 | [Hardware acceleration](docs/hw-acceleration.md) | Hyperscan |
 | [Compatibility layer](docs/backend-replaceability.md) | Why tpsweb exists |
 | [Shim review](docs/ootb-ui-compat-review.md) | What the bridge patches |

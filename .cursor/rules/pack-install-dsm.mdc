@@ -1,0 +1,16 @@
+---
+description: DSM BusyBox tar, noexec /tmp, ustar SPK, no GitHub token curl
+globs: "**/*.sh"
+alwaysApply: false
+---
+
+# Pack and install scripts
+
+- Extract with `cd dest && tar xzf archive`. DSM BusyBox ignores `-C` after `-f`.
+- Test engine with `-f`, not `-x`. DSM `/tmp` is noexec.
+- macOS pack: `COPYFILE_DISABLE=1` and `tar --format ustar` (xattrs → synopkg 263).
+- Do not pass `GH_TOKEN` / `GITHUB_TOKEN` into curl. Public `/releases/latest/download/` only.
+- `command -v file` before `file`; DSM has no `file`.
+- SPK version comes from `spk/pkg-version.sh` (branch or tag), not `VERSION`.
+- GitHub tarballs drop `+x`. Run with `bash script.sh`; `chmod +x` after extract.
+- File caps + `$ORIGIN` RUNPATH fail for the package user. Pack rewrites RUNPATH to `/var/lib/tps`; start/postinst symlink `target/lib` there.

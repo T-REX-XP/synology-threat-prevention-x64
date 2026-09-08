@@ -427,7 +427,8 @@ write_telegram_conf("123:ABC", "-1001")
 cfg = read_telegram_conf()
 check(cfg["token"] == "123:ABC" and cfg["chat"] == "-1001", "telegram.conf")
 tg = handle("SYNO.TPS.Settings.Telegram", "get", {}, conn)
-check(tg["success"] and tg["data"]["has_token"] and tg["data"]["token"] == "", "telegram get hides token")
+check(tg["success"] and tg["data"]["has_token"] and tg["data"]["token"] == "123:ABC", "telegram get returns token")
+check(tg["data"]["bot_token"] == "123:ABC", "telegram get bot_token alias")
 blank = handle("SYNO.TPS.Settings.Telegram", "set", {
     "enable_telegram": True, "token": "", "chat_id": "", "min_interval_telegram": 120,
 }, conn)

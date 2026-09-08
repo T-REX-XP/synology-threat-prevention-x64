@@ -889,39 +889,61 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			};
 		},
 		telegramNames: ["enable_telegram", "tg_token", "tg_chat_id", "min_interval_telegram", "telegram_follow_mail"],
-		/* Password emptyText is ignored on DSM. Keep a mask in the value so Apply
-		   does not look like it wiped the token. Never POST this string. */
-		tgTokenKeep: "********",
+		telegramSecretNames: ["tg_token", "tg_chat_id"],
 		isKeptTelegramToken: function (v) {
 			v = String(v || "").trim();
 			if (!v) { return true; }
 			return /^[\u2022*•]+$/.test(v);
 		},
+		fieldInput: function (fld) {
+			if (!fld || !fld.el) { return null; }
+			var input = fld.el.dom;
+			if (input && String(input.tagName || "").toLowerCase() !== "input") {
+				input = (fld.el.child && fld.el.child("input", true)) ||
+					(fld.el.query && fld.el.query("input")[0]);
+			}
+			return input || null;
+		},
 		fieldRaw: function (fld) {
 			if (!fld) { return ""; }
-			var raw = "";
-			try {
-				if (fld.el) {
-					var input = fld.el.dom;
-					if (input && String(input.tagName || "").toLowerCase() !== "input") {
-						input = (fld.el.child && fld.el.child("input", true)) ||
-							(fld.el.query && fld.el.query("input")[0]);
-					}
-					if (input && input.value) { raw = input.value; }
-				}
-			} catch (e) { /* ignore */ }
+			var input = this.fieldInput(fld);
+			var raw = (input && input.value) || "";
 			if (!raw && fld.getRawValue) { raw = fld.getRawValue(); }
 			if (!raw && fld.getValue) { raw = fld.getValue(); }
 			return raw == null ? "" : String(raw);
 		},
-		fillTelegramToken: function (fld, hasToken) {
-			if (!fld || !fld.setValue) { return; }
-			var v = hasToken ? this.tgTokenKeep : "";
-			fld.setValue(v);
-			fld.originalValue = v;
-			if (fld.startValue !== undefined) { fld.startValue = v; }
-			if (fld.emptyText !== undefined) { fld.emptyText = ""; }
-			if (fld.applyEmptyText) { fld.applyEmptyText(); }
+		setFieldInputType: function (fld, type) {
+			if (!fld) { return; }
+			fld.inputType = type;
+			var input = this.fieldInput(fld);
+			if (!input) { return; }
+			try {
+				input.type = type;
+			} catch (e) {
+				try { input.setAttribute("type", type); } catch (e2) { /* IE */ }
+			}
+		},
+		telegramShowButton: function (panel) {
+			var found = panel && panel.find && panel.find("itemId", "btn_telegram_show");
+			return (found && found[0]) || null;
+		},
+		applyTelegramSecretVisibility: function (panel) {
+			var me = this;
+			var show = !!(panel && panel._tpsShowSecrets);
+			var f = panel && panel.getForm && panel.getForm();
+			if (f) {
+				Ext.each(this.telegramSecretNames, function (name) {
+					me.setFieldInputType(f.findField(name), show ? "text" : "password");
+				});
+			}
+			var btn = this.telegramShowButton(panel);
+			if (btn && btn.setText) {
+				btn.setText(show ? "Hide values" : "Show values");
+			}
+		},
+		toggleTelegramSecrets: function (panel) {
+			panel._tpsShowSecrets = !panel._tpsShowSecrets;
+			this.applyTelegramSecretVisibility(panel);
 		},
 		patchNotificationTelegram: function (NP) {
 			var me = this;
@@ -1011,7 +1033,8 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				items: [
 					{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot", checked: false},
 					{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: ""},
-					{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1, value: ""},
+					{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", inputType: "password", indent: 1, value: ""},
+					{xtype: "syno_button", itemId: "btn_telegram_show", text: "Show values", indent: 1, handler: function () { me.toggleTelegramSecrets(panel); }},
 					{xtype: "syno_numberfield", name: "min_interval_telegram", fieldLabel: "Minimum interval (minutes)", indent: 1, maxValue: 60 * 24, allowDecimals: false, minValue: 0, value: 5},
 					{xtype: "syno_checkbox", name: "telegram_follow_mail", boxLabel: "Use the same classes as email", indent: 1, checked: true},
 					{xtype: "syno_button", itemId: "btn_telegram_test", text: "Send test message", indent: 1, handler: function () { me.testTelegram(panel); }}
@@ -1070,7 +1093,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			var chat = val("tg_chat_id", "") || "";
 			/* DSM Ajax injects CSRF as `token`. Always send bot_token. */
 			if (token && !me.isKeptTelegramToken(token)) { payload.bot_token = token; }
-			if (chat) { payload.chat_id = chat; }
+			if (chat && !me.isKeptTelegramToken(chat)) { payload.chat_id = chat; }
 			return payload;
 		},
 		hookFormDirtyGate: function (panel, opts) {
@@ -1121,13 +1144,20 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				set("enable_telegram", !!data.enable_telegram);
 				set("telegram_follow_mail", data.follow_mail !== false);
 				set("tg_chat_id", data.chat_id || "");
-				me.fillTelegramToken(f.findField("tg_token"), !!data.has_token);
+				set("tg_token", data.bot_token || data.token || "");
 				var sec = Number(data.min_interval_telegram);
 				if (!isFinite(sec) || sec < 0) { sec = 300; }
 				set("min_interval_telegram", Math.round(sec / 60));
+				me.applyTelegramSecretVisibility(panel);
 				me.clearTelegramDirty(panel);
-				window.setTimeout(function () { me.clearTelegramDirty(panel); }, 0);
-				window.setTimeout(function () { me.clearTelegramDirty(panel); }, 50);
+				window.setTimeout(function () {
+					me.applyTelegramSecretVisibility(panel);
+					me.clearTelegramDirty(panel);
+				}, 0);
+				window.setTimeout(function () {
+					me.applyTelegramSecretVisibility(panel);
+					me.clearTelegramDirty(panel);
+				}, 50);
 			});
 		},
 		saveTelegramFrom: function (panel) {

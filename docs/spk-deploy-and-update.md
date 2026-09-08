@@ -11,7 +11,8 @@ Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
 | --- | --- |
 | Install root | `/var/packages/ThreatPrevention/target` |
 | Logs, pid, live rules | `/var/packages/ThreatPrevention/var/` |
-| Capture iface override | `/var/packages/ThreatPrevention/etc/interface` (one line; typically `ovs_eth0`) |
+| Capture iface override | `/var/packages/ThreatPrevention/etc/interface` (one line). When router copy is on, this is `tps0`. |
+| Traffic copy (gretap / TZSP) | `/var/packages/ThreatPrevention/etc/mirror.conf` — see [router-traffic-copy.md](router-traffic-copy.md) |
 | Hardware acceleration | `/var/packages/ThreatPrevention/etc/accel.conf` — Hyperscan default on; see [hw-acceleration.md](hw-acceleration.md) |
 | Start Menu UI | `/usr/syno/synoman/webman/3rdparty/ThreatPrevention` → `target/ui` |
 | tpsweb API / SPA | `http://<nas>:19557/` (also unix `var/tpsweb.sock`) |
@@ -83,12 +84,27 @@ grep -E "Engine started|af-packet|Operation not permitted" \
   /var/packages/ThreatPrevention/var/log/suricata.log | tail
 ```
 
-Optional iface pin (then restart):
+Optional iface pin (then restart). **Do not pin `ovs_eth0` while router copy is enabled** — start will recreate `tps0` and rewrite `etc/interface`.
 
 ```sh
 echo ovs_eth0 | sudo tee /var/packages/ThreatPrevention/etc/interface
 sudo synopkg restart ThreatPrevention
 ```
+
+### Router traffic copy (LAN↔WAN IDS)
+
+The NAS is not the gateway. LAN listen only sees NAS traffic. To inspect client LAN↔WAN flows, the gateway copies FORWARD frames onto `tps0` — OpenWrt via GRE tap, MikroTik via TZSP (UDP 37008). Full steps: [router-traffic-copy.md](router-traffic-copy.md).
+
+Copy `target/etc/openwrt/` or `target/etc/mikrotik/` to the router; do **not** let the SPK rewrite the gateway.
+
+```sh
+# OpenWrt
+NAS_IP=192.168.1.130 sh apply-tps-mirror.sh
+# MikroTik (after editing NasIp/WanIf/LanIf)
+/import file-name=apply-tps-mirror.rsc
+```
+
+Then Settings → General → **Receive a traffic copy from the router**, pick OpenWrt or MikroTik, Apply, `setcap`, `synopkg restart`.
 
 ### Hardware acceleration (Hyperscan)
 
@@ -188,6 +204,8 @@ sudo synopkg uninstall ThreatPrevention
 | `Cannot read properties of undefined (reading 'LineChart')` | DSM 7 has no SRM `SYNO.SDS.Chart.*`; or browser still has `synoips.js?v=1.3.3-0926` | Install ≥ `0021`, log out/in, hard-refresh. JSLoad should fetch `tps-chart.js` and `synoips.js?v=8.0.6-0021`. |
 | `POST …/ThreatPrevention/api` or `/webman/tps-api` 404 | nginx rewrote the POST to `/` and tpsweb served missing `index.html` (≤0019); or nginx not reloaded | Install ≥ `0021`. Then `sudo nginx -s reload`. Confirm: `curl -sS -d 'api=SYNO.TPS.Sensor&method=get&version=1' http://127.0.0.1:19557/api`. |
 | `NoApiKeys` / `mapsjs/gen_204` `ERR_BLOCKED_BY_CLIENT` | Official Maps loader has no key; ad blocker drops Google’s `gen_204` probe | Ignore. Not tpsweb. No demo key. Own key + GeoIP: [google-maps.md](google-maps.md). |
+| `tps0` missing after enabling router copy | Tap is created only at package start; no `CAP_NET_ADMIN` | `setcap` then `synopkg restart`. [router-traffic-copy.md](router-traffic-copy.md). |
+| `tps0` UP but only NAS traffic in Events | DSM Firewall blocking GRE/TZSP, OpenWrt WAN not L3, or MikroTik fasttrack | Allow proto 47 or UDP 37008 from the router LAN IP; set WAN ifname; disable fasttrack. |
 | Engine fails after enabling Hyperscan | Binary has no `libhs` | `accel.conf` falls back to `ac`/`bmh`. Confirm `--build-info` Hyperscan yes. [hw-acceleration.md](hw-acceleration.md). |
 
 Do not set `LD_LIBRARY_PATH` to `target/lib` in a root shell: that Ubuntu `libc.so.6` will break DSM tools (`tail`, etc.) in the same environment. The ELF interpreter is already patched to `target/lib/ld-linux-x86-64.so.2`.

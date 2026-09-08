@@ -1,0 +1,14 @@
+---
+description: Research PoC constraints — IDS only, no official UI in git, no Vue unless asked
+alwaysApply: true
+---
+
+# Project constraints
+
+This is a DSM 7 x86_64 research PoC, not a product. Capture is AF_PACKET IDS. Do not wire NFQUEUE/IPS or claim drop-packet works.
+
+Official ExtJS (`synoips.js`, texts, help) is Synology copyright. It is not in this git tree and not attached to GitHub Releases. Pack downloads the public SRM SPK into `build/official/` (gitignored).
+
+Do not start the Vue Exit-fork DSM app unless the user asks. Stay on the shim: wrap official prototypes, prepend the bridge at pack time.
+
+Unsigned packages cannot `run-as: root` or declare file capabilities (`synopkg` 319). Print `setcap` in postinst; apply after every install.
