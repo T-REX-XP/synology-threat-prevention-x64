@@ -3,7 +3,7 @@ name: Release engine
 # Native compile on GitHub-hosted Ubuntu (no Docker). Matrix: x86_64 + aarch64.
 # Packed SPK / official ExtJS are not attached. NAS: ./install.sh
 #
-# Versions: repo-root VERSION. Tag as v${SURICATA_VERSION}-${PKG_RELEASE}.
+# GitHub tag (v0.1.0) is the release label. Engine/SPK numbers come from VERSION.
 
 on:
   push:
@@ -23,16 +23,8 @@ jobs:
         run: |
           set -euo pipefail
           . ./VERSION
-          echo "PKG_VERSION=${SURICATA_VERSION}-${PKG_RELEASE}" >> "$GITHUB_ENV"
-          echo "SURICATA_VERSION=${SURICATA_VERSION} PKG_RELEASE=${PKG_RELEASE}"
-      - name: Check tag matches VERSION
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          expected="v${PKG_VERSION}"
-          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} != ${expected} (from VERSION)."
-            exit 1
-          fi
+          echo "PKG_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
+          echo "SURICATA_VERSION=${SURICATA_VERSION} PKG_VERSION=${PKG_VERSION}"
       - name: Backend envelope tests
         run: python3 spk/src/threatprevention/python/test_compat.py
 
@@ -58,7 +50,7 @@ jobs:
           . ./VERSION
           {
             echo "SURICATA_VERSION=${SURICATA_VERSION}"
-            echo "PKG_VERSION=${SURICATA_VERSION}-${PKG_RELEASE}"
+            echo "PKG_VERSION=${PKG_VERSION}"
             echo "ENGINE_ASSET=suricata-${SURICATA_VERSION}-${{ matrix.suffix }}.tar.gz"
           } >> "$GITHUB_ENV"
       - uses: actions/cache@v4
@@ -95,7 +87,7 @@ jobs:
           set -euo pipefail
           . ./VERSION
           echo "SURICATA_VERSION=${SURICATA_VERSION}" >> "$GITHUB_ENV"
-          echo "PKG_VERSION=${SURICATA_VERSION}-${PKG_RELEASE}" >> "$GITHUB_ENV"
+          echo "PKG_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           pattern: suricata-engine-*
@@ -125,5 +117,5 @@ jobs:
             ```
             git clone https://github.com/${{ github.repository }}.git
             cd ${{ github.event.repository.name }}
-            sudo ./install.sh --repo ${{ github.repository }} --tag v${{ env.PKG_VERSION }}
+            sudo ./install.sh --repo ${{ github.repository }} --tag ${{ github.ref_name }}
             ```

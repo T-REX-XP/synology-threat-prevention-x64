@@ -4,8 +4,7 @@
 # shellcheck source=../VERSION
 . "${SCRIPT_DIR}/VERSION"
 : "${SURICATA_VERSION:?VERSION: missing SURICATA_VERSION}"
-: "${PKG_RELEASE:?VERSION missing PKG_RELEASE}"
-PKG_VERSION="${SURICATA_VERSION}-${PKG_RELEASE}"
+: "${PKG_VERSION:?VERSION missing PKG_VERSION}"
 
 # Default: Intel/AMD NAS. On a Synology ARM host, follow uname. Override with TPS_ARCH.
 if [ -z "${TPS_ARCH:-}" ]; then

@@ -4,7 +4,7 @@ Community **DSM 7 x86_64** package that runs **vanilla Suricata 8.0.6** on a Syn
 
 This is a **research proof of concept**, not a product and not a Synology contribution. It is **IDS only** (AF_PACKET). It does not drop packets (no NFQUEUE / IPS).
 
-Current package version is in [`VERSION`](VERSION) (`SURICATA_VERSION` + `PKG_RELEASE`). Bump that file; scripts and GitHub Actions read it.
+Current versions are in [`VERSION`](VERSION): **PKG_VERSION** is this SPK; **SURICATA_VERSION** is the upstream engine. They are independent.
 
 ## What this is (and is not)
 
@@ -61,7 +61,7 @@ These are community additions on top of the official ExtJS window. They are not 
 ## Repository layout
 
 ```
-VERSION                       SURICATA_VERSION + PKG_RELEASE (scripts + CI)
+VERSION                       SURICATA_VERSION (engine) + PKG_VERSION (SPK)
 install.sh                    NAS: fetch prebuilt engine, pack SPK, synopkg
 build.sh                      Developer: compile Suricata via Docker, then pack
 spk/src/threatprevention/      Community package (python, bridge, scripts, yaml)
@@ -105,14 +105,13 @@ Tag a release so CI uploads the engine, clone this repo on the NAS, then:
 
 ```sh
 sudo ./install.sh
-# tag must match VERSION, e.g. v8.0.6-0067
-# sudo ./install.sh --repo owner/name --tag v8.0.6-0067
+# sudo ./install.sh --repo owner/name --tag v0.1.0
 ```
 
 That downloads the prebuilt Suricata tarball, downloads the official SRM UI
 package, packs `artifact/ThreatPrevention-x86_64-*.spk`, runs `synopkg install`,
 and `setcap`. Log out of DSM and back in so the Start Menu loads
-`synoips.js?v=8.0.6-0067`.
+`synoips.js?v=<PKG_VERSION>`.
 
 | Flag | Meaning |
 | --- | --- |
@@ -140,11 +139,12 @@ Full operator notes: [docs/spk-deploy-and-update.md](docs/spk-deploy-and-update.
 
 ```sh
 ./build.sh
-# artifact/ThreatPrevention-x86_64-<SURICATA_VERSION>-<PKG_RELEASE>.spk
+# artifact/ThreatPrevention-x86_64-<PKG_VERSION>.spk
 ```
 
-CI (`.github/workflows/release.yml`) on tag `v<PKG_VERSION>` builds engine
-tarballs **natively** (no Docker), x86_64 and aarch64:
+CI (`.github/workflows/release.yml`) on tag `v*` (e.g. `v0.1.0`) builds engine
+tarballs **natively** (no Docker), x86_64 and aarch64. Asset names use
+[`VERSION`](VERSION) `SURICATA_VERSION`; the GitHub tag is `v${PKG_VERSION}`:
 
 ```
 artifact/suricata-<SURICATA_VERSION>-linux-amd64.tar.gz

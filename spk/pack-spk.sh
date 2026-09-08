@@ -7,8 +7,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=../VERSION
 . "${ROOT}/VERSION"
 : "${SURICATA_VERSION:?VERSION: missing SURICATA_VERSION}"
-: "${PKG_RELEASE:?VERSION missing PKG_RELEASE}"
-PKG_VERSION="${SURICATA_VERSION}-${PKG_RELEASE}"
+: "${PKG_VERSION:?VERSION missing PKG_VERSION}"
 # pack-spk does not source arch.sh; keep the same names as common.sh
 case "${TPS_ARCH:-x86_64}" in
     x86_64|amd64) TPS_ARCH=x86_64; ENGINE_SUFFIX=linux-amd64 ;;
