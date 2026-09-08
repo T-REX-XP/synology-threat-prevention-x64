@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Pack a DSM 7 x86_64 SPK the same way synology_codecs does.
+# Assemble the unsigned DSM 7 SPK. Called by ./build.sh (preferred).
+# Official UI/rules/icons come from TPS_OFFICIAL (build/official/), never from git.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${ROOT}/spk/src/threatprevention"
 ENGINE="${ROOT}/build/suricata-8/out/tps-suricata"
-ORIG_RULES="${ROOT}/unpacked/package/etc/rules"
-ORIG_SPK="${ROOT}/unpacked/spk"
 STAGING="${ROOT}/build/spk/staging"
 OUT_DIR="${ROOT}/artifact"
 PKG_VER="$(grep '^version=' "${SRC}/INFO" | cut -d= -f2 | tr -d '"')"
@@ -15,8 +14,28 @@ SPK_NAME="ThreatPrevention-x86_64-${PKG_VER}.spk"
 die() { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
 
-[ -x "${ENGINE}/bin/suricata" ] || die "Missing ${ENGINE}/bin/suricata — run build/suricata-8/build.sh first"
-[ -f "${ORIG_RULES}/emerging.rules.tar.gz" ] || die "Missing original rules tarball"
+resolve_official() {
+  local candidates=()
+  [ -n "${TPS_OFFICIAL:-}" ] && candidates+=("${TPS_OFFICIAL}")
+  candidates+=("${ROOT}/build/official" "${ROOT}/unpacked")
+  local d
+  for d in "${candidates[@]}"; do
+    if [ -f "${d}/package/ui/synoips.js" ] \
+      && [ -f "${d}/package/etc/rules/emerging.rules.tar.gz" ] \
+      && [ -f "${d}/spk/PACKAGE_ICON.PNG" ]; then
+      OFFICIAL="$d"
+      ORIG_RULES="${OFFICIAL}/package/etc/rules"
+      ORIG_SPK="${OFFICIAL}/spk"
+      info "Official inputs: ${OFFICIAL}"
+      return
+    fi
+  done
+  die "Official Synology tree missing. Run ./build.sh (downloads ThreatPrevention 1.3.3-0926 into build/official/). Do not commit that tree."
+}
+
+resolve_official
+[ -x "${ENGINE}/bin/suricata" ] || die "Missing ${ENGINE}/bin/suricata — run ./build.sh (or build/suricata-8/build.sh)"
+[ -f "${ORIG_RULES}/emerging.rules.tar.gz" ] || die "Missing original rules tarball under ${ORIG_RULES}"
 [ -d "${SRC}" ] || die "Missing SPK sources in ${SRC}"
 
 if [ ! -f "${ENGINE}/lib/ld-linux-x86-64.so.2" ]; then
@@ -62,7 +81,7 @@ cp -a "${ORIG_RULES}/classification.config" "${STAGING}/package/etc/rules/"
 cp -a "${ORIG_RULES}/reference.config" "${STAGING}/package/etc/rules/"
 cp -a "${ORIG_RULES}/syno-custom-events.rules" "${STAGING}/package/etc/rules/"
 cp -a "${ORIG_RULES}/version.txt" "${STAGING}/package/etc/rules/" 2>/dev/null || true
-cp -a "${ROOT}/unpacked/package/etc/suricata/threshold.config" "${STAGING}/package/etc/suricata/"
+cp -a "${OFFICIAL}/package/etc/suricata/threshold.config" "${STAGING}/package/etc/suricata/"
 cp -a "${SRC}/package/etc/sensor/sensor.conf" "${STAGING}/package/etc/sensor/sensor.conf"
 cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/suricata/suricata.yaml"
 cp -a "${SRC}/package/etc/mirror.conf" "${STAGING}/package/etc/mirror.conf"
@@ -76,7 +95,7 @@ mkdir -p "${STAGING}/package/etc/nginx"
 cp -a "${SRC}/package/etc/nginx/dsm-tpsweb.conf" "${STAGING}/package/etc/nginx/dsm-tpsweb.conf"
 
 info "Stage official ExtJS UI (research PoC — not redistributable)"
-OFFICIAL_UI="${ROOT}/unpacked/package/ui"
+OFFICIAL_UI="${OFFICIAL}/package/ui"
 [ -f "${OFFICIAL_UI}/synoips.js" ] || die "Official UI missing at ${OFFICIAL_UI}/synoips.js"
 rm -rf "${STAGING}/package/ui"
 mkdir -p "${STAGING}/package/ui"
@@ -220,7 +239,7 @@ fi
 
 info "Stage SYNO.TPS.lib (Info listing only; aarch64 .so are not packed)"
 mkdir -p "${STAGING}/package/webapi"
-cp -a "${ROOT}/unpacked/package/webapi/SYNO.TPS.lib" "${STAGING}/package/webapi/SYNO.TPS.lib"
+cp -a "${OFFICIAL}/package/webapi/SYNO.TPS.lib" "${STAGING}/package/webapi/SYNO.TPS.lib"
 
 info "Compute extractsize"
 EXTRACT_KB="$(du -sk "${STAGING}/package" | awk '{print $1}')"

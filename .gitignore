@@ -9,8 +9,11 @@ artifact/
 extracted/
 build/spk/
 build/suricata-8/out/
+build/cache/
+build/official/
+build/official-tmp/
 
-# Official Synology tree (required to pack, not redistributable)
+# Official Synology tree (downloaded by ./build.sh, not redistributable)
 unpacked/package/
 unpacked/spk/
 

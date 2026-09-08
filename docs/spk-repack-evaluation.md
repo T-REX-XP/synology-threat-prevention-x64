@@ -68,7 +68,14 @@ Default capture iface on SA6400 is `ovs_eth0` (eth0 is an OVS slave).
 ## Pack command
 
 ```sh
-./spk/pack-spk.sh
+./build.sh
 ```
 
-Output: `artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk` (unsigned POSIX tar; ~18 MiB with vendored libs).
+That downloads the public `ThreatPrevention-cypress-1.3.3-0926.spk`, extracts
+UI / icons / bootstrap rules into `build/official/` (gitignored), builds
+Suricata 8, and writes `artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk`
+(unsigned POSIX tar; ~18 MiB with vendored libs). `spk/pack-spk.sh` is the
+assembler only.
+
+Unlike codecs, this tree does **not** decrypt SPKs or patch license
+libraries. The aarch64 engine is replaced, not patched.

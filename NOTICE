@@ -12,13 +12,14 @@ The official Threat Prevention ExtJS application (`synoips.js`), `ui/texts`,
 official help, icons as shipped in the SRM SPK, and aarch64 `SYNO.TPS.*.so`
 modules are copyright Synology Inc. They are **not** part of this Git repository.
 
-Packing an SPK requires a local `unpacked/` tree taken from an official SPK you
-already have. Do not add that tree to git or to a public release.
+`./build.sh` downloads the public Package Center SPK into `build/cache/` and
+extracts UI / icons / bootstrap rules into `build/official/`. Those
+directories are gitignored. Do not add them to git or to a public release.
 
 ## Suricata
 
 The engine is vanilla Suricata 8, licensed under the GNU General Public License
-version 2. Build it with `build/suricata-8/build.sh`. Binaries are not stored in git.
+version 2. `./build.sh` compiles it via Docker. Binaries are not stored in git.
 
 ## PyYAML
 

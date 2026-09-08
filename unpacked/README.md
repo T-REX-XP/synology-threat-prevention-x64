@@ -1,19 +1,11 @@
-# Local inputs (not in git)
+# Official inputs (not in git)
 
-Packing (`./spk/pack-spk.sh`) needs a copy of the **official** Threat Prevention SPK
-unpacked here. Synology copyright — do not commit this directory.
+`./build.sh` downloads the public SRM Threat Prevention SPK and extracts
+the files packing needs into **`build/official/`**. You do not need to
+populate this directory.
 
-Expected layout:
+If you already unpacked an official SPK here (`package/ui/synoips.js`,
+`package/etc/rules/`, `spk/PACKAGE_ICON.PNG`), `pack-spk.sh` will still
+accept it as a fallback when `build/official/` is missing.
 
-```
-unpacked/
-  package/ui/synoips.js
-  package/etc/rules/emerging.rules.tar.gz
-  package/etc/rules/signature.conf
-  package/etc/suricata/threshold.config
-  spk/PACKAGE_ICON.PNG
-  spk/PACKAGE_ICON_256.PNG
-```
-
-Place the tree yourself after clone. The community sources under `spk/src/` do not
-include the official UI.
+Synology copyright — do not commit `unpacked/package/` or `unpacked/spk/`.

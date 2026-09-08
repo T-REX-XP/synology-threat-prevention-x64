@@ -2,6 +2,9 @@
 
 Operator and internals for this DSM 7 Threat Prevention PoC. Start with the [root README](../README.md).
 
+Build from a clean clone: **`./build.sh`**. Official Synology UI is downloaded
+into `build/official/` at pack time and is not in git.
+
 ## Operator
 
 | Doc | When to read it |
