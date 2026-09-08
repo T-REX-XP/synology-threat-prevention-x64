@@ -811,6 +811,7 @@ _COMPOUND_SET_ORDER = {
     ("SYNO.TPS.Sensor", "set"): 2,
     ("SYNO.TPS.Settings.Update.Schedule", "set"): 3,
     ("SYNO.TPS.Settings.Update.Source", "set"): 4,
+    ("SYNO.TPS.Settings.Telegram", "set"): 5,
 }
 
 
@@ -1802,10 +1803,21 @@ def settings_telegram(conn, method, p):
                 kv_set(conn, "min_interval_telegram", str(max(0, int(p.get("min_interval_telegram") or 300))))
             except (TypeError, ValueError):
                 kv_set(conn, "min_interval_telegram", "300")
-        token = p.get("token") or p.get("bot_token")
-        chat = p.get("chat_id") if "chat_id" in p else p.get("chat")
-        if token or chat is not None:
-            write_telegram_conf(token if token else None, chat)
+        token = p.get("token") if "token" in p else p.get("bot_token")
+        if isinstance(token, (list, tuple)):
+            token = token[0] if token else ""
+        if "chat_id" in p:
+            chat = p.get("chat_id")
+        elif "chat" in p:
+            chat = p.get("chat")
+        else:
+            chat = None
+        if isinstance(chat, (list, tuple)):
+            chat = chat[0] if chat else ""
+        token_s = "" if token is None else str(token).strip()
+        chat_s = None if chat is None else str(chat).strip()
+        if token_s or chat_s:
+            write_telegram_conf(token_s or None, chat_s if chat_s else None)
         conn.commit()
         return ok({})
     if method == "test":

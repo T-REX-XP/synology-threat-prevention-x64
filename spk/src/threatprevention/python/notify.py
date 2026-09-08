@@ -207,13 +207,20 @@ def read_telegram_conf():
 
 def write_telegram_conf(token=None, chat=None):
     cur = read_telegram_conf()
-    if token:
-        cur["token"] = str(token).strip()
-    if chat is not None and str(chat).strip() != "":
-        cur["chat"] = str(chat).strip()
+    token_s = "" if token is None else str(token).strip()
+    chat_s = "" if chat is None else str(chat).strip()
+    # Empty values mean "leave unchanged". A second Apply with a blank
+    # password field must not truncate TOKEN=/CHAT=.
+    if token_s:
+        cur["token"] = token_s
+    if chat_s:
+        cur["chat"] = chat_s
     os.makedirs(PKGETC, exist_ok=True)
-    with open(TELEGRAM_CONF, "w", encoding="utf-8") as fh:
-        fh.write("TOKEN=%s\nCHAT=%s\n" % (cur.get("token") or "", cur.get("chat") or ""))
+    payload = "TOKEN=%s\nCHAT=%s\n" % (cur.get("token") or "", cur.get("chat") or "")
+    tmp = TELEGRAM_CONF + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(payload)
+    os.replace(tmp, TELEGRAM_CONF)
     try:
         os.chmod(TELEGRAM_CONF, 0o600)
     except OSError:

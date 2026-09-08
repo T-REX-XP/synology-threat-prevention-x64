@@ -273,6 +273,22 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 		compound: function (opts) {
 			var me = this;
 			var items = this.orderCompound(opts.compound.params || []);
+			var panel = opts.scope;
+			var extra = [];
+			Ext.each(items, function (item) {
+				if (item && item.api === "SYNO.TPS.Notification" && item.method === "set") {
+					me.stripTelegramParams({params: item.params});
+					if (panel && panel.getForm && panel.getForm().findField("enable_telegram")) {
+						extra.push({
+							api: "SYNO.TPS.Settings.Telegram",
+							method: "set",
+							version: 1,
+							params: me.telegramFromForm(panel)
+						});
+					}
+				}
+			});
+			items = items.concat(extra);
 			var out = [];
 			var left = items.length;
 			var failed = false;
@@ -290,14 +306,6 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						result: (data && data.result) || [],
 						has_fail: !ok || !!(data && data.has_fail)
 					};
-					Ext.each(items, function (item) {
-						if (item && item.api === "SYNO.TPS.Notification" && item.method === "set") {
-							var panel = opts.scope;
-							if (panel && panel.getForm && panel.getForm().findField("enable_telegram")) {
-								me.saveTelegramFrom(panel);
-							}
-						}
-					});
 					if (opts.callback) {
 						opts.callback.call(opts.scope || window, ok && !payload.has_fail, payload, { compound: items });
 					}
@@ -309,12 +317,6 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (!ok) {
 					failed = true;
 					out[idx].error = (raw && raw.error) || { code: 500 };
-				}
-				if (ok && items[idx].api === "SYNO.TPS.Notification" && items[idx].method === "set") {
-					var panel = opts.scope;
-					if (panel && panel.getForm && panel.getForm().findField("enable_telegram")) {
-						me.saveTelegramFrom(panel);
-					}
 				}
 				left -= 1;
 				if (!left && opts.callback) {
@@ -341,7 +343,8 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				"SYNO.TPS.Settings.Mirror|set": 1,
 				"SYNO.TPS.Sensor|set": 2,
 				"SYNO.TPS.Settings.Update.Schedule|set": 3,
-				"SYNO.TPS.Settings.Update.Source|set": 4
+				"SYNO.TPS.Settings.Update.Source|set": 4,
+				"SYNO.TPS.Settings.Telegram|set": 5
 			};
 			var tagged = [];
 			Ext.each(items || [], function (it, i) {

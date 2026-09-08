@@ -428,6 +428,16 @@ cfg = read_telegram_conf()
 check(cfg["token"] == "123:ABC" and cfg["chat"] == "-1001", "telegram.conf")
 tg = handle("SYNO.TPS.Settings.Telegram", "get", {}, conn)
 check(tg["success"] and tg["data"]["has_token"] and tg["data"]["token"] == "", "telegram get hides token")
+blank = handle("SYNO.TPS.Settings.Telegram", "set", {
+    "enable_telegram": True, "token": "", "chat_id": "", "min_interval_telegram": 120,
+}, conn)
+check(blank["success"], "telegram set empty secrets")
+cfg = read_telegram_conf()
+check(cfg["token"] == "123:ABC" and cfg["chat"] == "-1001", "telegram set empty does not wipe conf")
+flags_only = handle("SYNO.TPS.Settings.Telegram", "set", {"enable_telegram": False}, conn)
+check(flags_only["success"] and read_telegram_conf()["token"] == "123:ABC", "telegram flags-only keeps token")
+upd = handle("SYNO.TPS.Settings.Telegram", "set", {"token": "999:ZZZ", "chat_id": "-42"}, conn)
+check(upd["success"] and read_telegram_conf() == {"token": "999:ZZZ", "chat": "-42"}, "telegram set updates secrets")
 
 leases = _parse_isc_leases(
     'lease 192.168.1.50 {\n  hardware ethernet AA:BB:CC:DD:EE:FF;\n'

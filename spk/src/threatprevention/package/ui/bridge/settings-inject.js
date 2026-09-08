@@ -976,7 +976,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				defaults: {labelWidth: 180},
 				items: [
 					{xtype: "syno_checkbox", name: "enable_telegram", boxLabel: "Send threat alerts to a Telegram bot", checked: false},
-					{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: ""},
+					{xtype: "syno_textfield", name: "tg_token", fieldLabel: "Bot token", inputType: "password", indent: 1, value: "", emptyText: ""},
 					{xtype: "syno_textfield", name: "tg_chat_id", fieldLabel: "Chat ID", indent: 1, value: ""},
 					{xtype: "syno_numberfield", name: "min_interval_telegram", fieldLabel: "Minimum interval (minutes)", indent: 1, maxValue: 60 * 24, allowDecimals: false, minValue: 0, value: 5},
 					{xtype: "syno_checkbox", name: "telegram_follow_mail", boxLabel: "Use the same classes as email", indent: 1, checked: true},
@@ -1015,18 +1015,32 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			if (!f) { return {}; }
 			function val(name, fallback) {
 				var fld = f.findField(name);
-				if (!fld || !fld.getValue) { return fallback; }
-				return fld.getValue();
+				if (!fld) { return fallback; }
+				var xt = String(fld.xtype || "");
+				if (xt.indexOf("check") !== -1) {
+					return fld.getValue ? fld.getValue() : fallback;
+				}
+				/* Password fields often still have "" until blur; raw DOM has the typed value. */
+				if (fld.getRawValue) {
+					var raw = fld.getRawValue();
+					if (raw !== undefined && raw !== null && String(raw).length) {
+						return raw;
+					}
+				}
+				return fld.getValue ? fld.getValue() : fallback;
 			}
 			var minutes = Number(val("min_interval_telegram", 5));
 			if (!isFinite(minutes) || minutes < 0) { minutes = 5; }
-			return {
+			var payload = {
 				enable_telegram: !!val("enable_telegram", false),
 				follow_mail: val("telegram_follow_mail", true) !== false,
-				min_interval_telegram: Math.round(minutes * 60),
-				token: val("tg_token", "") || "",
-				chat_id: val("tg_chat_id", "") || ""
+				min_interval_telegram: Math.round(minutes * 60)
 			};
+			var token = val("tg_token", "") || "";
+			var chat = val("tg_chat_id", "") || "";
+			if (token) { payload.token = token; }
+			if (chat) { payload.chat_id = chat; }
+			return payload;
 		},
 		hookFormDirtyGate: function (panel, opts) {
 			opts = opts || {};
@@ -1077,6 +1091,11 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				set("telegram_follow_mail", data.follow_mail !== false);
 				set("tg_chat_id", data.chat_id || "");
 				set("tg_token", "");
+				var tok = f.findField("tg_token");
+				if (tok) {
+					tok.emptyText = data.has_token ? "Saved — leave blank to keep" : "";
+					if (tok.applyEmptyText) { tok.applyEmptyText(); }
+				}
 				var sec = Number(data.min_interval_telegram);
 				if (!isFinite(sec) || sec < 0) { sec = 300; }
 				set("min_interval_telegram", Math.round(sec / 60));
@@ -1090,7 +1109,11 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			this.call("SYNO.TPS.Settings.Telegram", "set", 1, this.telegramFromForm(panel), function (ok) {
 				var f = panel.getForm && panel.getForm();
 				var token = f && f.findField("tg_token");
-				if (ok && token && token.setValue) { token.setValue(""); }
+				if (ok && token && token.setValue) {
+					token.setValue("");
+					token.emptyText = "Saved — leave blank to keep";
+					if (token.applyEmptyText) { token.applyEmptyText(); }
+				}
 				me.clearTelegramDirty(panel);
 			});
 		},
