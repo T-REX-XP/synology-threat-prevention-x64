@@ -1,6 +1,6 @@
 # Threat Prevention SPK — deploy and update
 
-Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0032`). Official ExtJS app with a custom `tpsweb` backend (bridge inlined into `synoips.js` at pack time; Chart stubs in `tps-chart.js`). Not a product. See [backend-replaceability.md](backend-replaceability.md).  
+Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0061`). Official ExtJS app with a custom `tpsweb` backend (bridge inlined into `synoips.js` at pack time; Chart stubs in `tps-chart.js`). Not a product. See [backend-replaceability.md](backend-replaceability.md).  
 SPK scripts under `spk/src/threatprevention/scripts/` are stubs except `postinst`, `start-stop-status`, and `update-rules.sh`. **Most of the work that makes capture actually run is admin-side:** DSM will not let an unsigned package declare `run-as: root` or file capabilities (`synopkg` error 319). `start-stop-status` tries `setcap` but it is a no-op when Package Center starts the unit as the package user.
 
 Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
@@ -12,7 +12,8 @@ Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
 | Install root | `/var/packages/ThreatPrevention/target` |
 | Logs, pid, live rules | `/var/packages/ThreatPrevention/var/` |
 | Capture iface override | `/var/packages/ThreatPrevention/etc/interface` (one line). When router copy is on, this is `tps0`. |
-| Traffic copy (gretap) | `/var/packages/ThreatPrevention/etc/mirror.conf` — see [router-traffic-copy.md](router-traffic-copy.md) |
+| Traffic copy (gretap / TZSP) | `/var/packages/ThreatPrevention/etc/mirror.conf` — see [router-traffic-copy.md](router-traffic-copy.md) |
+| Hardware acceleration | `/var/packages/ThreatPrevention/etc/accel.conf` — Hyperscan default on; see [hw-acceleration.md](hw-acceleration.md) |
 | Start Menu UI | `/usr/syno/synoman/webman/3rdparty/ThreatPrevention` → `target/ui` |
 | tpsweb API / SPA | `http://<nas>:19557/` (also unix `var/tpsweb.sock`) |
 | Event DB | `/var/packages/ThreatPrevention/var/tps.db` |
@@ -24,7 +25,7 @@ Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
 Rebuild the SPK on a Mac/Linux host with Docker:
 
 ```sh
-./build/spk/pack-spk.sh
+./spk/pack-spk.sh
 # artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk
 ```
 
@@ -101,7 +102,16 @@ NAS_IP=192.168.1.130 sh apply-tps-mirror.sh
 
 Then Settings → General → **Receive a traffic copy from the router**, pick OpenWrt or MikroTik, Apply, `setcap`, `synopkg restart`.
 
-**Start Menu tile:** one app, `SYNO.SDS.TPS.Application`. After install, **log out of DSM and back in** and remove any leftover community `SYNO.SDS.ThreatPrevention.Application` pin. The bridge calls same-origin `/webman/tps-api` (nginx → tpsweb `:19557`), then falls back to `/webman/3rdparty/ThreatPrevention/api`. After UI/`config` changes, confirm the script URL is `synoips.js?v=8.0.6-0021` or newer — `?v=1.3.3-0926` is a stale cache.
+### Hardware acceleration (Hyperscan)
+
+Default policy is **Intel Hyperscan** for signature matching (`mpm-algo: hs`). Settings radios choose Hyperscan vs portable `ac`/`bmh`. DPDK and NIC flow offload are not wired (notes, not checkboxes). Full steps: [hw-acceleration.md](hw-acceleration.md). After install, confirm:
+
+```sh
+/var/packages/ThreatPrevention/target/bin/suricata --build-info | grep -i hyperscan
+cat /var/packages/ThreatPrevention/etc/accel.conf
+```
+
+**Start Menu tile:** one app, `SYNO.SDS.TPS.Application`. After install, **log out of DSM and back in** and remove any leftover community `SYNO.SDS.ThreatPrevention.Application` pin. The bridge calls same-origin `/webman/tps-api` (nginx → tpsweb `:19557`). After UI/`config` changes, confirm the script URL is `synoips.js?v=8.0.6-0061` or newer — `?v=1.3.3-0926` is a stale cache.
 
 Optional but recommended — replace the 2021 Suricata-5 ET dump with a current Suricata 8 feed (do **not** convert the old files):
 
@@ -155,7 +165,7 @@ sudo synopkg restart ThreatPrevention
 
 ## Rules-only update (no new SPK)
 
-Not a package upgrade. The bootstrap file is ET Open **for Suricata 5** (feed 9840, 2021-09). Suricata 8 rejects part of that syntax; the engine still starts. Current signatures must be pulled with `suricata-update` (ET Open is the default source). Optional extras after `update-sources`: Abuse.ch SSLBL, ET Pro (license), and other index sources — enable them with `suricata-update enable-source …` using the same `--data-dir` / `--output` as `scripts/update-rules.sh`.
+Not a package upgrade. The bootstrap file is ET Open **for Suricata 5** (feed 9840, 2021-09). Suricata 8 rejects part of that syntax; the engine still starts. Current signatures must be pulled with `suricata-update` (ET Open is the default source). Settings → **Rule Feeds** lists free OISF-index sources (Abuse.ch, Traffic ID, …) **disabled**; enable what you want there, then Update Now. ET Pro stays on General (license code).
 
 ```sh
 sudo /var/packages/ThreatPrevention/scripts/update-rules.sh
@@ -192,5 +202,6 @@ sudo synopkg uninstall ThreatPrevention
 | `NoApiKeys` / `mapsjs/gen_204` `ERR_BLOCKED_BY_CLIENT` | Official Maps loader has no key; ad blocker drops Google’s `gen_204` probe | Ignore. Not tpsweb. No demo key. Own key + GeoIP: [google-maps.md](google-maps.md). |
 | `tps0` missing after enabling router copy | Tap is created only at package start; no `CAP_NET_ADMIN` | `setcap` then `synopkg restart`. [router-traffic-copy.md](router-traffic-copy.md). |
 | `tps0` UP but only NAS traffic in Events | DSM Firewall blocking GRE/TZSP, OpenWrt WAN not L3, or MikroTik fasttrack | Allow proto 47 or UDP 37008 from the router LAN IP; set WAN ifname; disable fasttrack. |
+| Engine fails after enabling Hyperscan | Binary has no `libhs` | `accel.conf` falls back to `ac`/`bmh`. Confirm `--build-info` Hyperscan yes. [hw-acceleration.md](hw-acceleration.md). |
 
 Do not set `LD_LIBRARY_PATH` to `target/lib` in a root shell: that Ubuntu `libc.so.6` will break DSM tools (`tail`, etc.) in the same environment. The ELF interpreter is already patched to `target/lib/ld-linux-x86-64.so.2`.

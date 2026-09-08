@@ -44,8 +44,7 @@
 <h2>Hardware acceleration</h2>
 <p>In <b>Settings</b> &gt; <b>General</b> &gt; <b>Hardware acceleration</b>:</p>
 <ul>
-	<li><b>Intel Hyperscan (MPM / SPM)</b> — default on. Uses SIMD (AVX2 / AVX-512) for signature matching (<code>mpm-algo: hs</code>, <code>spm-algo: hs</code>). Apply restarts Suricata. If this binary has no Hyperscan, matching stays <code>ac</code> / <code>bmh</code>.</li>
-	<li><b>Intel DPDK</b> and <b>NIC hardware flow offload</b> are listed but not wired. Capture stays AF_PACKET. This package does not bypass the kernel or prefilter on the NIC.</li>
+	<li><b>Intel Hyperscan</b> vs <b>Portable matching</b> — pick one. Hyperscan is the default. DPDK and NIC flow offload are different layers (capture), not another matching choice; they are not wired. Capture stays AF_PACKET.</li>
 </ul>
 <p>Confirm with <code>suricata --build-info | grep -i hyperscan</code>. See the package docs <code>hw-acceleration.md</code> for details.</p>
 

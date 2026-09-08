@@ -122,17 +122,20 @@ These are the places the shim fights the official app instead of meeting the con
 
 **IDS topology.** The NAS is not the gateway. LAN listen vs OpenWrt GRE / MikroTik TZSP copy is a real product choice. Keep `mirror.conf` + `start-stop-status` tap create. Stop creating tunnels from tpsweb as the package user. Operator docs: [router-traffic-copy.md](router-traffic-copy.md), DSM Help **Router traffic copy**, `target/etc/openwrt/` and `target/etc/mikrotik/`.
 
+**Hyperscan.** Default MPM/SPM is Intel Hyperscan when the binary has `libhs`. Settings **Hardware acceleration** writes `etc/accel.conf`. DPDK and NIC offload stay unwired. [hw-acceleration.md](hw-acceleration.md).
+
 ---
 
 ## 7. Improvement plan
 
 | When | Theme | Work | Detail |
 | --- | --- | --- | --- |
-| Landed | Honesty | IDS-only chrome | Prevention / security-mode widgets disabled. Overview + Settings notes. Sensor get/set force `enable_prevention=no`, `availability`, `prevention_enforced:false`. |
+| Landed | Honesty | IDS-only chrome | Drop-packet checkbox stays off. Default mode (availability vs security) is saved; packets are not dropped. Sensor get/set force `enable_prevention=no`, `prevention_enforced:false`. |
+| Landed | Ops | Hyperscan default | `etc/accel.conf` `hyperscan=1`; yaml `mpm-algo: hs`. DPDK / NIC offload listed but disabled. Settings **Hardware acceleration**. |
 | Landed | Safety | Narrow the Request hook | `shouldStealRequest` refuses Polling APIs, polling callbacks, and Core-only compounds. `test_compat.py` locks the `reg_ref` contract. |
 | Landed | Forms | One post-load snap | `processReturnData` snaps `originalValue` once via `clearGeneralDirty`. No 0ms/50ms General dirty timers. |
 | Landed | Capture | Un-monkey `setDisabled` | `syncCaptureMode` after official Sensor get. Radios: single `check` handler. No `interfaceGrid.setDisabled` wrap. |
-| Landed | API | Server-side compound | `SYNO.TPS.Compound.request` applies Mirror → Sensor → Schedule → Source. Result rows stay in request order. |
+| Landed | API | Server-side compound | `SYNO.TPS.Compound.request` applies Accel → Mirror → Sensor → Schedule → Source. Result rows stay in request order. |
 | Landed | Ops | gretap only at package start | `settings_mirror` writes conf + pin; `tap_present` is honest. `ensure_gretap` lives in `start-stop-status`. |
 | Landed | Code | Split the bridge at pack time | `bridge/transport.js`, `dsm7.js`, `settings-inject.js` concatenated in `pack-spk.sh`. Same JSLoad prepend. |
 | Landed | Tests | Envelope fixtures from `synoips.js` | Store roots (`signatures`, `rules`, `list`, `devices`, `notification_filters`, `events`, `days7`, `trends`) plus FormPanel gets in `test_compat.py`. Capture-mode Apply order is the Compound Mirror-then-Sensor case. |

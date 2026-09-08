@@ -124,5 +124,7 @@ Official `synoips.js` never calls these. [`bridge/`](../../spk/src/threatprevent
 | `Settings.Telegram` | `test` | `sendMessage`; `{sent:true}` or error 100/104 |
 | `Settings.Mirror` | `get` | `{enabled,capture_mode,router_kind,encap,router_ip,local_ip,ifname,tzsp_port,tap_present}` from `etc/mirror.conf` |
 | `Settings.Mirror` | `set` | `capture_mode` `copy` requires router IPv4; `router_kind` `openwrt`\|`mikrotik` (`encap` gretap\|tzsp); writes `mirror.conf`, pins `tps0` or LAN; error 100 on bad IP |
-| `Settings.Feed` | `list` | `{feeds:[{id,name,url,enabled}]}` |
-| `Settings.Feed` | `add`/`update`/`delete` | HTTPS (or RFC1918 HTTP); name `[A-Za-z0-9._-]+`, not `et-*`; writes `etc/feeds.json` |
+| `Settings.Accel` | `get` | `{hyperscan,hyperscan_available,hyperscan_active,mpm_algo,spm_algo,dpdk,dpdk_available,nic_offload,nic_offload_available}` from `etc/accel.conf` |
+| `Settings.Accel` | `set` | `hyperscan` bool (default on); DPDK / NIC offload ignored (always false); writes yaml `detect.mpm-algo` and restarts Suricata |
+| `Settings.Feed` | `list` | `{feeds:[{id,name,url,enabled}]}`. Seeds OISF-index community sources **disabled**. |
+| `Settings.Feed` | `add`/`update`/`delete` | HTTPS (or RFC1918 HTTP); name `[A-Za-z0-9._-]+`, not `et-*`; writes `etc/feeds.json`. Toggle enable, then Update Now. |

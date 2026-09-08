@@ -2,7 +2,9 @@
 
 This x86_64 Suricata 8 build can use **Intel Hyperscan** for signature matching. **DPDK** and **NIC flow offload** are documented here but are **not wired** — capture stays AF_PACKET (IDS).
 
-Default policy: **Hyperscan on** when `suricata --build-info` reports Hyperscan support.
+These are **different layers**, not alternatives. They can run together on a full Intel stack (DPDK IO + rte_flow prefilter + Hyperscan matching). They are **not** a radio group of three.
+
+This package only wires matching: Hyperscan **or** portable `ac`/`bmh` (Settings radios). DPDK and NIC offload stay notes, not checkboxes.
 
 On an installed NAS: Settings → General → **Hardware acceleration**, and DSM Help → **This NAS (Suricata IDS)**.
 
@@ -32,7 +34,7 @@ This is the default. Confirm the binary:
 
 ### Settings
 
-Settings → General → **Hardware acceleration** → **Intel Hyperscan (MPM / SPM)**. Apply rewrites `detect.mpm-algo` / `detect.spm-algo` and restarts Suricata.
+Settings → General → **Hardware acceleration**: radios for **Hyperscan** vs **portable ac/bmh**. Apply calls `SYNO.TPS.Settings.Accel` (`get` / `set`), rewrites `detect.mpm-algo` / `detect.spm-algo`, and restarts Suricata. DPDK and NIC offload are notes only.
 
 Shipped files:
 

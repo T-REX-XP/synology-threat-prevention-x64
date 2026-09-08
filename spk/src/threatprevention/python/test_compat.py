@@ -34,7 +34,7 @@ from compat import (  # noqa: E402
 from compiler import parse_header, parse_refs  # noqa: E402
 from geoip import is_public_ipv4, lookup as geoip_lookup  # noqa: E402
 from ingest import payload_hex  # noqa: E402
-from feeds import add_feed, feed_url_ok, list_feeds  # noqa: E402
+from feeds import CATALOG, add_feed, feed_url_ok, list_feeds, seed_catalog_feeds  # noqa: E402
 from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
@@ -214,6 +214,8 @@ check("++n > 80" not in js, "no SignatureUpdater 25ms poll")
 check("tps_cap_note" in js, "Overview banner when capture cap missing")
 check("SYNO.TPS.Settings.Accel" in js, "bridge hosts Accel API")
 check("Intel Hyperscan" in js, "General Hardware acceleration fieldset")
+check("accel_mode" in js, "matching is a radio group")
+check("accel_dpdk" not in js, "DPDK is not a fake checkbox")
 check('"SYNO.TPS.Settings.Accel|set": 0' in js, "compound ranks Accel.set first")
 check(SETCAP_CMD in js, "Overview banner prints exact setcap")
 postinst = open(os.path.join(HERE, "..", "scripts", "postinst"), encoding="utf-8").read()
@@ -390,9 +392,16 @@ check(not feed_url_ok("http://example.com/x"), "public http blocked")
 check(feed_url_ok("http://192.168.1.10/x.rules"), "rfc1918 http ok")
 check(add_feed(conn, "et-open", "https://example.com/x", True) is None, "reserved feed name")
 fid = add_feed(conn, "local-extra", "https://example.com/extra.rules", True)
-check(fid and list_feeds(conn)[0]["name"] == "local-extra", "feed add")
+check(fid and any(x["name"] == "local-extra" for x in list_feeds(conn)), "feed add")
 listed = handle("SYNO.TPS.Settings.Feed", "list", {}, conn)
 check(listed["success"] and listed["data"]["feeds"][0]["url"].startswith("https://"), "feed list api")
+by_name = {x["name"]: x for x in listed["data"]["feeds"]}
+check(len(CATALOG) >= 8 and all(n in by_name for n, _u in CATALOG), "OISF catalog seeded")
+check(all(by_name[n]["enabled"] is False for n, _u in CATALOG), "catalog feeds off by default")
+check(by_name["local-extra"]["enabled"] is True, "user-added feed stays enabled")
+nfeeds = len(list_feeds(conn))
+seed_catalog_feeds(conn)
+check(len(list_feeds(conn)) == nfeeds, "catalog seed is idempotent")
 write_telegram_conf("123:ABC", "-1001")
 cfg = read_telegram_conf()
 check(cfg["token"] == "123:ABC" and cfg["chat"] == "-1001", "telegram.conf")

@@ -13,7 +13,7 @@ Operator and research notes for the community DSM 7 Threat Prevention PoC (vanil
 
 On an installed NAS, the same router steps ship in:
 
-- DSM Help → **This NAS (Suricata IDS)** and **Router traffic copy** (app **?** button)
+- DSM Help → **This NAS (Suricata IDS)** (setcap, capture source, Hyperscan) and **Router traffic copy**
 - `/var/packages/ThreatPrevention/target/etc/openwrt/README.txt` (OpenWrt)
 - `/var/packages/ThreatPrevention/target/etc/mikrotik/README.txt` (MikroTik)
 

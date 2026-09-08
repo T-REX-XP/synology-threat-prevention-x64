@@ -80,7 +80,7 @@ Params: `date_range` (`7days` / `30days` / `all`). Data: `total`, `high`, `mediu
 
 Fields from Sensor.so + `sensor.conf`: `enable_sensor`, `enable_prevention`, `interface_list`, `network_security_mode` (`availability` | `security`), `default_detect`, `status` (`running` | `stopped` | `starting`).
 
-`set` writes `/var/packages/ThreatPrevention/etc/interface` and `etc/sensor.conf`. Prevention mode is stored but NFQUEUE is not auto-wired (IDS only).
+`set` writes `/var/packages/ThreatPrevention/etc/interface` and `etc/sensor.conf`. Drop-packet (`enable_prevention`) is forced off. `network_security_mode` is saved; NFQUEUE is not auto-wired (IDS only).
 
 ## SYNO.TPS.Sensor.Variables (v1 get)
 
@@ -117,6 +117,12 @@ Actions: `alert`, `drop`, `pass`, `disable` (maps to official strings Alert / Dr
 ## SYNO.TPS.Settings.Update.Source (v1 get / set)
 
 `source`: `et-open` | `et-pro`. `code`: ET Pro oinkcode. Also `use_code` (`etOpen` / `etPro`) and `support_etpro`.
+
+## SYNO.TPS.Settings.Accel (v1 get / set)
+
+Community fieldset (not official SRM). Default policy `hyperscan=1`.
+
+`get` / `set`: `hyperscan` (bool), `hyperscan_available`, `hyperscan_active`, `mpm_algo` (`hs` | `ac`), `spm_algo` (`hs` | `bmh`). `dpdk` and `nic_offload` are always false. Writes `/var/packages/ThreatPrevention/etc/accel.conf` and `target/etc/suricata/suricata.yaml` `detect` keys; restarts the engine if it is running. See [hw-acceleration.md](../hw-acceleration.md).
 
 ## SYNO.TPS.Settings.Storage (v1)
 

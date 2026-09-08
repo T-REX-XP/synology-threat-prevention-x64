@@ -18,7 +18,7 @@ A new package around **stock Suricata 8.0.6** is the viable path. Inline IPS onl
 | Capture | `af-packet` (IDS) and `--enable-nfqueue` (IPS) |
 | Alerts | eve-log JSON (unix socket or file). No Synology `synodb` |
 | Portable CPU | `--disable-gccmarch-native` so the binary runs on geminilake / v1000 / denverton / r1000 |
-| Hyperscan | Enable on x86_64 when `libhs` is available (ARM Cypress could not use it) |
+| Hyperscan | **Default on** for this x86_64 build (`libhs`). Settings → Hardware acceleration. DPDK / NIC offload not wired. [hw-acceleration.md](hw-acceleration.md) |
 | Rules | ET Open via `suricata-update` (Suricata 8 tree), not the bundled 2021 `suricata-5.0` tarball as the live feed |
 
 Build tree: `build/suricata-8/` (Docker `linux/amd64`). Install prefix: `/opt/tps-suricata`.
@@ -58,7 +58,7 @@ cd build/suricata-8
 | Artifact | [`artifact/suricata-8.0.6-linux-amd64.tar.gz`](../artifact/suricata-8.0.6-linux-amd64.tar.gz) (42 MiB) |
 | Unpacked | `build/suricata-8/out/tps-suricata/` (`suricata` 108 MiB, not stripped) |
 
-Capture: NFQueue **yes**, AF_PACKET **yes**. GCC march native **no**. Hyperscan **yes**.
+Capture: NFQueue **yes**, AF_PACKET **yes**. GCC march native **no**. Hyperscan **yes** (package default `mpm-algo: hs`).
 
 **glibc caveat:** this binary was built on Ubuntu 24.04 (glibc 2.39). DSM 7 NAS images typically have an older glibc. Before installing on a NAS, rebuild with Synology `pkgscripts-ng` or an older distro matching the NAS libc (often Ubuntu 20.04 / Debian 11). Confirm with `ldd` on the target.
 

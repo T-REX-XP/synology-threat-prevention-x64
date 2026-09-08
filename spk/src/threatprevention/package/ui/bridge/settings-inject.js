@@ -329,20 +329,16 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			});
 		},
 		readAccelValues: function (panel) {
-			var form = panel && panel.getForm && panel.getForm();
-			var hs = true;
-			if (form && form.findField) {
-				var fld = form.findField("accel_hyperscan");
-				if (fld && fld.getValue) { hs = !!fld.getValue(); }
-			}
-			return { hyperscan: hs, dpdk: false, nic_offload: false };
+			var mode = this.radioInputValue(panel, "accel_mode") || "hs";
+			return { hyperscan: mode !== "ac", dpdk: false, nic_offload: false };
 		},
 		applyAccelData: function (panel, data) {
 			if (!panel || !data) { return; }
+			var me = this;
 			var form = panel.getForm && panel.getForm();
 			if (!form || !form.setValues) { return; }
 			form.setValues({
-				accel_hyperscan: data.hyperscan !== false
+				accel_mode: (data.hyperscan !== false && data.hyperscan_available) ? "hs" : "ac"
 			});
 			var hint = form.findField("accel_hint");
 			if (hint && hint.setValue) {
@@ -350,14 +346,21 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (data.hyperscan_available) {
 					msg = data.hyperscan_active
 						? "Active: mpm-algo=hs, spm-algo=hs. Apply, then restart if the engine is running."
-						: "Hyperscan is in this binary. Enable it and Apply to use SIMD signature matching.";
+						: "Hyperscan is in this binary. Choose it and Apply to use SIMD signature matching.";
 				} else {
-					msg = "This Suricata binary has no Hyperscan. Matching stays ac/bmh. DPDK and NIC offload are not wired.";
+					msg = "This Suricata binary has no Hyperscan. Matching stays ac/bmh.";
 				}
 				hint.setValue(msg);
 			}
-			var box = this.namedField(panel, "accel_hyperscan");
-			this.setCmpEnabled(box, !!data.hyperscan_available);
+			if (form.findFields) {
+				Ext.each(form.findFields("accel_mode") || [], function (fld) {
+					if (fld && fld.inputValue === "hs") {
+						me.setCmpEnabled(fld, !!data.hyperscan_available);
+					} else {
+						me.setCmpEnabled(fld, true);
+					}
+				});
+			}
 		},
 		applyAccelFromResult: function (panel, resp) {
 			var me = this;
@@ -378,19 +381,19 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				items: [
 					{
 						xtype: "syno_displayfield", hideLabel: true, htmlEncode: false,
-						value: "Default policy: Intel Hyperscan for signature matching (SIMD). DPDK and NIC flow offload are not wired on this IDS package."
+						value: "Signature matching (pick one). DPDK and NIC offload are different layers; they would stack with Hyperscan, not replace it. They are not wired on this IDS package."
 					},
 					{
-						xtype: "syno_checkbox", name: "accel_hyperscan", checked: true,
-						boxLabel: "Intel Hyperscan (MPM / SPM) — recommended"
+						xtype: "syno_radio", name: "accel_mode", inputValue: "hs", checked: true,
+						boxLabel: "Intel Hyperscan (MPM / SPM) — recommended, SIMD"
 					},
 					{
-						xtype: "syno_checkbox", name: "accel_dpdk", checked: false, disabled: true,
-						boxLabel: "Intel DPDK userspace IO — not wired (capture stays AF_PACKET)"
+						xtype: "syno_radio", name: "accel_mode", inputValue: "ac",
+						boxLabel: "Portable matching (ac / bmh) — no SIMD"
 					},
 					{
-						xtype: "syno_checkbox", name: "accel_nic_offload", checked: false, disabled: true,
-						boxLabel: "NIC hardware flow offload / prefilter — not wired"
+						xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, indent: 1,
+						value: "Not available: Intel DPDK (userspace IO) and NIC hardware flow offload. Capture stays AF_PACKET."
 					},
 					{
 						xtype: "syno_displayfield", name: "accel_hint", hideLabel: true, htmlEncode: false,
@@ -573,11 +576,12 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				"network_security_mode", "auto_update", "weekday", "hour", "minute",
 				"use_code", "code", "update_status", "last_updated",
 				"capture_mode", "router_kind", "router_ip", "local_ip", "ifname",
-				"accel_hyperscan"
+				"accel_mode"
 			], function (name) { snap(me.findNamed(panel, name) || form.findField(name)); });
 			if (form.findFields) {
 				Ext.each(form.findFields("network_security_mode") || [], snap);
 				Ext.each(form.findFields("capture_mode") || [], snap);
+				Ext.each(form.findFields("accel_mode") || [], snap);
 			}
 			var store = panel.interfaceStore;
 			if (store) {
@@ -758,8 +762,11 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 							var fld = form && form.findField && form.findField(name);
 							if (fld && fld.isDirty && fld.isDirty()) { dirtyMirror = true; }
 						});
-						var afld = form && form.findField && form.findField("accel_hyperscan");
-						if (afld && afld.isDirty && afld.isDirty()) { dirtyAccel = true; }
+						if (form && form.findFields) {
+							Ext.each(form.findFields("accel_mode") || [], function (fld) {
+								if (fld && fld.isDirty && fld.isDirty()) { dirtyAccel = true; }
+							});
+						}
 						Ext.each(out || [], function (f) {
 							if (!f) { return; }
 							if (f.api === "SYNO.TPS.Settings.Update.Schedule" && f.method !== "get") {
@@ -1257,7 +1264,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				layoutConfig: {align: "stretch"},
 				items: [
 					{xtype: "container", layout: "form", autoHeight: true, items: [
-						{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: "Extra HTTPS rule feeds are applied on top of ET Open/Pro on General. Run Update Now after changes."}
+						{xtype: "syno_displayfield", hideLabel: true, htmlEncode: false, value: "Community sources from the OISF index are listed here, <b>off by default</b>. Enable the ones you want (or Add your own HTTPS URL). They apply on top of ET Open/Pro. Run Update Now on General after changes."}
 					]},
 					grid
 				],
