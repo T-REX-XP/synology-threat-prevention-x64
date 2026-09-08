@@ -135,6 +135,7 @@ info "DSM Help (helptoc + community pages + empty indexdb)"
 HELP_DIR="${SRC}/package/ui/help/enu"
 [ -f "${HELP_DIR}/threatprevention_dsm.html" ] || die "Missing ${HELP_DIR}/threatprevention_dsm.html"
 [ -f "${HELP_DIR}/threatprevention_router.html" ] || die "Missing ${HELP_DIR}/threatprevention_router.html"
+[ -f "${HELP_DIR}/images/router-traffic-copy.svg" ] || die "Missing ${HELP_DIR}/images/router-traffic-copy.svg"
 python3 - "${STAGING}/package/ui" "${HELP_DIR}" <<'PY'
 import json, os, shutil, sys
 ui, src_dir = sys.argv[1], sys.argv[2]
@@ -147,10 +148,18 @@ for name, _title in pages:
     src = os.path.join(src_dir, name)
     if not os.path.isfile(src):
         raise SystemExit("missing " + src)
+    img_src = os.path.join(src_dir, "images")
     for lang in sorted(os.listdir(help_root)):
         dest = os.path.join(help_root, lang)
         if os.path.isdir(dest):
             shutil.copy(src, os.path.join(dest, name))
+            if os.path.isdir(img_src):
+                img_dest = os.path.join(dest, "images")
+                os.makedirs(img_dest, exist_ok=True)
+                for fn in os.listdir(img_src):
+                    if fn.startswith("."):
+                        continue
+                    shutil.copy(os.path.join(img_src, fn), os.path.join(img_dest, fn))
 toc_path = os.path.join(ui, "helptoc.conf")
 toc = json.load(open(toc_path, encoding="utf-8"))
 children = toc.get("toc") or []

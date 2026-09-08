@@ -11,14 +11,7 @@ Two router families share the same NAS capture pin (`tps0`). They do **not** use
 
 MikroTik **EoIP** is a proprietary GRE flavor (tunnel-id). It will not peer with Linux gretap (ethertype 0x6558, Transparent Ethernet Bridging). `/interface gre` is L3 only. That is why this package uses TZSP for RouterOS.
 
-```
-LAN clients ↔ LAN bridge/switch ↔ WAN
-                 │
-                 │  OpenWrt: nft dup → gretap
-                 │  MikroTik: sniff-tzsp → UDP 37008
-                 ▼
-            NAS tps0  →  Suricata AF_PACKET
-```
+![LAN clients exchange traffic with the WAN through the LAN gateway. OpenWrt copies it with nft dup over gretap (DSM Firewall GRE protocol 47). MikroTik copies it with sniff-tzsp on UDP 37008. The copy arrives on NAS tps0 and Suricata inspects it.](../spk/src/threatprevention/package/ui/help/enu/images/router-traffic-copy.svg)
 
 Copies are originated on the router as **OUTPUT**. The copy hook is **forward** only, so the copy is not re-mirrored.
 
