@@ -68,7 +68,7 @@ Default capture iface on SA6400 is `ovs_eth0` (eth0 is an OVS slave).
 ## Pack command
 
 ```sh
-./build/spk/pack-spk.sh
+./spk/pack-spk.sh
 ```
 
 Output: `artifact/ThreatPrevention-x86_64-8.0.6-NNNN.spk` (unsigned POSIX tar; ~18 MiB with vendored libs).

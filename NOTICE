@@ -1,0 +1,33 @@
+# NOTICE
+
+## This repository
+
+Community-written code and documentation in this tree are MIT-licensed (see LICENSE).
+This project is an independent research PoC. It is not affiliated with, endorsed
+by, or a contribution to Synology Inc.
+
+## Synology (not redistributed)
+
+The official Threat Prevention ExtJS application (`synoips.js`), `ui/texts`,
+official help, icons as shipped in the SRM SPK, and aarch64 `SYNO.TPS.*.so`
+modules are copyright Synology Inc. They are **not** part of this Git repository.
+
+Packing an SPK requires a local `unpacked/` tree taken from an official SPK you
+already have. Do not add that tree to git or to a public release.
+
+## Suricata
+
+The engine is vanilla Suricata 8, licensed under the GNU General Public License
+version 2. Build it with `build/suricata-8/build.sh`. Binaries are not stored in git.
+
+## PyYAML
+
+Vendored at `spk/src/threatprevention/vendor/yaml/`. License: MIT.
+See `spk/src/threatprevention/vendor/PyYAML.LICENSE`.
+
+## Emerging Threats
+
+Bootstrap rules at pack time come from the official package tarball (ET Open dump).
+That tarball is not stored in git. Live updates use URLs in
+`spk/src/threatprevention/package/etc/rule-sources.json` (operator-overridable).
+Follow the license of each feed you enable.

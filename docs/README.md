@@ -1,24 +1,24 @@
 # Documentation
 
-Operator and research notes for the community DSM 7 Threat Prevention PoC (vanilla Suricata 8 + official ExtJS UI). Not a product.
+Operator and internals for this DSM 7 Threat Prevention PoC. Start with the [root README](../README.md).
 
 ## Operator
 
 | Doc | When to read it |
 | --- | --- |
-| [spk-deploy-and-update.md](spk-deploy-and-update.md) | Install, `setcap`, upgrade, uninstall, capture pin |
+| [spk-deploy-and-update.md](spk-deploy-and-update.md) | Install, `setcap`, upgrade, uninstall |
 | [hw-acceleration.md](hw-acceleration.md) | Intel Hyperscan default; DPDK / NIC offload not wired |
 | [google-maps.md](google-maps.md) | Overview map / GeoIP (optional) |
 
-On an installed NAS, operator steps ship in DSM Help → **This NAS (Suricata IDS)** (`setcap`, capture on the NAS LAN, Hyperscan).
+On an installed NAS: DSM Help → **This NAS (Suricata IDS)**.
 
 ## Internals
 
 | Doc | Topic |
 | --- | --- |
-| [dsm-extjs-sdk.md](dsm-extjs-sdk.md) | DSM 7 ExtJS load path, `ui/config`, Help indexer |
-| [backend-replaceability.md](backend-replaceability.md) | What is official vs community |
-| [ootb-ui-compat-review.md](ootb-ui-compat-review.md) | Shim layers on `synoips.js` |
+| [backend-replaceability.md](backend-replaceability.md) | Official vs community backend |
+| [ootb-ui-compat-review.md](ootb-ui-compat-review.md) | Bridge / shim on `synoips.js` |
+| [dsm-extjs-sdk.md](dsm-extjs-sdk.md) | DSM 7 ExtJS load path, Help indexer |
 | [api/SYNO.TPS.contract.md](api/SYNO.TPS.contract.md) | `SYNO.TPS.*` envelopes |
 | [api/official-app-surface.md](api/official-app-surface.md) | What the official app calls |
 | [api/backend-port-backlog.md](api/backend-port-backlog.md) | Remaining API gaps |
@@ -26,7 +26,9 @@ On an installed NAS, operator steps ship in DSM Help → **This NAS (Suricata ID
 | [spk-repack-evaluation.md](spk-repack-evaluation.md) | SPK packaging notes |
 | [x64-dsm-migration-plan.md](x64-dsm-migration-plan.md) | aarch64 SRM → x86_64 DSM |
 
-## Official SRM package (research only)
+## Research (official SRM SPK)
+
+Notes on the original `ThreatPrevention-1.3.3-0926` tree. That tree is **not** in git.
 
 | Doc | Topic |
 | --- | --- |
@@ -34,4 +36,4 @@ On an installed NAS, operator steps ship in DSM Help → **This NAS (Suricata ID
 | [ThreatPrevention-bundled-signatures.md](ThreatPrevention-bundled-signatures.md) | Bundled ET dump |
 | [rules/README.md](rules/README.md) | Rule extracts |
 
-Do not publish official `synoips.js`, texts, or help as a community product. The extra DSM Help page in this repo (`threatprevention_dsm.html`) is community-written.
+Do not publish official `synoips.js`, texts, or help. The extra DSM Help page (`threatprevention_dsm.html`) is community-written.

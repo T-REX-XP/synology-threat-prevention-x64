@@ -1,4 +1,18 @@
-artifact/*
-build/*
+# Local / generated
+.DS_Store
+**/.DS_Store
+__pycache__/
+*.pyc
+*.spk
+
+artifact/
+extracted/
+build/spk/
+build/suricata-8/out/
+
+# Official Synology tree (required to pack, not redistributable)
+unpacked/package/
+unpacked/spk/
+
 ui/node_modules/
 ui/dist/
