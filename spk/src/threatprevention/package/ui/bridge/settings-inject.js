@@ -737,12 +737,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				}
 				return true;
 			}
-			if (tryPatch()) { return; }
-			if (Panel) { return; }
-			var tries = 0;
-			var id = window.setInterval(function () {
-				if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
-			}, 25);
+			this.whenClass(tryPatch, !!Panel);
 		},
 		injectSettingsTabs: function () {
 			var me = this;
@@ -756,11 +751,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (S.GeneralPanel) { me.patchGeneralSettings(S.GeneralPanel); }
 				return true;
 			}
-			if (tryPatch()) { return; }
-			var tries = 0;
-			var id = window.setInterval(function () {
-				if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
-			}, 25);
+			this.whenClass(tryPatch, false);
 		},
 		hookExtDefine: function () {
 			var me = this;

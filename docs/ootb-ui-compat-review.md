@@ -102,10 +102,10 @@ These are the places the shim fights the official app instead of meeting the con
 | P3 | High | DisplayField `innerHTML` rewrite | DSM 7 `htmlEncode` + `restoreOfficialMarkup` replaced live `<a class="pathlink">` and dropped `afterrender` click handlers. | Set `htmlEncode:false` on those fields. Bind clicks with capture-phase delegation. Never replace `innerHTML` of live widgets. |
 | P4 | Med | General form dirty/valid patch pile | Fake `ovs_eth0` rows, `allowBlank` on code/weekday, `CheckUpdateSettingsDirty` always includes Schedule.set, `clearDirty` at 0ms and 50ms. | After official `processReturnData`, snap `originalValue` once. Drive `isValid` from real data. Do not inject phantom NICs except as a last-resort fallback. |
 | P5 | Med | Capture mode `setDisabled` gate | Monkey-patches `interfaceGrid.setDisabled` so official Sensor load cannot re-enable the grid. Radios bound via handler+check+click. | One check handler, same pattern as `onEnableSensorChecked`. No prototype wrap. Official load then our sync, in that order only. |
-| P6 | Med | Chart stubs look like charts | `SYNO.SDS.Chart.*` SVG placeholders let Overview construct. Trends/pies do not match SRM Chart widgets. | Either implement `setChartItems`/`draw` against official data, or show a DSM note instead of a fake graph. |
+| P6 | Med | Chart stubs look like charts | `SYNO.SDS.Chart.*` SVG placeholders let Overview construct. Empty series used to look like a blank product graph. | Landed: `setChartItems`/`draw` plot official `[index,y]` series; all-zero / empty shows a DSM note. |
 | P7 | Med | Compound = N sequential HTTP posts | Settings Apply fans out each `SYNO.TPS.*` call. Order `Sensor.set` vs `Mirror.set` races capture pin. | Add one tpsweb compound method that applies the list server-side in a defined order (Mirror then Sensor). |
 | P8 | Med | Fake `Polling.List` admin collection | SignatureUpdater expected DSM job names `SYNO.TPS_Updater`. Bridge synthesizes a collection then rewrites `update()` to poll `Update.status`. | Keep the updater patch (it is the right contract) but drop the fake List once `update()` no longer calls `pollList`. |
-| P9 | Med | God files | `tpsweb.handle()` is a long if-ladder. Timing retries (25ms × 80) wait for `Ext.define`. | Bridge is split at pack time. Split tpsweb routers. Hook `Ext.define` once; drop `setInterval` polls. |
+| P9 | Med | God files | `tpsweb.handle()` is a long if-ladder. Timing retries (25ms × 80) wait for `Ext.define`. | Bridge is split at pack time. `hookExtDefine` + `whenClass` skip those polls when the hook is installed. Split tpsweb routers still later. |
 | P10 | Med | gretap from the package user | UI writes `mirror.conf`; tpsweb `ip link add` often fails without `CAP_NET_ADMIN`. Tunnel only appears after `synopkg restart` as root. | Create `tps0` only in `start-stop-status`. UI set writes conf + pin; return `tap_present` honestly; tell the user to restart the package. |
 | P11 | Low | Two extra-feature patterns | Telegram stripped from `Notification.set`; Mirror uses fieldset `webapi`; Feeds is a new tab with `useDefaultBtn:false`. | One pattern: extra Settings tab for all community fields. Do not splice official `fillConfig` except for capture source if it must sit next to the iface grid. |
 | P12 | Low | HTTPS DSM mixed content | tpsweb is HTTP `:19557`. Same-origin nginx `/webman/tps-api` is the fix; leftover `:19557` fallback still exists in the bridge. | Remove the host:19557 fallback. Fail closed if `/webman/tps-api` (then same-origin legacy) is missing. |
@@ -137,17 +137,15 @@ These are the places the shim fights the official app instead of meeting the con
 | Landed | Code | Split the bridge at pack time | `bridge/transport.js`, `dsm7.js`, `settings-inject.js` concatenated in `pack-spk.sh`. Same JSLoad prepend. |
 | Landed | Tests | Envelope fixtures from `synoips.js` | Store roots (`signatures`, `rules`, `list`, `devices`, `notification_filters`, `events`, `days7`, `trends`) plus FormPanel gets in `test_compat.py`. Capture-mode Apply order is the Compound Mirror-then-Sensor case. |
 | Landed | Transport | Drop `:19557` fallback | Bridge posts `/webman/tps-api`, then same-origin `/webman/3rdparty/ThreatPrevention/api`. No `http://host:19557`. |
-| Later | Charts | Real Overview graphs or a stub label | Drive `LineChart` from `Statistic.Trends`; stop drawing empty SVG that looks like a product chart. |
-| Later | Ops | setcap + nginx in one operator path | `postinst` prints the exact `sudo setcap`; Overview banner if cap missing. |
+| Landed | Charts | Real Overview graphs or a stub label | `LineChart` / `PieChart` draw SVG from official `setChartItems` data. All-zero / empty series show a DSM note instead of a blank graph. |
+| Landed | Ops | setcap + nginx in one operator path | `postinst` prints the exact `sudo setcap`. Sensor.get includes `capture_capable`. Overview banner if cap missing. |
 | Exit | Product | Vue DSM app, Suricata-native API | Stop shipping `synoips.js`. Official UI is research-only and Synology copyright. |
 
 **Recommended next cuts if you stay on the shim**
 
-The “Now” honesty / Request / form / capture / compound / gretap cuts, plus the pack-time bridge split, envelope fixtures, and `:19557` drop, are in `8.0.6-0056`. Remaining:
+The “Now” honesty / Request / form / capture / compound / gretap cuts, plus the pack-time bridge split, envelope fixtures, `:19557` drop, Overview empty-chart labels, and `postinst` / Overview setcap path, are in this tree. Remaining:
 
-1. Real Overview charts or a stub label instead of empty SVG.
-2. `postinst` setcap one-liner and Overview banner if the cap is missing.
-3. Split `tpsweb.handle()` routers; hook `Ext.define` once and drop `setInterval` polls.
+1. Split `tpsweb.handle()` routers; SignatureUpdater still uses a short `setInterval` wait because it is an object literal, not `Ext.define`.
 
 Those remove the remaining “feel broken” surface without a new UI.
 

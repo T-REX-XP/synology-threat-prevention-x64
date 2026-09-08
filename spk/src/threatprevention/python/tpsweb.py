@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from compat import (
     coerce_params,
+    capture_capable,
     flatten_keywords,
     now_str,
     official_devices,
@@ -153,6 +154,33 @@ def engine_status():
             pass
         return "running", pid
     return "stopped", 0
+
+
+def _getcap_text(path):
+    for cmd in ("/usr/bin/getcap", "getcap"):
+        try:
+            out = subprocess.check_output([cmd, path], stderr=subprocess.STDOUT, timeout=2)
+            return out.decode("utf-8", "replace")
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            continue
+    return ""
+
+
+def _suricata_log_tail(n=8192):
+    path = os.path.join(PKGVAR, "log", "suricata.log")
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - n))
+            return fh.read().decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
+def suricata_capture_capable():
+    st, _pid = engine_status()
+    return capture_capable(_getcap_text(SURICATA_BIN), st == "running", _suricata_log_tail())
 
 
 _AUTOSTART_TRY = 0.0
@@ -305,6 +333,7 @@ def read_sensor():
         mirror_ifname=mirror.get("ifname") or "",
         mirror_enabled=bool(mirror.get("enabled")),
     )
+    data["capture_capable"] = suricata_capture_capable()
     for item in data.get("interface_list") or []:
         item["ip_addr"] = iface_ipv4(item.get("if_id") or item.get("ifname") or "") or ""
     return data

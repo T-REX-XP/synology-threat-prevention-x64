@@ -11,6 +11,8 @@ os.environ.setdefault("TPS_PKGETC", os.environ["TPS_PKGVAR"])
 os.environ.setdefault("TPS_PKGDEST", os.environ["TPS_PKGVAR"])
 
 from compat import (  # noqa: E402
+    SETCAP_CMD,
+    capture_capable,
     classify_update,
     official_devices,
     official_event,
@@ -67,6 +69,10 @@ sensor = official_sensor(
 check(sensor["status"] == "engine_start", "sensor status")
 check(sensor["prevention_enforced"] is False and sensor["ips_mode"] == "ids", "ids only")
 check(sensor["enable_prevention"] is False and sensor["network_security_mode"] == "availability", "ids chrome")
+check(capture_capable("suricata = cap_net_raw,cap_net_admin+ep") is True, "getcap text is capable")
+check(capture_capable("", True) is True, "running engine is capable")
+check(capture_capable("", False, "Error: Operation not permitted") is False, "EPERM without cap is not capable")
+check(SETCAP_CMD.startswith("/usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep "), "setcap command")
 lied = official_sensor(
     {
         "enable_sensor": True,
@@ -193,6 +199,17 @@ check("setTimeout(function () { me.clearGeneralDirty" not in js, "no timer dirty
 check("fallbackBase" not in js, "no :19557 fallback helper")
 check(":19557" not in js, "no mixed-content host:19557 fallback")
 check("return \"/webman/tps-api\"" in js, "same-origin tps-api is primary")
+check("whenClass:" in js, "bridge shares Ext.define waiter")
+check("Ext.define._tpsHook" in js, "whenClass skips poll if Ext.define is hooked")
+check(js.count("tries > 80") == 1, "one Ext.define poll helper")
+check("tps_cap_note" in js, "Overview banner when capture cap missing")
+check(SETCAP_CMD in js, "Overview banner prints exact setcap")
+postinst = open(os.path.join(HERE, "..", "scripts", "postinst"), encoding="utf-8").read()
+check("sudo " + SETCAP_CMD in postinst, "postinst prints exact sudo setcap")
+chart_js = open(os.path.join(HERE, "..", "package", "ui", "tps-chart.js"), encoding="utf-8").read()
+check("No trend data yet" in chart_js, "LineChart empty-state label")
+check("No events in this period" in chart_js, "PieChart empty-state label")
+check("tps-chart-empty" in chart_js, "empty chart CSS class")
 
 src = official_source("et-pro", "abc")
 check(src["use_code"] == "etPro" and src["support_etpro"] is True, "source use_code")
@@ -275,6 +292,7 @@ check("now" in inner and "total" in inner, "list_status now/total")
 sens = handle("SYNO.TPS.Sensor", "get", {}, conn)
 check(sens["success"] and isinstance(sens["data"].get("interface_list"), list), "Sensor.get interface_list")
 check(sens["data"]["prevention_enforced"] is False and sens["data"]["ips_mode"] == "ids", "Sensor.get ids")
+check(isinstance(sens["data"].get("capture_capable"), bool), "Sensor.get capture_capable")
 svar = handle("SYNO.TPS.Sensor.Variables", "get", {}, conn)
 check(svar["success"] and "home_net" in svar["data"], "Variables.get home_net")
 pol = handle("SYNO.TPS.Signature.Policy", "list", {}, conn)

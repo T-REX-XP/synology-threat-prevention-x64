@@ -48,9 +48,14 @@ Package Center → Manual Install, or:
 sudo synopkg install /tmp/ThreatPrevention-x86_64-8.0.6-0010.spk
 ```
 
-What `postinst` does (as the package user): unpacks the bundled ET 2021 tarball if missing, concatenates `*.rules` into `/var/packages/ThreatPrevention/var/rules/suricata.rules` so the engine has a bootstrap ruleset. It does **not** apply `setcap` and does **not** fetch current ET Open.
+What `postinst` does (as the package user): unpacks the bundled ET 2021 tarball if missing, concatenates `*.rules` into `/var/packages/ThreatPrevention/var/rules/suricata.rules` so the engine has a bootstrap ruleset. It cannot apply `setcap` (unsigned packages, synopkg 319) and does **not** fetch current ET Open. It **does** print the exact admin command to stderr:
 
-Install may report “started” while Suricata later dies on `AF_PACKET … Operation not permitted`. That is expected until the post-deploy cap is set.
+```
+sudo /usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep /var/packages/ThreatPrevention/target/bin/suricata
+sudo synopkg restart ThreatPrevention
+```
+
+Install may report “started” while Suricata later dies on `AF_PACKET … Operation not permitted`. That is expected until the post-deploy cap is set. Overview also shows a banner when `Sensor.get` reports `capture_capable: false`.
 
 ### Post-deploy (required)
 

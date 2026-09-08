@@ -56,6 +56,15 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 		componentGone: function (comp) {
 			return !!(comp && comp !== window && (comp.isDestroyed || comp.destroying));
 		},
+		whenClass: function (tryPatch, alreadyPassed) {
+			if (tryPatch()) { return; }
+			if (alreadyPassed) { return; }
+			if (window.Ext && Ext.define && Ext.define._tpsHook) { return; }
+			var tries = 0;
+			var id = window.setInterval(function () {
+				if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
+			}, 25);
+		},
 		walkAppWindow: function (start) {
 			var c = start, n = 0;
 			while (c && n++ < 40) {

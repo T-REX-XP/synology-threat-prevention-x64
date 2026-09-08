@@ -20,6 +20,27 @@ POLICY_TYPE_FILTER = 3
 
 SEVERITY_NAME = {1: "high", 2: "medium", 3: "low"}
 
+SETCAP_CMD = (
+    "/usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep "
+    "/var/packages/ThreatPrevention/target/bin/suricata"
+)
+
+
+def capture_capable(getcap_text="", engine_running=False, log_tail=""):
+    """Whether bin/suricata can open AF_PACKET (file caps or a live engine).
+
+    log_tail is the last chunk of suricata.log; EPERM there does not override a
+    live engine or getcap text, but callers still pass it for the failed-start case.
+    """
+    text = (getcap_text or "").lower()
+    if "cap_net_raw" in text and "cap_net_admin" in text:
+        return True
+    if engine_running:
+        return True
+    if "operation not permitted" in (log_tail or "").lower():
+        return False
+    return False
+
 
 def now_str():
     return time.strftime("%Y-%m-%d %H:%M:%S")

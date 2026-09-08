@@ -52,6 +52,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			(document.head || document.getElementsByTagName("head")[0] || document.body).appendChild(el);
 		},
 		patchRuleGridCombo: function (Panel) {
+			var me = this;
 			function tryPatch() {
 				var P = Panel;
 				if (!P || !P.prototype) {
@@ -67,12 +68,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				};
 				return true;
 			}
-			if (tryPatch()) { return; }
-			if (Panel) { return; }
-			var tries = 0;
-			var id = window.setInterval(function () {
-				if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
-			}, 25);
+			this.whenClass(tryPatch, !!Panel);
 		},
 		looksOfficialHtml: function (v) {
 			return typeof v === "string" && v.indexOf("<") !== -1 &&
@@ -376,6 +372,36 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				else if (box.doLayout) { box.doLayout(); }
 			} catch (e) { /* status container not ready */ }
 		},
+		ensureOverviewCapNote: function (panel, data) {
+			if (!panel || !window.Ext) { return; }
+			var box = panel.statusContainerId && Ext.getCmp(panel.statusContainerId);
+			if (!box || !box.add) { return; }
+			var existing = box.getComponent && box.getComponent("tps_cap_note");
+			if (!data || data.capture_capable !== false) {
+				if (existing && box.remove) {
+					try { box.remove(existing, true); } catch (e0) { /* already gone */ }
+				}
+				return;
+			}
+			var html = "Capture needs file capabilities. As admin run:<br><code>/usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep /var/packages/ThreatPrevention/target/bin/suricata</code><br>then restart the package.";
+			if (existing) {
+				if (existing.setValue) { existing.setValue(html); }
+				return;
+			}
+			try {
+				box.add({
+					xtype: "syno_displayfield",
+					itemId: "tps_cap_note",
+					hideLabel: true,
+					htmlEncode: false,
+					cls: "syno-ux-note note-font",
+					margins: "8 0 0 0",
+					value: html
+				});
+				if (panel.doLayout) { panel.doLayout(); }
+				else if (box.doLayout) { box.doLayout(); }
+			} catch (e) { /* status container not ready */ }
+		},
 		bindStatusPathlinks: function (panel) {
 			if (!panel) { return; }
 			var el = panel.el || (panel.getEl && panel.getEl());
@@ -469,12 +495,25 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						var ret = origShowStart.apply(this, arguments);
 						me.bindStatusPathlinks(this);
 						me.ensureOverviewIdsNote(this);
+						me.ensureOverviewCapNote(this, this._tpsSensorData);
 						window.setTimeout(function () {
 							me.bindStatusPathlinks(self);
 							me.ensureOverviewIdsNote(self);
+							me.ensureOverviewCapNote(self, self._tpsSensorData);
 						}, 0);
 						return ret;
 					};
+				}
+				var origSensorCb = P.prototype.sensorStatusCallback;
+				if (origSensorCb && !P.prototype.sensorStatusCallback._tpsCap) {
+					P.prototype.sensorStatusCallback = function (ok, data) {
+						var ret = origSensorCb.apply(this, arguments);
+						if (ok && data) { this._tpsSensorData = data; }
+						me.ensureOverviewIdsNote(this);
+						me.ensureOverviewCapNote(this, this._tpsSensorData);
+						return ret;
+					};
+					P.prototype.sensorStatusCallback._tpsCap = true;
 				}
 				if (Ext.ComponentMgr && Ext.ComponentMgr.all && Ext.ComponentMgr.all.each) {
 					Ext.ComponentMgr.all.each(function (c) {
@@ -493,12 +532,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				};
 				return true;
 			}
-			if (tryPatch()) { return; }
-			if (Panel) { return; }
-			var tries = 0;
-			var id = window.setInterval(function () {
-				if (tryPatch() || ++tries > 80) { window.clearInterval(id); }
-			}, 25);
+			this.whenClass(tryPatch, !!Panel);
 		},
 		patchGmapsKey: function () {
 			var me = this;

@@ -42,4 +42,9 @@ if [ ! -f "${PKGETC}/mirror.conf" ] && [ -f "${PKGDEST}/etc/mirror.conf" ]; then
 	cp -f "${PKGDEST}/etc/mirror.conf" "${PKGETC}/mirror.conf" 2>/dev/null || true
 	chmod 644 "${PKGETC}/mirror.conf" 2>/dev/null || true
 fi
+# Unsigned packages cannot declare file capabilities (synopkg 319). Print the
+# exact admin command so Package Center / synopkg logs have a copy-paste line.
+echo "Threat Prevention: after every install/upgrade, as admin run:" >&2
+echo "  sudo /usr/bin/setcap cap_net_raw,cap_net_admin,cap_ipc_lock+ep /var/packages/ThreatPrevention/target/bin/suricata" >&2
+echo "  sudo synopkg restart ThreatPrevention" >&2
 exit 0
