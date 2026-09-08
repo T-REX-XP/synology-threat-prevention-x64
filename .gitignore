@@ -22,6 +22,7 @@ artifact/
 extracted/
 build/spk/
 build/suricata-8/out/
+build/suricata-8/src/
 build/cache/
 build/official/
 build/official-tmp/

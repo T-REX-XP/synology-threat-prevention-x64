@@ -1,12 +1,12 @@
-# Suricata for DSM 7 x86_64. SURICATA_VERSION is passed from repo VERSION
-# via build/suricata-8/build.sh --build-arg.
-# Build on Debian 12 so the binary needs at most glibc 2.36 (DSM 7.4 SA6400).
-# Capture: AF_PACKET + NFQUEUE. Private libs vendored next to the binary.
+# Suricata for DSM. SURICATA_VERSION from repo VERSION via --build-arg.
+# GitHub Actions compiles natively (no Docker). This image is for local
+# cross-build (e.g. Apple Silicon → x86_64). TARGETPLATFORM comes from buildx.
 
 ARG SURICATA_VERSION=8.0.6
 ARG PREFIX=/opt/tps-suricata
+ARG TARGETPLATFORM=linux/amd64
 
-FROM --platform=linux/amd64 debian:12 AS build
+FROM --platform=$TARGETPLATFORM debian:12 AS build
 ARG SURICATA_VERSION
 ARG PREFIX
 ENV DEBIAN_FRONTEND=noninteractive

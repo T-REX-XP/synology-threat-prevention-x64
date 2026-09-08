@@ -79,8 +79,8 @@ artifact/                     Built community .spk (gitignored)
 
 Official Synology files never live in git **or in GitHub Releases**. CI publishes
 the engine tarball named from [`VERSION`](VERSION)
-(`suricata-<SURICATA_VERSION>-linux-amd64.tar.gz`). The NAS installer fetches that
-tarball plus the public `ThreatPrevention-cypress-1.3.3-0926.spk` and copies only
+(`suricata-<SURICATA_VERSION>-linux-amd64.tar.gz` and `-linux-arm64.tar.gz`). The NAS installer fetches the
+tarball for this CPU plus the public `ThreatPrevention-cypress-1.3.3-0926.spk` and copies only
 what packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
 `synosuricata` and `SYNO.TPS.*.so` are discarded.
 
@@ -93,7 +93,11 @@ what packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
 - A GitHub Release that includes the engine tarball from [`VERSION`](VERSION)
 
 **Developer rebuild (`./build.sh`)**
-- Docker (compile Suricata 8 linux/amd64)
+- On Linux matching the target: native compile (no Docker)
+- On macOS: Docker (qemu) for linux/amd64
+
+GitHub Actions compile natively on `ubuntu-24.04` (x86_64) and
+`ubuntu-24.04-arm` (aarch64). Docker is not used in CI.
 
 ## Install on the NAS (no compile)
 
@@ -139,11 +143,12 @@ Full operator notes: [docs/spk-deploy-and-update.md](docs/spk-deploy-and-update.
 # artifact/ThreatPrevention-x86_64-<SURICATA_VERSION>-<PKG_RELEASE>.spk
 ```
 
-CI (`.github/workflows/release.yml`) on tag `v<PKG_VERSION>` builds the engine tarball from [`VERSION`](VERSION):
+CI (`.github/workflows/release.yml`) on tag `v<PKG_VERSION>` builds engine
+tarballs **natively** (no Docker), x86_64 and aarch64:
 
 ```
 artifact/suricata-<SURICATA_VERSION>-linux-amd64.tar.gz
-artifact/suricata-<SURICATA_VERSION>-linux-amd64.tar.gz.sha256
+artifact/suricata-<SURICATA_VERSION>-linux-arm64.tar.gz
 ```
 
 | Flag | Meaning |

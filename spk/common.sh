@@ -6,7 +6,24 @@
 : "${SURICATA_VERSION:?VERSION: missing SURICATA_VERSION}"
 : "${PKG_RELEASE:?VERSION missing PKG_RELEASE}"
 PKG_VERSION="${SURICATA_VERSION}-${PKG_RELEASE}"
-ENGINE_ASSET="suricata-${SURICATA_VERSION}-linux-amd64.tar.gz"
+
+# Default: Intel/AMD NAS. On a Synology ARM host, follow uname. Override with TPS_ARCH.
+if [ -z "${TPS_ARCH:-}" ]; then
+    if [ -x /usr/syno/bin/synopkg ] || command -v synopkg >/dev/null 2>&1; then
+        case "$(uname -m)" in
+            aarch64|arm64) TPS_ARCH=aarch64 ;;
+            *) TPS_ARCH=x86_64 ;;
+        esac
+    else
+        TPS_ARCH=x86_64
+    fi
+fi
+case "${TPS_ARCH}" in
+    x86_64|amd64) TPS_ARCH=x86_64; ENGINE_SUFFIX=linux-amd64 ;;
+    aarch64|arm64) TPS_ARCH=aarch64; ENGINE_SUFFIX=linux-arm64 ;;
+    *) echo "ERROR: unsupported TPS_ARCH=${TPS_ARCH}" >&2; exit 1 ;;
+esac
+ENGINE_ASSET="suricata-${SURICATA_VERSION}-${ENGINE_SUFFIX}.tar.gz"
 
 OFFICIAL_PKG="ThreatPrevention"
 OFFICIAL_VER="1.3.3-0926"

@@ -9,7 +9,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 : "${SURICATA_VERSION:?VERSION: missing SURICATA_VERSION}"
 : "${PKG_RELEASE:?VERSION missing PKG_RELEASE}"
 PKG_VERSION="${SURICATA_VERSION}-${PKG_RELEASE}"
-ENGINE_ASSET="suricata-${SURICATA_VERSION}-linux-amd64.tar.gz"
+# pack-spk does not source arch.sh; keep the same names as common.sh
+case "${TPS_ARCH:-x86_64}" in
+    x86_64|amd64) TPS_ARCH=x86_64; ENGINE_SUFFIX=linux-amd64 ;;
+    aarch64|arm64) TPS_ARCH=aarch64; ENGINE_SUFFIX=linux-arm64 ;;
+    *) TPS_ARCH=x86_64; ENGINE_SUFFIX=linux-amd64 ;;
+esac
+ENGINE_ASSET="suricata-${SURICATA_VERSION}-${ENGINE_SUFFIX}.tar.gz"
 
 SRC="${ROOT}/spk/src/threatprevention"
 ENGINE="${ROOT}/build/suricata-8/out/tps-suricata"
