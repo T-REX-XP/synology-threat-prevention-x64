@@ -1,9 +1,22 @@
-# Local / generated
+# Local / generated — never commit
 .DS_Store
 **/.DS_Store
 __pycache__/
 *.pyc
+
+# Packages, tarballs, native objects
 *.spk
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+*.so
+*.so.*
+*.mgc
+*.o
+*.a
+*.dylib
+*.exe
 
 artifact/
 extracted/
@@ -13,9 +26,15 @@ build/cache/
 build/official/
 build/official-tmp/
 
-# Official Synology tree (downloaded by ./build.sh, not redistributable)
+# Official Synology tree (downloaded by ./build.sh / install.sh)
 unpacked/package/
 unpacked/spk/
+
+# Generated ET catalogs (from the official rules tarball)
+docs/data/bundled-alerts.csv
+docs/rules/alerts-all.csv
+docs/rules/alerts-active.csv
+docs/rules/alerts-active.json
 
 ui/node_modules/
 ui/dist/

@@ -11,6 +11,10 @@ This note catalogs every signature shipped in the SPK. The engine (`synosuricata
 
 ## 1. Where the files are
 
+CSV/JSON catalogs under `docs/rules/` (except `summary.json`) are **generated**
+(`extract_rules.py`) and are not in git. Official tarball paths below exist
+after `./build.sh` extracts the public SRM SPK.
+
 | Path | Contents |
 | --- | --- |
 | `unpacked/package/etc/rules/emerging.rules.tar.gz` | Vendor tarball (2.9 MiB) |
