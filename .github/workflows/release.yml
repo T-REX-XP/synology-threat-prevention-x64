@@ -114,12 +114,14 @@ jobs:
 
             This release does **not** include a packed SPK or official Synology UI.
 
-            ```
-            bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh)"
-            ```
-
-            Pinned to this release:
+            Always latest installer + latest engine:
 
             ```
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --tag ${{ github.ref_name }}
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash
+            ```
+
+            Optional — pin the engine to this release (`--tag` is optional):
+
+            ```
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash -s -- --tag ${{ github.ref_name }}
             ```

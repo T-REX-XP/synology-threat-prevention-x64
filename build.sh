@@ -129,13 +129,13 @@ ensure_engine() {
         return
     fi
     info "Building Suricata ${SURICATA_VERSION} (linux/amd64 via Docker)"
-    "${SCRIPT_DIR}/build/suricata-8/build.sh"
+    bash "${SCRIPT_DIR}/build/suricata-8/build.sh"
 }
 
 pack_spk() {
     export TPS_OFFICIAL="$OFFICIAL_DIR"
     info "Packing community SPK"
-    "${SCRIPT_DIR}/spk/pack-spk.sh"
+    bash "${SCRIPT_DIR}/spk/pack-spk.sh"
 }
 
 main() {

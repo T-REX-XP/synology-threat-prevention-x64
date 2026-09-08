@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Prepare and install Threat Prevention on a DSM 7 x86_64 NAS.
 #
-# One-liner (no git clone):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh)"
+# One-liner (no git clone) — always latest installer + latest engine:
+#   curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | sudo bash
+# Optional pin of the engine GitHub Release:
+#   … | sudo bash -s -- --tag v0.2.0
 #
 # Does not compile Suricata. Fetches a prebuilt engine from GitHub Releases,
 # downloads the official SRM UI SPK, packs a community SPK, then synopkg
@@ -32,11 +34,11 @@ Usage: $0 [options]
 On a DSM 7 Intel/AMD NAS: fetch the prebuilt Suricata engine, assemble the
 SPK (official UI is downloaded here, not from GitHub), install, setcap.
 
-  bash -c "\$(curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh)"
+  curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh | sudo bash
 
   --repo owner/name       GitHub repo (default: ${DEFAULT_REPO})
-  --tag TAG               Engine GitHub Release (default: latest). Installer
-                          sources always come from ${DEFAULT_BRANCH}.
+  --tag [TAG]             Engine GitHub Release (optional; default: latest).
+                          Installer sources always come from ${DEFAULT_BRANCH}.
   --engine-tar PATH       Use a local engine tarball
   --official-spk PATH     Use a local official Threat Prevention .spk
   --skip-install          Pack only (do not synopkg)
@@ -56,9 +58,13 @@ while [ $# -gt 0 ]; do
         --no-setcap) SKIP_SETCAP=1; shift ;;
         --force) FORCE_EXTRACT=1; FORCE_ENGINE=1; export FORCE_EXTRACT FORCE_ENGINE; shift ;;
         --tag)
-            [ $# -ge 2 ] || usage
-            RELEASE_TAG="$2"
-            shift 2
+            if [ $# -ge 2 ] && [ "${2#-}" = "$2" ]; then
+                RELEASE_TAG="$2"
+                shift 2
+            else
+                RELEASE_TAG="latest"
+                shift
+            fi
             ;;
         --engine-tar)
             [ $# -ge 2 ] || usage
@@ -80,6 +86,8 @@ while [ $# -gt 0 ]; do
         *) usage ;;
     esac
 done
+
+[ -n "$RELEASE_TAG" ] || RELEASE_TAG="latest"
 
 repo_root() {
     if [ -n "${TPS_ROOT:-}" ] && [ -f "${TPS_ROOT}/VERSION" ] && [ -d "${TPS_ROOT}/spk/src/threatprevention" ]; then
@@ -113,6 +121,8 @@ bootstrap_sources() {
     # DEST: DSM BusyBox ignores -C after -f.
     curl -fsSL --retry 3 "$url" | tar -xz -C "$work" --strip-components=1
     [ -f "$work/install.sh" ] && [ -f "$work/VERSION" ] || die "GitHub archive is missing install.sh / VERSION"
+    # GitHub tarballs / BusyBox tar often drop +x. Always run scripts with bash.
+    chmod +x "$work/install.sh" "$work/build.sh" "$work/spk/"*.sh 2>/dev/null || true
     export TPS_GITHUB_REPO="$repo"
     info "Re-running installer from ${work}"
     exec bash "$work/install.sh" "${ORIG_ARGS[@]}"
@@ -205,7 +215,7 @@ main() {
     if [ -n "${OFFICIAL_SPK_OVERRIDE}" ]; then
         pack_args+=(--official-spk "$OFFICIAL_SPK_OVERRIDE")
     fi
-    "${SCRIPT_DIR}/build.sh" "${pack_args[@]}"
+    bash "${SCRIPT_DIR}/build.sh" "${pack_args[@]}"
     install_spk
 }
 

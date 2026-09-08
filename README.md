@@ -36,16 +36,18 @@ Official ExtJS (`synoips.js`, texts, help) is **Synology copyright**. It is **no
 
 On the NAS (DSM 7 Intel/AMD). Package Center → Trust Level: allow unsigned packages.
 
+Always uses the latest installer from `main` and the latest engine GitHub Release:
+
 ```sh
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh)"
+curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | sudo bash
 ```
 
 That downloads this repo, the prebuilt Suricata engine from GitHub Releases, the official SRM UI SPK, packs the community package, then `synopkg install` + `setcap`. Log out of DSM and back in afterwards.
 
-Pinned **engine** (installer always comes from `main`; `--tag` is the GitHub Release that holds `suricata-*-linux-amd64.tar.gz`):
+`--tag` is optional. Pass it only to pin a specific engine release (`suricata-*-linux-amd64.tar.gz`); installer sources still come from `main`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | bash -s -- --tag v0.2.0
+curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | sudo bash -s -- --tag v0.2.0
 ```
 
 ## Features added vs the official app
@@ -110,7 +112,7 @@ what packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
 
 ## Requirements
 
-**NAS install** (`curl | bash` or `./install.sh`)
+**NAS install** (`curl | sudo bash` or `./install.sh`)
 - DSM **7.0+** Intel/AMD (`arch=x86_64`). Will not run on ARM.
 - `curl`, `tar`, `python3` (no Docker, no git)
 - Package Center → Trust Level: allow unsigned packages
@@ -125,7 +127,7 @@ GitHub Actions compile natively on `ubuntu-24.04` (x86_64) and
 
 ## Install on the NAS (no compile)
 
-See [Install](#install) for the `curl | bash` one-liner. From a checkout:
+See [Install](#install) for the `curl | sudo bash` one-liner. From a checkout:
 
 ```sh
 sudo ./install.sh
@@ -134,6 +136,7 @@ sudo ./install.sh
 | Flag | Meaning |
 | --- | --- |
 | `--skip-install` | Pack only |
+| `--tag TAG` | Optional. Pin engine GitHub Release (default: latest) |
 | `--engine-tar PATH` | Use a local engine tarball |
 | `--official-spk PATH` | Use a local official `.spk` |
 
