@@ -34,7 +34,8 @@ from compat import (  # noqa: E402
 from compiler import parse_header, parse_refs  # noqa: E402
 from geoip import is_public_ipv4, lookup as geoip_lookup  # noqa: E402
 from ingest import payload_hex  # noqa: E402
-from feeds import CATALOG, add_feed, feed_url_ok, list_feeds, seed_catalog_feeds  # noqa: E402
+from feeds import add_feed, feed_url_ok, list_feeds, seed_catalog_feeds  # noqa: E402
+from rule_sources import catalog_entries, source_urls  # noqa: E402
 from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
 from store import init_db, kv_set  # noqa: E402
@@ -396,8 +397,20 @@ check(fid and any(x["name"] == "local-extra" for x in list_feeds(conn)), "feed a
 listed = handle("SYNO.TPS.Settings.Feed", "list", {}, conn)
 check(listed["success"] and listed["data"]["feeds"][0]["url"].startswith("https://"), "feed list api")
 by_name = {x["name"]: x for x in listed["data"]["feeds"]}
-check(len(CATALOG) >= 8 and all(n in by_name for n, _u in CATALOG), "OISF catalog seeded")
-check(all(by_name[n]["enabled"] is False for n, _u in CATALOG), "catalog feeds off by default")
+catalog = catalog_entries()
+check(len(catalog) >= 8 and all(n in by_name for n, _u in catalog), "OISF catalog seeded")
+check(all(by_name[n]["enabled"] is False for n, _u in catalog), "catalog feeds off by default")
+et_open = source_urls("et-open")
+et_pro = source_urls("et-pro", "ABC123")
+check(et_open and all(u.startswith("https://") for u in et_open), "et-open urls from json")
+check(et_pro and all("ABC123" in u and "{code}" not in u for u in et_pro), "et-pro interpolates code")
+for rel in ("tpsweb.py", "feeds.py", "rule_sources.py"):
+    text = open(os.path.join(HERE, rel), encoding="utf-8").read().lower()
+    check("emergingthreats.net" not in text and "emergingthreatspro.com" not in text,
+          "no hardcoded et url in %s" % rel)
+sh_text = open(os.path.join(HERE, "..", "scripts", "update-rules.sh"), encoding="utf-8").read().lower()
+check("emergingthreats.net" not in sh_text and "emergingthreatspro.com" not in sh_text,
+      "no hardcoded et url in update-rules.sh")
 check(by_name["local-extra"]["enabled"] is True, "user-added feed stays enabled")
 nfeeds = len(list_feeds(conn))
 seed_catalog_feeds(conn)

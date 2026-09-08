@@ -1,6 +1,6 @@
 # Threat Prevention SPK — deploy and update
 
-Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0061`). Official ExtJS app with a custom `tpsweb` backend (bridge inlined into `synoips.js` at pack time; Chart stubs in `tps-chart.js`). Not a product. See [backend-replaceability.md](backend-replaceability.md).  
+Unsigned DSM 7 x86_64 research PoC (`ThreatPrevention`, current `8.0.6-0062`). Official ExtJS app with a custom `tpsweb` backend (bridge inlined into `synoips.js` at pack time; Chart stubs in `tps-chart.js`). Not a product. See [backend-replaceability.md](backend-replaceability.md).  
 SPK scripts under `spk/src/threatprevention/scripts/` are stubs except `postinst`, `start-stop-status`, and `update-rules.sh`. **Most of the work that makes capture actually run is admin-side:** DSM will not let an unsigned package declare `run-as: root` or file capabilities (`synopkg` error 319). `start-stop-status` tries `setcap` but it is a no-op when Package Center starts the unit as the package user.
 
 Target verified: DSM 7.4.1, SA6400 (`synology_epyc7002_sa6400`), glibc 2.36.
@@ -111,7 +111,7 @@ Default policy is **Intel Hyperscan** for signature matching (`mpm-algo: hs`). S
 cat /var/packages/ThreatPrevention/etc/accel.conf
 ```
 
-**Start Menu tile:** one app, `SYNO.SDS.TPS.Application`. After install, **log out of DSM and back in** and remove any leftover community `SYNO.SDS.ThreatPrevention.Application` pin. The bridge calls same-origin `/webman/tps-api` (nginx → tpsweb `:19557`). After UI/`config` changes, confirm the script URL is `synoips.js?v=8.0.6-0061` or newer — `?v=1.3.3-0926` is a stale cache.
+**Start Menu tile:** one app, `SYNO.SDS.TPS.Application`. After install, **log out of DSM and back in** and remove any leftover community `SYNO.SDS.ThreatPrevention.Application` pin. The bridge calls same-origin `/webman/tps-api` (nginx → tpsweb `:19557`). After UI/`config` changes, confirm the script URL is `synoips.js?v=8.0.6-0062` or newer — `?v=1.3.3-0926` is a stale cache.
 
 Optional but recommended — replace the 2021 Suricata-5 ET dump with a current Suricata 8 feed (do **not** convert the old files):
 
@@ -120,7 +120,7 @@ sudo /var/packages/ThreatPrevention/scripts/update-rules.sh
 sudo synopkg restart ThreatPrevention
 ```
 
-Needs outbound HTTPS to the ET / Open Information Security Foundation index. Log: `var/log/suricata-update.log`. Success creates `var/rules/.from-suricata-update`.
+Needs outbound HTTPS to the hosts in `target/etc/rule-sources.json` (ET Open/Pro URLs and the Rule Feeds catalog). Override by copying that file to `/var/packages/ThreatPrevention/etc/rule-sources.json`; `{code}` is replaced with the ET Pro license. Log: `var/log/suricata-update.log`. Success creates `var/rules/.from-suricata-update`.
 
 ---
 

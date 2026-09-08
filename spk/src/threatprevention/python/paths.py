@@ -30,3 +30,5 @@ PKG_SHARES = os.environ.get("TPS_PKGSHARES", "/var/packages/ThreatPrevention/sha
 GMAPS_KEY = os.path.join(PKGETC, "gmaps.key")
 TELEGRAM_CONF = os.path.join(PKGETC, "telegram.conf")
 FEEDS_JSON = os.path.join(PKGETC, "feeds.json")
+RULE_SOURCES_JSON = os.path.join(PKGETC, "rule-sources.json")
+SHIPPED_RULE_SOURCES_JSON = os.path.join(PKGDEST, "etc", "rule-sources.json")

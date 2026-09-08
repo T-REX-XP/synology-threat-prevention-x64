@@ -8,28 +8,9 @@ import time
 from urllib.parse import urlparse
 
 from paths import FEEDS_JSON, PKGETC
+from rule_sources import catalog_entries
 
 FEED_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-
-# Free sources from the OISF suricata-update index (suricata-intel-index).
-# ET Open/Pro stay on General. Commercial/secret-code and obsolete entries omitted.
-# Names: slash → hyphen so they pass feed_name_ok. Seeded enabled=0.
-CATALOG = (
-    ("oisf-trafficid", "https://openinfosecfoundation.org/rules/trafficid/trafficid.rules"),
-    ("abuse.ch-sslbl-blacklist", "https://sslbl.abuse.ch/blacklist/sslblacklist_tls_cert.tar.gz"),
-    ("abuse.ch-sslbl-ja3", "https://sslbl.abuse.ch/blacklist/ja3_fingerprints.tar.gz"),
-    ("abuse.ch-feodotracker", "https://feodotracker.abuse.ch/downloads/feodotracker.tar.gz"),
-    ("abuse.ch-urlhaus", "https://urlhaus.abuse.ch/downloads/urlhaus_suricata.tar.gz"),
-    ("etnetera-aggressive", "https://security.etnetera.cz/feeds/etn_aggressive.rules"),
-    ("tgreen-hunting", "https://github.com/travisbgreen/hunting-rules/raw/master/hunting.rules.tar.gz"),
-    ("stamus-lateral", "https://ti.stamus-networks.io/open/stamus-lateral-rules.tar.gz"),
-    ("pawpatrules", "https://rules.pawpatrules.fr/suricata/paw-patrules.tar.gz"),
-    ("ptrules-open", "https://rules.ptsecurity.com/files/ptopen.rules.tar.gz"),
-    ("aleksibovellan-nmap", "https://raw.githubusercontent.com/aleksibovellan/opnsense-suricata-nmaps/main/local.rules"),
-    ("ipfire-dbl", "https://dbl.ipfire.org/lists/suricata.tar.gz"),
-    ("julioliraup-antiphishing", "https://raw.githubusercontent.com/julioliraup/Antiphishing/refs/heads/main/antiphishing.tar.gz"),
-    ("the-hunters-ledger-open", "https://the-hunters-ledger.com/feeds/suricata/hunters-ledger.rules"),
-)
 
 
 def migrate_feeds(conn):
@@ -48,7 +29,7 @@ def migrate_feeds(conn):
 def seed_catalog_feeds(conn):
     """Insert known index sources as disabled. Never turn a user choice on."""
     now = int(time.time())
-    for name, url in CATALOG:
+    for name, url in catalog_entries():
         if not feed_name_ok(name) or not feed_url_ok(url):
             continue
         conn.execute(

@@ -1,0 +1,33 @@
+{
+  "sources": {
+    "et-open": {
+      "urls": [
+        "https://rules.emergingthreats.net/open/suricata-8.0.6/emerging.rules.tar.gz",
+        "https://rules.emergingthreats.net/open/suricata-8.0/emerging.rules.tar.gz",
+        "https://rules.emergingthreats.net/open/suricata/emerging.rules.tar.gz"
+      ]
+    },
+    "et-pro": {
+      "urls": [
+        "https://rules.emergingthreatspro.com/{code}/suricata-8.0/etpro.rules.tar.gz",
+        "https://rules.emergingthreatspro.com/{code}/suricata/etpro.rules.tar.gz"
+      ]
+    }
+  },
+  "catalog": [
+    {"name": "oisf-trafficid", "url": "https://openinfosecfoundation.org/rules/trafficid/trafficid.rules"},
+    {"name": "abuse.ch-sslbl-blacklist", "url": "https://sslbl.abuse.ch/blacklist/sslblacklist_tls_cert.tar.gz"},
+    {"name": "abuse.ch-sslbl-ja3", "url": "https://sslbl.abuse.ch/blacklist/ja3_fingerprints.tar.gz"},
+    {"name": "abuse.ch-feodotracker", "url": "https://feodotracker.abuse.ch/downloads/feodotracker.tar.gz"},
+    {"name": "abuse.ch-urlhaus", "url": "https://urlhaus.abuse.ch/downloads/urlhaus_suricata.tar.gz"},
+    {"name": "etnetera-aggressive", "url": "https://security.etnetera.cz/feeds/etn_aggressive.rules"},
+    {"name": "tgreen-hunting", "url": "https://github.com/travisbgreen/hunting-rules/raw/master/hunting.rules.tar.gz"},
+    {"name": "stamus-lateral", "url": "https://ti.stamus-networks.io/open/stamus-lateral-rules.tar.gz"},
+    {"name": "pawpatrules", "url": "https://rules.pawpatrules.fr/suricata/paw-patrules.tar.gz"},
+    {"name": "ptrules-open", "url": "https://rules.ptsecurity.com/files/ptopen.rules.tar.gz"},
+    {"name": "aleksibovellan-nmap", "url": "https://raw.githubusercontent.com/aleksibovellan/opnsense-suricata-nmaps/main/local.rules"},
+    {"name": "ipfire-dbl", "url": "https://dbl.ipfire.org/lists/suricata.tar.gz"},
+    {"name": "julioliraup-antiphishing", "url": "https://raw.githubusercontent.com/julioliraup/Antiphishing/refs/heads/main/antiphishing.tar.gz"},
+    {"name": "the-hunters-ledger-open", "url": "https://the-hunters-ledger.com/feeds/suricata/hunters-ledger.rules"}
+  ]
+}

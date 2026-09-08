@@ -47,6 +47,7 @@ from accel import accel_cli_sets, accel_status, apply_accel_yaml, write_accel_co
 from compiler import compile_rules, import_rules, parse_header, parse_refs, reload_suricata
 from corehost import iface_ipv4, list_neighbors, nsm_device_list, systemdb_get, usb_list
 from feeds import add_feed, delete_feed, list_feeds, update_feed, write_feeds_json
+from rule_sources import source_urls
 from notify import (
     list_filters,
     read_telegram_conf,
@@ -654,17 +655,13 @@ def write_update_source(source, code=""):
 
 def probe_rule_update(last_updated="", source="et-open", code=""):
     """HEAD ET Open or ET Pro tarball. Returns (reachable, remote_newer)."""
-    if str(source).lower() in ("et-pro", "etpro") and code:
-        urls = (
-            "https://rules.emergingthreatspro.com/%s/suricata-8.0/etpro.rules.tar.gz" % code,
-            "https://rules.emergingthreatspro.com/%s/suricata/etpro.rules.tar.gz" % code,
-        )
+    src = str(source).lower()
+    if src in ("et-pro", "etpro") and code:
+        urls = source_urls("et-pro", code)
     else:
-        urls = (
-            "https://rules.emergingthreats.net/open/suricata-8.0.6/emerging.rules.tar.gz",
-            "https://rules.emergingthreats.net/open/suricata-8.0/emerging.rules.tar.gz",
-            "https://rules.emergingthreats.net/open/suricata/emerging.rules.tar.gz",
-        )
+        urls = source_urls("et-open")
+    if not urls:
+        return False, False
     try:
         from urllib.request import Request, urlopen
     except ImportError:

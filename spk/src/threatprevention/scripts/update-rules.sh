@@ -26,34 +26,51 @@ fi
 
 mkdir -p "${OUT}" "${SU_DATA}/sources" "${PKGVAR}/log"
 # DSM python3 has no PyYAML. The SPK vendors a pure-Python copy.
-export PYTHONPATH="${PKGDEST}/lib/python:${PKGDEST}/lib/suricata/python${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${PKGDEST}/lib/tps:${PKGDEST}/lib/python:${PKGDEST}/lib/suricata/python${PYTHONPATH:+:${PYTHONPATH}}"
 
+PYJSON=""
+for c in /usr/bin/python3 /usr/local/bin/python3 python3; do
+	if command -v "${c}" >/dev/null 2>&1 || [ -x "${c}" ]; then
+		PYJSON="${c}"
+		break
+	fi
+done
+
+if [ -z "${PYJSON}" ]; then
+	echo "python3 missing; cannot read rule-sources.json" >&2
+	exit 2
+fi
+
+KIND="et-open"
 if [ "${SOURCE}" = "et-pro" ]; then
 	if [ -z "${CODE}" ]; then
 		echo "ET Pro code missing" >&2
 		exit 2
 	fi
-	"${BIN}" disable-source et/open \
-		--data-dir "${SU_DATA}" >>"${LOG}" 2>&1 || true
-	# Non-interactive: drop a source file instead of the enable-source prompt.
-	cat > "${SU_DATA}/sources/et-pro.yaml" <<EOF
-url: https://rules.emergingthreatspro.com/${CODE}/suricata-8.0/etpro.rules.tar.gz
-EOF
-else
-	rm -f "${SU_DATA}/sources/et-pro.yaml"
-	"${BIN}" enable-source et/open \
-		--data-dir "${SU_DATA}" >>"${LOG}" 2>&1 || true
+	KIND="et-pro"
 fi
+
+ET_URL="$("${PYJSON}" - "${KIND}" "${CODE}" <<'PY'
+import sys
+from rule_sources import source_urls
+urls = source_urls(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "")
+if not urls:
+    sys.exit(1)
+print(urls[0])
+PY
+)" || {
+	echo "${KIND} url missing in rule-sources.json" >&2
+	exit 2
+}
+
+# Ignore suricata-update's built-in ET Open URL; JSON is the source of truth.
+"${BIN}" disable-source et/open \
+	--data-dir "${SU_DATA}" >>"${LOG}" 2>&1 || true
+rm -f "${SU_DATA}/sources/et-pro.yaml" "${SU_DATA}/sources/et-open.yaml"
+printf 'url: %s\n' "${ET_URL}" > "${SU_DATA}/sources/${KIND}.yaml"
 
 # Additive custom feeds from Settings → Rule feeds (etc/feeds.json).
 if [ -r "${PKGETC}/feeds.json" ]; then
-	PYJSON=""
-	for c in /usr/bin/python3 /usr/local/bin/python3 python3; do
-		if command -v "${c}" >/dev/null 2>&1 || [ -x "${c}" ]; then
-			PYJSON="${c}"
-			break
-		fi
-	done
 	if [ -n "${PYJSON}" ]; then
 		"${PYJSON}" - "${PKGETC}/feeds.json" "${SU_DATA}/sources" >>"${LOG}" 2>&1 <<'PY'
 import json, os, re, sys

@@ -67,6 +67,7 @@ cp -a "${SRC}/package/etc/sensor/sensor.conf" "${STAGING}/package/etc/sensor/sen
 cp -a "${SRC}/package/etc/suricata/suricata.yaml" "${STAGING}/package/etc/suricata/suricata.yaml"
 cp -a "${SRC}/package/etc/mirror.conf" "${STAGING}/package/etc/mirror.conf"
 cp -a "${SRC}/package/etc/accel.conf" "${STAGING}/package/etc/accel.conf"
+cp -a "${SRC}/package/etc/rule-sources.json" "${STAGING}/package/etc/rule-sources.json"
 mkdir -p "${STAGING}/package/etc/openwrt" "${STAGING}/package/etc/mikrotik"
 cp -a "${SRC}/package/etc/openwrt/." "${STAGING}/package/etc/openwrt/"
 cp -a "${SRC}/package/etc/mikrotik/." "${STAGING}/package/etc/mikrotik/"
@@ -236,11 +237,18 @@ cp -a "${SRC}/conf/." "${STAGING}/conf/"
 
 info "package.tgz"
 export COPYFILE_DISABLE=1
-tar czf "${STAGING}/package.tgz" -C "${STAGING}/package" .
+export COPY_EXTENDED_ATTRIBUTES_DISABLE=1
+if command -v xattr >/dev/null 2>&1; then
+  xattr -cr "${STAGING}" 2>/dev/null || true
+fi
+tar --format ustar -czf "${STAGING}/package.tgz" -C "${STAGING}/package" .
 rm -rf "${STAGING}/package"
 
 info "SPK tar (unsigned)"
-(cd "${STAGING}" && tar cf "${OUT_DIR}/${SPK_NAME}" \
+if command -v xattr >/dev/null 2>&1; then
+  xattr -cr "${STAGING}" 2>/dev/null || true
+fi
+(cd "${STAGING}" && tar --format ustar -cf "${OUT_DIR}/${SPK_NAME}" \
   package.tgz INFO PACKAGE_ICON.PNG PACKAGE_ICON_256.PNG scripts conf)
 
 info "Built ${OUT_DIR}/${SPK_NAME}"
