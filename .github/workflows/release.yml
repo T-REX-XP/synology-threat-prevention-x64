@@ -18,7 +18,7 @@ jobs:
   tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Load versions
         run: |
           set -euo pipefail
@@ -43,7 +43,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Load versions
         run: |
           set -euo pipefail
@@ -53,7 +53,7 @@ jobs:
             echo "PKG_VERSION=${PKG_VERSION}"
             echo "ENGINE_ASSET=suricata-${SURICATA_VERSION}-${{ matrix.suffix }}.tar.gz"
           } >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -68,7 +68,7 @@ jobs:
         run: |
           cd artifact
           sha256sum "${ENGINE_ASSET}" | tee "${ENGINE_ASSET}.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: suricata-engine-${{ matrix.arch }}
           path: |
@@ -81,14 +81,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Load versions
         run: |
           set -euo pipefail
           . ./VERSION
           echo "SURICATA_VERSION=${SURICATA_VERSION}" >> "$GITHUB_ENV"
           echo "PKG_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: suricata-engine-*
           path: artifact
@@ -96,7 +96,7 @@ jobs:
       - name: List assets
         run: ls -lh artifact/
       - name: GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |
@@ -115,7 +115,11 @@ jobs:
             This release does **not** include a packed SPK or official Synology UI.
 
             ```
-            git clone https://github.com/${{ github.repository }}.git
-            cd ${{ github.event.repository.name }}
-            sudo ./install.sh --repo ${{ github.repository }} --tag ${{ github.ref_name }}
+            bash -c "$(curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh)"
+            ```
+
+            Pinned to this release:
+
+            ```
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | bash -s -- --tag ${{ github.ref_name }}
             ```

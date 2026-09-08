@@ -22,7 +22,23 @@ This repo replaces the engine and backend:
 | Desktop | ExtJS `synoips.js` | Same app, plus an inlined bridge |
 | Privilege | root / IPS | package user + admin `setcap` |
 
-Official ExtJS (`synoips.js`, texts, help) is **Synology copyright**. It is **not** in this Git tree and **not** on GitHub Releases. `./install.sh` (NAS) or `./build.sh` (developer) downloads the public SRM package at pack time into `build/official/` (gitignored). Do not publish that tree.
+Official ExtJS (`synoips.js`, texts, help) is **Synology copyright**. It is **not** in this Git tree and **not** on GitHub Releases. The NAS installer downloads the public SRM package at pack time into `build/official/` (gitignored). Do not publish that tree.
+
+## Install
+
+On the NAS (DSM 7 Intel/AMD). Package Center → Trust Level: allow unsigned packages.
+
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh)"
+```
+
+That downloads this repo, the prebuilt Suricata engine from GitHub Releases, the official SRM UI SPK, packs the community package, then `synopkg install` + `setcap`. Log out of DSM and back in afterwards.
+
+Pinned release:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh | bash -s -- --tag v0.1.0
+```
 
 ## Features added vs the official app
 
@@ -86,9 +102,9 @@ what packing needs (ExtJS, icons, ET bootstrap tarball, `SYNO.TPS.lib`). aarch64
 
 ## Requirements
 
-**NAS install (`./install.sh`)**
+**NAS install** (`curl | bash` or `./install.sh`)
 - DSM **7.0+** Intel/AMD (`arch=x86_64`). Will not run on ARM.
-- `curl`, `tar`, `python3` (no Docker)
+- `curl`, `tar`, `python3` (no Docker, no git)
 - Package Center → Trust Level: allow unsigned packages
 - A GitHub Release that includes the engine tarball from [`VERSION`](VERSION)
 
@@ -101,17 +117,11 @@ GitHub Actions compile natively on `ubuntu-24.04` (x86_64) and
 
 ## Install on the NAS (no compile)
 
-Tag a release so CI uploads the engine, clone this repo on the NAS, then:
+See [Install](#install) for the `curl | bash` one-liner. From a checkout:
 
 ```sh
 sudo ./install.sh
-# sudo ./install.sh --repo owner/name --tag v0.1.0
 ```
-
-That downloads the prebuilt Suricata tarball, downloads the official SRM UI
-package, packs `artifact/ThreatPrevention-x86_64-*.spk`, runs `synopkg install`,
-and `setcap`. Log out of DSM and back in so the Start Menu loads
-`synoips.js?v=<PKG_VERSION>`.
 
 | Flag | Meaning |
 | --- | --- |

@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # Prepare and install Threat Prevention on a DSM 7 x86_64 NAS.
 #
+# One-liner (no git clone):
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/T-REX-XP/synology-threat-prevention-x64/main/install.sh)"
+#
 # Does not compile Suricata. Fetches a prebuilt engine from GitHub Releases,
 # downloads the official SRM UI SPK, packs a community SPK, then synopkg
 # install + setcap.
-#
-# Developer compile path: ./build.sh
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=spk/common.sh
-. "${SCRIPT_DIR}/spk/common.sh"
+DEFAULT_REPO="${TPS_GITHUB_REPO:-T-REX-XP/synology-threat-prevention-x64}"
+DEFAULT_BRANCH="${TPS_BRANCH:-main}"
 
+die()  { echo "ERROR: $*" >&2; exit 1; }
+info() { echo "==> $*" >&2; }
+
+ORIG_ARGS=("$@")
 SKIP_INSTALL=0
 SKIP_SETCAP=0
 RELEASE_TAG="latest"
@@ -28,10 +32,12 @@ Usage: $0 [options]
 On a DSM 7 Intel/AMD NAS: fetch the prebuilt Suricata engine, assemble the
 SPK (official UI is downloaded here, not from GitHub), install, setcap.
 
-  --repo owner/name       GitHub repo that hosts engine artifacts
-  --tag TAG               Release tag (default: latest)
-  --engine-tar PATH       Use a local ${ENGINE_ASSET}
-  --official-spk PATH    Use a local official Threat Prevention .spk
+  bash -c "\$(curl -fsSL https://raw.githubusercontent.com/${DEFAULT_REPO}/main/install.sh)"
+
+  --repo owner/name       GitHub repo (default: ${DEFAULT_REPO})
+  --tag TAG               Source + engine release tag (default: latest / ${DEFAULT_BRANCH})
+  --engine-tar PATH       Use a local engine tarball
+  --official-spk PATH     Use a local official Threat Prevention .spk
   --skip-install          Pack only (do not synopkg)
   --no-setcap             Install but skip setcap
   --force                 Re-extract official UI and re-download engine
@@ -74,6 +80,52 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+repo_root() {
+    if [ -n "${TPS_ROOT:-}" ] && [ -f "${TPS_ROOT}/VERSION" ] && [ -d "${TPS_ROOT}/spk/src/threatprevention" ]; then
+        echo "${TPS_ROOT}"
+        return 0
+    fi
+    local src="${BASH_SOURCE[0]:-}"
+    if [ -n "$src" ] && [ -f "$src" ]; then
+        local d
+        d="$(cd "$(dirname "$src")" && pwd)"
+        if [ -f "$d/VERSION" ] && [ -d "$d/spk/src/threatprevention" ]; then
+            echo "$d"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+bootstrap_sources() {
+    local repo="${GITHUB_REPO_ARG:-$DEFAULT_REPO}"
+    local work url
+    work="$(mktemp -d "${TMPDIR:-/tmp}/tps-install.XXXXXX")"
+    if [ "$RELEASE_TAG" != "latest" ]; then
+        url="https://github.com/${repo}/archive/refs/tags/${RELEASE_TAG}.tar.gz"
+        info "Downloading ${repo} @ ${RELEASE_TAG}"
+    else
+        url="https://github.com/${repo}/archive/refs/heads/${DEFAULT_BRANCH}.tar.gz"
+        info "Downloading ${repo} @ ${DEFAULT_BRANCH}"
+    fi
+    info "  ${url}"
+    curl -fsSL --retry 3 "$url" | tar -xz -C "$work" --strip-components=1
+    [ -f "$work/install.sh" ] && [ -f "$work/VERSION" ] || die "GitHub archive is missing install.sh / VERSION"
+    export TPS_GITHUB_REPO="$repo"
+    info "Re-running installer from ${work}"
+    exec bash "$work/install.sh" "${ORIG_ARGS[@]}"
+}
+
+if ! SCRIPT_DIR="$(repo_root)"; then
+    command -v curl >/dev/null || die "Missing curl"
+    command -v tar >/dev/null || die "Missing tar"
+    bootstrap_sources
+fi
+
+export TPS_GITHUB_REPO="${GITHUB_REPO_ARG:-${TPS_GITHUB_REPO:-$DEFAULT_REPO}}"
+# shellcheck source=spk/common.sh
+. "${SCRIPT_DIR}/spk/common.sh"
+
 check_nas_arch() {
     local m
     m="$(uname -m)"
@@ -95,10 +147,7 @@ ensure_prebuilt_engine() {
         unpack_engine_tar "$ENGINE_TAR"
         return
     fi
-    local repo="${GITHUB_REPO_ARG}"
-    if [ -z "$repo" ]; then
-        repo="$(detect_github_repo || true)"
-    fi
+    local repo="${GITHUB_REPO_ARG:-${TPS_GITHUB_REPO}}"
     [ -n "$repo" ] || die "Pass --repo owner/name (GitHub repo that publishes ${ENGINE_ASSET})"
     local tarpath
     tarpath="$(download_engine_release "$repo" "$RELEASE_TAG")"
@@ -144,7 +193,7 @@ main() {
     for cmd in tar curl python3; do
         command -v "$cmd" >/dev/null || die "Missing ${cmd}"
     done
-    [ -d "$SRC_DIR" ] || die "Run this from a git checkout of the community repo"
+    [ -d "$SRC_DIR" ] || die "Missing community sources at ${SRC_DIR}"
     mkdir -p "$CACHE_DIR" "$OUT_DIR"
     ensure_prebuilt_engine
     local pack_args=(--skip-engine --skip-tests)
@@ -158,4 +207,4 @@ main() {
     install_spk
 }
 
-main "$@"
+main
