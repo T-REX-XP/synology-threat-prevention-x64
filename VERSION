@@ -2,4 +2,4 @@
 #   SURICATA_VERSION  upstream engine (tarball, GitHub asset names)
 #   PKG_VERSION       SPK / INFO version: git branch, or tag when detached
 #                     (override with TPS_PKG_VERSION). Not stored here.
-SURICATA_VERSION=8.0.6
+SURICATA_VERSION=8.0.8

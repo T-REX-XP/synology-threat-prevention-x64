@@ -2,7 +2,7 @@
   "sources": {
     "et-open": {
       "urls": [
-        "https://rules.emergingthreats.net/open/suricata-8.0.6/emerging.rules.tar.gz",
+        "https://rules.emergingthreats.net/open/suricata-8.0.8/emerging.rules.tar.gz",
         "https://rules.emergingthreats.net/open/suricata-8.0/emerging.rules.tar.gz",
         "https://rules.emergingthreats.net/open/suricata/emerging.rules.tar.gz"
       ]

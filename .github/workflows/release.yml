@@ -95,6 +95,20 @@ jobs:
           pattern: suricata-engine-*
           path: artifact
           merge-multiple: true
+      - name: Keep 8.0.6 available during the 8.0.8 rollout
+        if: github.ref_name == 'v0.3.1' && env.SURICATA_VERSION == '8.0.8'
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd artifact
+          base="https://github.com/${REPOSITORY}/releases/download/v0.3.0"
+          for arch in amd64 arm64; do
+            asset="suricata-8.0.6-linux-${arch}.tar.gz"
+            curl -fsSL --retry 3 -o "${asset}" "${base}/${asset}"
+            curl -fsSL --retry 3 -o "${asset}.sha256" "${base}/${asset}.sha256"
+            sha256sum --check "${asset}.sha256"
+          done
       - name: List assets
         run: ls -lh artifact/
       - name: GitHub Release

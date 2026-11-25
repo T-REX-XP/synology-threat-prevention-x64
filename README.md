@@ -14,7 +14,7 @@ Research proof of concept — **IDS only** (watch traffic). It does **not** drop
 | --- | --- |
 | **Works on** | DSM 7.0+, `x86_64` (Intel/AMD). Not ARM. |
 | **Verified on** | SA6400 (`ovs_eth0`). Not tested on a typical stock DiskStation. |
-| **Engine** | Suricata **8.0.6** (AF_PACKET + Hyperscan). Version lives in [`VERSION`](VERSION). |
+| **Engine** | Suricata **8.0.8** (AF_PACKET + Hyperscan). Version lives in [`VERSION`](VERSION). |
 | **Not this package** | IPS / NFQUEUE, DPDK, official `synoips.js` in git or GitHub Releases. |
 
 ---
@@ -130,7 +130,7 @@ Official SRM Threat Prevention is a client for a 21-API `SYNO.TPS.*` stack (aarc
 | Layer | Official SRM 1.3.3 | This package |
 | --- | --- | --- |
 | Target | SRM router (aarch64) | DSM 7 NAS (`x86_64`) |
-| Engine | synosuricata 6.0.4 NFQUEUE IPS | Suricata 8.0.6 AF_PACKET IDS |
+| Engine | synosuricata 6.0.4 NFQUEUE IPS | Suricata 8.0.8 AF_PACKET IDS |
 | Matching | stock AC | Intel Hyperscan (default) |
 | Events | PostgreSQL `synotps` | SQLite + `eve.json` ingest |
 | WebAPI | `SYNO.TPS.*.so` | Python `tpsweb` |

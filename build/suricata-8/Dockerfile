@@ -2,7 +2,7 @@
 # GitHub Actions compiles natively (no Docker). This image is for local
 # cross-build (e.g. Apple Silicon → x86_64). TARGETPLATFORM comes from buildx.
 
-ARG SURICATA_VERSION=8.0.6
+ARG SURICATA_VERSION=8.0.8
 ARG PREFIX=/opt/tps-suricata
 ARG TARGETPLATFORM=linux/amd64
 

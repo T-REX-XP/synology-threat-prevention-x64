@@ -10,7 +10,7 @@ SPK scripts that matter: `postinst`, `start-stop-status`, `update-rules.sh`, `in
 
 | What | Where | Example |
 | --- | --- | --- |
-| Suricata engine | [`VERSION`](../VERSION) `SURICATA_VERSION` | `8.0.6` |
+| Suricata engine | [`VERSION`](../VERSION) `SURICATA_VERSION` | `8.0.8` |
 | SPK / `INFO` / `synoips.js?v=` | git **branch**, or **tag** if HEAD is detached ([`spk/pkg-version.sh`](../spk/pkg-version.sh)) | `main`, `v0.2.0` |
 | Override | env `TPS_PKG_VERSION` | |
 
