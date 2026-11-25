@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -46,12 +47,15 @@ from compat import (
     to_epoch,
 )
 from accel import accel_cli_sets, accel_status, apply_accel_yaml, write_accel_conf
-from compiler import activate_rules, import_rules, parse_header, parse_refs
+from compiler import RuleActivationError, activate_rules, import_rules, parse_header, parse_refs
 from corehost import iface_ipv4, list_neighbors, nsm_device_list, systemdb_get, usb_list
 from feeds import add_feed, delete_feed, list_feeds, update_feed, write_feeds_json
+from engine_control import command_result
+from operations import log_operation
 from rule_sources import source_urls
 from notify import (
     list_filters,
+    notify_operation,
     read_telegram_conf,
     send_telegram,
     upsert_filters,
@@ -295,7 +299,7 @@ def stop_engine():
             pass
 
 
-def read_sensor():
+def _sensor_config():
     cfg = {
         "enable_sensor": True,
         "enable_prevention": False,
@@ -310,6 +314,11 @@ def read_sensor():
                     continue
                 k, v = line.split("=", 1)
                 cfg[k.strip()] = v.strip()
+    return cfg
+
+
+def read_sensor():
+    cfg = _sensor_config()
     if os.path.isfile(IFACE_FILE):
         cfg["interface_list"] = open(IFACE_FILE).read().strip()
     cfg["enable_sensor"] = _truth(cfg.get("enable_sensor", True))
@@ -1579,40 +1588,14 @@ def settings_update(conn, api, method, p):
             conn.commit()
 
             def _run():
-                c = connect()
+                job = JOBS[tid]
                 try:
-                    src = kv_get(c, "update_source", "et-open")
-                    code = kv_get(c, "etpro_code", "")
-                    write_update_source(src, code)
-                    if src == "et-pro" and not code:
-                        kv_set(c, "update_status", "etpro_error")
-                        kv_set(c, "engine_ui_status", "")
-                        JOBS[tid]["status"] = "etpro_error"
-                        c.commit()
-                        return
-                    kv_set(c, "engine_ui_status", "updating_signature")
-                    c.commit()
-                    rc = fetch_and_activate_rules(c)
-                    if rc == 0:
-                        kv_set(c, "update_status", "up_to_date")
-                        kv_set(c, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
-                        JOBS[tid]["status"] = "up_to_date"
-                    elif rc == 2:
-                        kv_set(c, "update_status", "etpro_error")
-                        JOBS[tid]["status"] = "etpro_error"
-                    else:
-                        kv_set(c, "update_status", "connect_error")
-                        JOBS[tid]["status"] = "connect_error"
-                    kv_set(c, "engine_ui_status", "")
-                    c.commit()
-                except Exception:
-                    c.rollback()
-                    kv_set(c, "update_status", "error")
-                    kv_set(c, "engine_ui_status", "")
-                    JOBS[tid]["status"] = "error"
-                    c.commit()
-                finally:
-                    c.close()
+                    with closing(connect()) as c:
+                        run_rule_update(c, "Manual", job)
+                except Exception as exc:
+                    if job["status"] == "updating":
+                        job["status"] = "error"
+                    log_operation("update", "Manual update worker failed: %s" % exc)
 
             threading.Thread(target=_run, daemon=True).start()
             return ok({"task_id": tid, "status": "updating"})
@@ -2029,7 +2012,7 @@ def _schedule_due(conn, now):
 def fetch_and_activate_rules(conn):
     rules_dir = os.path.join(PKGVAR, "rules")
     os.makedirs(rules_dir, exist_ok=True)
-    with RULE_UPDATE_LOCK, tempfile.TemporaryDirectory(prefix=".update-", dir=rules_dir) as stage:
+    with tempfile.TemporaryDirectory(prefix=".update-", dir=rules_dir) as stage:
         rc = subprocess.call(["/bin/sh", UPDATE_SCRIPT, stage], timeout=600)
         if rc:
             return rc
@@ -2040,32 +2023,113 @@ def fetch_and_activate_rules(conn):
         return 0
 
 
+def run_rule_update(conn, trigger, job=None):
+    """Use the same status and diagnostics for manual and scheduled updates."""
+    notice = ""
+    kind = "rule-update"
+    with RULE_UPDATE_LOCK:
+        log_operation("update", "%s rule update started" % trigger)
+        try:
+            kv_set(conn, "update_status", "updating")
+            kv_set(conn, "engine_ui_status", "updating_signature")
+            conn.commit()
+            source = kv_get(conn, "update_source", "et-open")
+            code = kv_get(conn, "etpro_code", "")
+            write_update_source(source, code)
+            if source == "et-pro" and not code:
+                status, notice = "etpro_error", "The ET Pro license code is missing."
+            else:
+                rc = fetch_and_activate_rules(conn)
+                if rc:
+                    status = "etpro_error" if rc == 2 and source == "et-pro" else "connect_error"
+                    notice = "Rule download or staging failed (exit %d). See suricata-update.log." % rc
+                else:
+                    status = "up_to_date"
+        except RuleActivationError as exc:
+            conn.rollback()
+            status, notice = "error", str(exc)
+            if exc.rollback_failed:
+                kind = "rule-rollback"
+        except subprocess.TimeoutExpired:
+            conn.rollback()
+            status, notice = "connect_error", "Rule download timed out. See suricata-update.log."
+        except Exception as exc:
+            conn.rollback()
+            status, notice = "error", "Rule update failed. See operations.log."
+            log_operation("update", "%s: %s" % (type(exc).__name__, exc))
+        with conn:
+            kv_set(conn, "update_status", status)
+            kv_set(conn, "engine_ui_status", "")
+            if status == "up_to_date":
+                kv_set(conn, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
+        if job is not None:
+            job["status"] = status
+        if not notice:
+            log_operation("update", "%s rule update completed" % trigger)
+            return
+        log_operation("update", "%s update failed: %s" % (trigger, notice))
+    notify_operation(conn, kind, "%s rule update failed. %s" % (trigger, notice))
+
+
 def scheduler_loop():
     while not STOP:
         time.sleep(30)
         if STOP:
             return
-        conn = None
         try:
-            conn = connect()
-            if _schedule_due(conn, time.time()):
-                kv_set(conn, "update_status", "updating")
-                conn.commit()
-                rc = fetch_and_activate_rules(conn)
-                if rc == 0:
-                    kv_set(conn, "update_status", "up_to_date")
-                    kv_set(conn, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
-                else:
-                    kv_set(conn, "update_status", "connect_error")
-                conn.commit()
-        except Exception:
-            if conn is not None:
-                conn.rollback()
-                kv_set(conn, "update_status", "error")
-                conn.commit()
-        finally:
-            if conn is not None:
-                conn.close()
+            with closing(connect()) as conn:
+                if _schedule_due(conn, time.time()):
+                    run_rule_update(conn, "Scheduled")
+        except Exception as exc:
+            log_operation("update", "Scheduler failed: %s" % exc)
+
+
+def capture_health_issue():
+    mirror = mirror_status()
+    expected = mirror["ifname"] if mirror["enabled"] else _capture_iface()
+    if mirror["enabled"] and not mirror["tap_present"]:
+        return "The router copy interface %s is missing." % expected
+    if engine_status()[0] != "running":
+        return "The Suricata process is stopped."
+    ok, reply = command_result("iface-list", timeout=3)
+    if not ok or not isinstance(reply, dict):
+        return "The Suricata control socket is unavailable."
+    if expected not in (reply.get("ifaces") or []):
+        return "Suricata is not capturing on %s." % expected
+    return ""
+
+
+def record_capture_health(conn, state, issue=""):
+    previous = kv_get(conn, "capture_health", "")
+    if previous == state:
+        return
+    with conn:
+        kv_set(conn, "capture_health", state)
+    if state == "down":
+        log_operation("capture", "Capture unavailable: %s" % issue)
+        notify_operation(conn, "capture-down", "Capture unavailable. %s See suricata.log." % issue, interval=0)
+    elif state == "up" and previous == "down":
+        log_operation("capture", "Capture recovered")
+        notify_operation(conn, "capture-up", "Capture recovered.", interval=0)
+
+
+def watch_capture():
+    failed_checks = 0
+    while not STOP:
+        time.sleep(30)
+        if STOP:
+            return
+        try:
+            enabled = _truth(_sensor_config().get("enable_sensor", True))
+            issue = capture_health_issue() if enabled else ""
+            failed_checks = failed_checks + 1 if issue else 0
+            if issue and failed_checks < 3:
+                continue
+            state = ("down" if issue else "up") if enabled else "disabled"
+            with closing(connect()) as conn:
+                record_capture_health(conn, state, issue)
+        except Exception as exc:
+            log_operation("capture", "Health check failed: %s" % exc)
 
 
 def authorized(handler):
@@ -2257,6 +2321,7 @@ def run():
     init_db()
     ensure_export_dir()
     threading.Thread(target=scheduler_loop, daemon=True).start()
+    threading.Thread(target=watch_capture, daemon=True).start()
     tcp = ThreadingHTTPServer(("0.0.0.0", TPSWEB_PORT), Handler)
     threads = [threading.Thread(target=tcp.serve_forever, daemon=True)]
     try:

@@ -39,16 +39,16 @@ from compat import (  # noqa: E402
     official_weekday,
     parse_weekday,
 )
-from compiler import activate_rules, import_rules, parse_header, parse_refs, remove_legacy_filters  # noqa: E402
+from compiler import RuleActivationError, activate_rules, import_rules, parse_header, parse_refs, remove_legacy_filters  # noqa: E402
 from engine_control import command_ok  # noqa: E402
 from geoip import COUNTRY_BEGIN, COUNTRY_CODES, is_public_ipv4, lookup as geoip_lookup  # noqa: E402
 from host_info import lookup_host  # noqa: E402
 from ingest import follow, insert_alert, payload_hex, rotate_raw_logs  # noqa: E402
 from feeds import add_feed, feed_url_ok, list_feeds, seed_catalog_feeds  # noqa: E402
 from rule_sources import catalog_entries, source_urls  # noqa: E402
-from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
+from notify import list_filters, maybe_notify, notify_operation, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
-from store import init_db, kv_set, rotate_if_needed, storage_size  # noqa: E402
+from store import init_db, kv_get, kv_set, rotate_if_needed, storage_size  # noqa: E402
 from api_routes import BY_API, EXACT, UPDATE_PREFIX  # noqa: E402
 from tpsweb import (  # noqa: E402
     SENSOR_CONF,
@@ -242,21 +242,36 @@ def check_rule_activation():
         downloaded.write_text(rule % 12346, encoding="utf-8")
         with patch("compiler.RULES_OUT", str(active)), patch("compiler.rule_sources", return_value=[str(catalog)]), \
                 patch("compiler.accel_cli_sets", return_value=[]), \
-                patch("compiler.subprocess.run") as validate, patch("compiler.command_ok") as engine:
+                patch("operations.OPERATIONS_LOG", str(root / "operations.log")), \
+                patch("compiler.subprocess.run") as validate, patch("compiler.command_result") as engine:
             import_rules(conn)
-            validate.side_effect = subprocess.CalledProcessError(1, "suricata")
-            with TestCase().assertRaises(subprocess.CalledProcessError):
+
+            def invalid_rules(_command, *, stdout, **_kwargs):
+                stdout.write(b"Invalid keyword in fixture from https://example.com/private-code/rules\n")
+                raise subprocess.CalledProcessError(1, "suricata")
+
+            validate.side_effect = invalid_rules
+            with TestCase().assertRaises(RuleActivationError):
                 activate_rules(conn, running=True, catalog=str(downloaded))
             check(active.read_text() == rule % 12345 and not engine.called, "invalid rules never replace the live file")
+            diagnostics = (root / "operations.log").read_text()
+            check("[validator] Invalid keyword" in diagnostics and "private-code" not in diagnostics,
+                  "validation failure keeps diagnostics and redacts feed URLs")
             validate.side_effect = None
-            engine.side_effect = [False, True]
-            with TestCase().assertRaises(RuntimeError):
+            engine.side_effect = [(False, "new rules rejected"), (True, "done")]
+            with TestCase().assertRaises(RuleActivationError):
                 activate_rules(conn, running=True, catalog=str(downloaded))
             check(active.read_text() == catalog.read_text() == rule % 12345 and engine.call_count == 2,
                   "failed reload restores both files and requests the old rules")
             check(conn.execute("SELECT sig_sid FROM signature").fetchone()[0] == 12345, "failed reload rolls back catalog")
+            engine.side_effect = [(False, "new rules rejected"), (False, "socket unavailable")]
+            with TestCase().assertRaises(RuleActivationError) as rejected:
+                activate_rules(conn, running=True, catalog=str(downloaded))
+            check(rejected.exception.rollback_failed, "rollback reload failure is distinguished")
+            check("Rollback reload failed: socket unavailable" in (root / "operations.log").read_text(),
+                  "logs failed rollback with engine reason")
             engine.side_effect = None
-            engine.return_value = True
+            engine.return_value = (True, "done")
             activate_rules(conn, running=True, catalog=str(downloaded))
             check(active.read_text() == catalog.read_text() == rule % 12346, "valid candidate is activated")
             check([row[0] for row in conn.execute("SELECT sig_sid FROM signature")] == [12346],
@@ -276,13 +291,56 @@ def check_rule_activation():
         check(not insert_alert(conn, alert), "scoped exception requires both endpoints")
         check(insert_alert(conn, dict(alert, dest_ip="2606:4700::1001")), "same signature outside scope is retained")
         check(insert_alert(conn, dict(alert, alert={"signature_id": 12345})), "other signatures remain visible")
-    with patch("engine_control.subprocess.run", return_value=SimpleNamespace(stdout=b'{"return":"NOK"}')):
+    with patch("engine_control.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=b'{"return":"NOK"}')):
         check(not command_ok("reload-rules"), "socket refusal can have a successful client exit")
+
+
+def check_operational_alerts():
+    with init_db(":memory:") as conn:
+        kv_set(conn, "enable_telegram", "1")
+        kv_set(conn, "last_telegram_ts", str(int(time.time())))
+        conn.commit()
+        with patch("notify.read_telegram_conf", return_value={"token": "fake", "chat": "1"}), \
+                patch("notify.send_telegram", return_value=True) as telegram:
+            check(notify_operation(conn, "rule-update", "failed"), "recent threat alerts do not block operational notice")
+            check(not notify_operation(conn, "rule-update", "failed again"), "repeated update failures are rate limited")
+            check(notify_operation(conn, "rule-rollback", "rollback unconfirmed"), "rollback has its own cooldown")
+            check(telegram.call_count == 2, "deduplicates update notices")
+        kv_set(conn, "last_updated", "known successful update")
+        conn.commit()
+        failure = RuleActivationError("Reloading rules failed.", rollback_failed=True)
+        with patch("tpsweb.write_update_source"), patch("tpsweb.fetch_and_activate_rules", side_effect=failure), \
+                patch("tpsweb.log_operation"), patch("tpsweb.notify_operation") as notify:
+            for trigger in ("Manual", "Scheduled"):
+                job = {}
+                tpsweb_mod.run_rule_update(conn, trigger, job)
+                check(job["status"] == "error" and kv_get(conn, "last_updated") == "known successful update",
+                      "update failure preserves the last successful timestamp")
+                check(notify.call_args.args[1] == "rule-rollback" and trigger in notify.call_args.args[2],
+                      "update failure sends a trigger-specific rollback alert")
+            notify.reset_mock()
+            with patch("tpsweb.fetch_and_activate_rules", return_value=0):
+                tpsweb_mod.run_rule_update(conn, "Scheduled")
+            check(kv_get(conn, "update_status") == "up_to_date" and kv_get(conn, "last_updated") != "known successful update",
+                  "successful update advances the timestamp")
+            check(not notify.called, "successful rule update is logged without a Telegram alert")
+            tpsweb_mod.record_capture_health(conn, "down", "test issue")
+            tpsweb_mod.record_capture_health(conn, "down", "test issue")
+            tpsweb_mod.record_capture_health(conn, "up")
+            tpsweb_mod.record_capture_health(conn, "disabled")
+            check([call.args[1] for call in notify.call_args_list] == ["capture-down", "capture-up"],
+                  "capture outage and recovery are notified once and disable is silent")
+    with patch("tpsweb.mirror_status", return_value={"enabled": True, "tap_present": True, "ifname": "tps0"}), \
+            patch("tpsweb.engine_status", return_value=("running", 1)), \
+            patch("tpsweb.command_result", return_value=(True, {"ifaces": ["ovs_eth0"]})):
+        check("tps0" in tpsweb_mod.capture_health_issue(),
+              "capture watcher detects engine running on the wrong interface")
 
 
 check_retention()
 check_raw_rotation()
 check_rule_activation()
+check_operational_alerts()
 
 
 sensor = official_sensor(

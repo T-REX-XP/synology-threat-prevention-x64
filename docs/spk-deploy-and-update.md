@@ -38,6 +38,8 @@ Package Center upgrade requires the new `INFO` version to be **greater** than th
 | Engine log | `/var/packages/ThreatPrevention/var/log/suricata.log` |
 | Alerts | `/var/packages/ThreatPrevention/var/log/eve.json` |
 | Rule update log | `/var/packages/ThreatPrevention/var/log/suricata-update.log` |
+| Update and capture diagnostics | `/var/packages/ThreatPrevention/var/log/operations.log` |
+| Telegram delivery errors | `/var/packages/ThreatPrevention/var/log/notify.log` |
 | Secure RUNPATH | `/var/lib/tps` → `target/lib` (file caps ignore `$ORIGIN`) |
 
 On the NAS, prefer **`install.sh`** from [the root README](../README.md): latest installer from `main`, latest engine from GitHub `/releases/latest/download/`, official UI at pack time, then `synopkg install` + `setcap`.
@@ -110,7 +112,9 @@ sudo synopkg restart ThreatPrevention
 
 Feed URLs live in `target/etc/rule-sources.json`. Override with `/var/packages/ThreatPrevention/etc/rule-sources.json`; `{code}` is replaced with the ET Pro license. CLI fallback (same script as Update Now): `sudo /var/packages/ThreatPrevention/scripts/update-rules.sh`. Success creates `var/rules/.from-suricata-update`.
 
-Rule updates stage the download, validate the compiled rules with the installed Suricata, and reload the active engine if it is running. A validation or reload failure keeps the previous rules and catalog. Update Now and scheduled updates record a failed status when activation fails.
+Rule updates stage the download, validate the compiled rules with the installed Suricata, and reload the active engine if it is running. Update Now and scheduled updates record a failed status when activation fails. Check `operations.log` for validator output, the engine's reload response, and any failure while restoring the previous rules.
+
+When Telegram is enabled, failed rule updates also send an operational alert. Ordinary update failures and unconfirmed rollbacks each have a separate 30-minute cooldown. The capture monitor checks the engine and configured capture interface every 30 seconds. It sends an outage alert after three failed checks and a recovery alert when capture returns. Disabling the sensor silences capture alerts. These checks establish process and interface readiness. They cannot distinguish an idle mirror from a router that has stopped sending traffic.
 
 Address-scoped Disable and Pass entries filter events and notifications by the selected signature ID and every specified endpoint. Suricata continues to inspect the mirrored traffic and write the original alerts to raw EVE. Scoped Alert and Drop entries are unsupported by the passive sensor.
 
@@ -144,7 +148,7 @@ cat /var/packages/ThreatPrevention/etc/accel.conf
 
 ## Package upgrade (new SPK)
 
-`preupgrade` / `postupgrade` are no-ops. DSM still runs **stop → replace `target/` → postinst → start**. The new `bin/suricata` has **no** file capabilities.
+During upgrade, DSM stops the package, replaces `target/`, and runs the package lifecycle hooks. The `postupgrade` hook removes legacy generated address rules. Reapply the file capabilities to the new `bin/suricata` before restarting capture.
 
 ### Pre-upgrade
 

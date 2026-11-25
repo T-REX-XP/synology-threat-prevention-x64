@@ -8,7 +8,8 @@ import subprocess
 import tempfile
 
 from accel import accel_cli_sets
-from engine_control import command_ok
+from engine_control import command_result
+from operations import log_operation, log_tail
 from paths import PKGDEST, PKGVAR, RULES_OUT, SURICATA_BIN, YAML_PATH
 from store import init_db
 
@@ -200,6 +201,12 @@ def compile_rules(conn=None, path=None):
     return len(lines)
 
 
+class RuleActivationError(RuntimeError):
+    def __init__(self, message, *, rollback_failed=False):
+        super().__init__(message)
+        self.rollback_failed = rollback_failed
+
+
 def activate_rules(conn, *, running, catalog=None):
     """Validate the pending DB changes and publish the rules as one operation."""
     rules_dir = os.path.dirname(RULES_OUT)
@@ -208,15 +215,20 @@ def activate_rules(conn, *, running, catalog=None):
         candidate = os.path.join(tmp, "candidate.rules")
         live_catalog = os.path.join(rules_dir, "catalog.rules")
         published = []
+        phase = "Preparing rules"
+        validation_capture = os.path.join(tmp, "validator.log")
         try:
             if catalog is not None:
                 import_rules(conn, catalog=catalog, commit=False)
             compile_rules(conn, candidate)
-            subprocess.run(
-                [SURICATA_BIN, "-T", "--init-errors-fatal", "-c", YAML_PATH,
-                 "-S", candidate, "-l", tmp, "--set", "unix-command.enabled=no", *accel_cli_sets()],
-                check=True, timeout=120, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
+            phase = "Validating rules"
+            with open(validation_capture, "wb") as output:
+                subprocess.run(
+                    [SURICATA_BIN, "-T", "--init-errors-fatal", "-c", YAML_PATH,
+                     "-S", candidate, "-l", tmp, "--set", "unix-command.enabled=no", *accel_cli_sets()],
+                    check=True, timeout=120, stdout=output, stderr=subprocess.STDOUT,
+                )
+            phase = "Publishing rules"
             files = [(candidate, RULES_OUT)]
             if catalog is not None:
                 staged_catalog = shutil.copyfile(catalog, os.path.join(tmp, "catalog.rules"))
@@ -233,19 +245,48 @@ def activate_rules(conn, *, running, catalog=None):
                     previous = None
                 os.replace(staged, destination)
                 published.append((destination, previous))
-            if running and not command_ok("reload-rules", timeout=120):
-                raise RuntimeError("Suricata rejected the rules reload")
+            if running:
+                phase = "Reloading rules"
+                ok, detail = command_result("reload-rules", timeout=120)
+                if not ok:
+                    raise RuntimeError(detail or "Suricata rejected the rules reload")
+            phase = "Saving rule state"
             conn.commit()
-        except Exception:
-            conn.rollback()
+        except Exception as exc:
+            log_operation("rules", "%s failed: %s" % (phase, exc))
+            if phase == "Validating rules":
+                for name in (validation_capture, os.path.join(tmp, "suricata.log")):
+                    detail = log_tail(name)
+                    if detail:
+                        log_operation("validator", detail)
+            rollback_failed = False
+            try:
+                conn.rollback()
+            except Exception as error:
+                rollback_failed = True
+                log_operation("rules", "Database rollback failed: %s" % error)
             for destination, previous in reversed(published):
-                if previous:
-                    os.replace(previous, destination)
-                else:
-                    os.unlink(destination)
+                try:
+                    if previous:
+                        os.replace(previous, destination)
+                    else:
+                        os.unlink(destination)
+                except OSError as error:
+                    rollback_failed = True
+                    log_operation("rules", "Could not restore %s: %s" % (os.path.basename(destination), error))
             if running and published:
-                command_ok("reload-rules", timeout=120)
-            raise
+                ok, detail = command_result("reload-rules", timeout=120)
+                if not ok:
+                    rollback_failed = True
+                    log_operation("rules", "Rollback reload failed: %s" % (detail or "Suricata refused reload"))
+            if rollback_failed:
+                message = "%s failed. The previous rules could not be confirmed." % phase
+            elif published:
+                log_operation("rules", "Restored the previous rule files and catalog")
+                message = "%s failed. Previous rules restored." % phase
+            else:
+                message = "%s failed. Active rules were left in place." % phase
+            raise RuleActivationError(message, rollback_failed=rollback_failed) from exc
 
 
 def remove_legacy_filters():

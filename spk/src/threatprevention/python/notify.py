@@ -7,6 +7,7 @@ from html import escape
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from corehost import server_name
 from host_info import alert_macs, lookup_host
 from paths import PKGETC, PKGVAR, TELEGRAM_CONF
 from store import kv_get, kv_set
@@ -232,6 +233,25 @@ def _maybe_telegram(conn, classtype, title, msg, sig_name, severity, ip_src, eve
     return sent
 
 
+def notify_operation(conn, key, message, interval=1800):
+    """Operational Telegram alerts use their own cooldown and ignore threat classes."""
+    if kv_get(conn, "enable_telegram", "0") != "1":
+        return False
+    cfg = read_telegram_conf()
+    if not cfg["token"] or not cfg["chat"]:
+        return False
+    if interval:
+        now = int(time.time())
+        stamp = "last_operation_notice_" + key
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            last = int(kv_get(conn, stamp, "0") or 0)
+            if last and now - last < interval:
+                return False
+            kv_set(conn, stamp, str(now))
+    return send_telegram(cfg["token"], cfg["chat"], "Threat Prevention on %s\n%s" % (server_name(), message))
+
+
 def read_telegram_conf():
     out = {"token": "", "chat": ""}
     if not os.path.isfile(TELEGRAM_CONF):
@@ -291,9 +311,14 @@ def send_telegram(token, chat, text, timeout=10, *, html=False):
         with urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", "replace")
         data = json.loads(raw)
-        return bool(data.get("ok"))
+        if data.get("ok"):
+            return True
+        _notify_log("Telegram returned a failed response")
+        return False
     except Exception as exc:
-        _notify_log("telegram send failed: %s" % exc)
+        status = getattr(exc, "code", None)
+        reason = "HTTP %d" % status if isinstance(status, int) else type(exc).__name__
+        _notify_log("Telegram send failed: %s" % reason)
         return False
 
 
