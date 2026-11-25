@@ -6,7 +6,8 @@ PKGDEST="${SYNOPKG_PKGDEST:-/var/packages/ThreatPrevention/target}"
 PKGVAR="/var/packages/ThreatPrevention/var"
 PKGETC="/var/packages/ThreatPrevention/etc"
 BIN="${PKGDEST}/bin/suricata-update"
-OUT="${PKGVAR}/rules"
+RULES_DIR="${PKGVAR}/rules"
+OUT="${1:-}"
 LOG="${PKGVAR}/log/suricata-update.log"
 SU_DATA="${PKGVAR}/suricata-update"
 SOURCE="et-open"
@@ -24,7 +25,11 @@ if [ ! -x "${BIN}" ]; then
 	exit 1
 fi
 
-mkdir -p "${OUT}" "${SU_DATA}/sources" "${PKGVAR}/log"
+mkdir -p "${RULES_DIR}" "${SU_DATA}/sources" "${PKGVAR}/log"
+if [ -z "${OUT}" ]; then
+	OUT="$(mktemp -d "${RULES_DIR}/.update-XXXXXX")"
+	trap 'rm -f "${OUT}/suricata.rules" "${OUT}/classification.config"; rmdir "${OUT}" 2>/dev/null || true' EXIT
+fi
 # DSM python3 has no PyYAML. The SPK vendors a pure-Python copy.
 export PYTHONPATH="${PKGDEST}/lib/tps:${PKGDEST}/lib/python:${PKGDEST}/lib/suricata/python${PYTHONPATH:+:${PYTHONPATH}}"
 
@@ -119,7 +124,7 @@ if [ ! -s "${OUT}/suricata.rules" ]; then
 	echo "update produced no suricata.rules (see ${LOG})" >&2
 	exit 1
 fi
-echo "Wrote ${OUT}/suricata.rules"
-cp -f "${OUT}/suricata.rules" "${OUT}/catalog.rules"
-: > "${OUT}/.from-suricata-update"
-echo "Restart the package to load the new rules: synopkg restart ThreatPrevention"
+if [ "$#" -eq 0 ]; then
+	"${PYJSON}" "${PKGDEST}/lib/tps/compiler.py" --catalog "${OUT}/suricata.rules"
+	echo "Validated and installed the updated rules"
+fi

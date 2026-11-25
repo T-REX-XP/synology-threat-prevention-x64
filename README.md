@@ -141,6 +141,10 @@ Official SRM Threat Prevention is a client for a 21-API `SYNO.TPS.*` stack (aarc
 
 **Desktop (community):** DSM 7 chart stubs, Devices via `SYNO.Core.Network.NSM.Device`, GeoIP / optional OSM tiles, File Station export share, Update Now polling the real `suricata-update` job.
 
+Telegram alerts include source and target, ports, severity, protocol, action, rule ID, and event time. LAN hostnames and MACs are filled when the NAS can resolve them from its hosts file, DHCP leases, neighbor table, or captured Ethernet headers. Name resolution can also use the NAS resolver or, for IPv4 LAN hosts, NetBIOS when `nmblookup` is available. To check what the NAS can resolve for an endpoint, run `python3 /var/packages/ThreatPrevention/target/lib/tps/host_info.py 192.168.1.130`.
+
+For event pins, configure the Google Maps key and either a public GeoIP database or local-site coordinates. See [map setup](docs/google-maps.md#where-event-pins-appear).
+
 **Not in this PoC:** inline block / IPS / NFQUEUE, DPDK and NIC offload, PostgreSQL / synotpsd / USB swap, shipping official `synoips.js`.
 
 Official ExtJS (`synoips.js`, texts, help) is **Synology copyright**. It is not in this Git tree and not on GitHub Releases. The installer downloads the public SRM package into `build/official/` (gitignored). Do not publish that tree.

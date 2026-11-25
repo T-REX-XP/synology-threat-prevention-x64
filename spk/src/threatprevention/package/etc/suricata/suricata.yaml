@@ -41,6 +41,7 @@ outputs:
       enabled: yes
       filetype: regular
       filename: eve.json
+      ethernet: yes
       types:
         - alert:
             tagged-packets: no

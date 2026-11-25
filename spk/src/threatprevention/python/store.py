@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS policy_filter (
     ip_dst_str TEXT NOT NULL DEFAULT '',
     comment TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS policy_filter_sid ON policy_filter(raw_sid);
 CREATE TABLE IF NOT EXISTS notification_filter (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -324,35 +325,56 @@ def severity_from_priority(prio):
     return 3
 
 
+def storage_size(path=None):
+    db = os.fspath(path or DB_PATH)
+    size = 0
+    for filename in (db, db + "-wal"):
+        try:
+            size += os.path.getsize(filename)
+        except FileNotFoundError:
+            pass
+    return size
+
+
 def rotate_if_needed(conn, path=None):
-    db = path or DB_PATH
-    try:
-        size = os.path.getsize(db)
-    except OSError:
-        return 0
     limit_mb = int(kv_get(conn, "storage_limit_mb", "500") or "500")
     limit = limit_mb * 1024 * 1024
-    if size <= limit:
+    if storage_size(path) <= limit:
         return 0
+    # WAL frames and reusable SQLite pages are not live event data.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+
+    def live_size():
+        pages = conn.execute("PRAGMA page_count").fetchone()[0]
+        free = conn.execute("PRAGMA freelist_count").fetchone()[0]
+        return (pages - free) * page_size
+
     deleted = 0
-    while size > int(limit * 0.8):
-        cur = conn.execute("SELECT cid FROM event ORDER BY ts_epoch ASC LIMIT 500")
-        ids = [r["cid"] for r in cur]
-        if not ids:
-            break
-        conn.executemany("DELETE FROM event WHERE cid=?", [(i,) for i in ids])
-        conn.executemany("DELETE FROM iphdr WHERE cid=?", [(i,) for i in ids])
-        conn.executemany("DELETE FROM tcphdr WHERE cid=?", [(i,) for i in ids])
-        conn.executemany("DELETE FROM udphdr WHERE cid=?", [(i,) for i in ids])
-        conn.executemany("DELETE FROM icmphdr WHERE cid=?", [(i,) for i in ids])
-        conn.executemany("DELETE FROM data WHERE cid=?", [(i,) for i in ids])
-        deleted += len(ids)
-        conn.commit()
-        try:
-            size = os.path.getsize(db)
-        except OSError:
-            break
-    conn.execute("VACUUM")
+    size = live_size()
+    while size > limit:
+        with conn:
+            # Serialize the selection and deletion with Clear Logs.
+            conn.execute("BEGIN IMMEDIATE")
+            count = conn.execute("SELECT COUNT(*) FROM event").fetchone()[0]
+            if count <= 1:
+                break
+            # Recheck after each batch. Leave the newest event even when the
+            # rule catalog or a single large event exceeds the entire quota.
+            batch = min(500, count - 1, max(1, count * (size - limit) // size))
+            ids = [(r[0],) for r in conn.execute(
+                "SELECT cid FROM event ORDER BY ts_epoch, cid LIMIT ?", (batch,)
+            )]
+            for table in ("data", "icmphdr", "udphdr", "tcphdr", "iphdr", "event"):
+                conn.executemany("DELETE FROM %s WHERE cid=?" % table, ids)
+            deleted += len(ids)
+        size = live_size()
+    # SQLite normally reuses free pages. Compact once when they still leave
+    # the physical DB over quota and the live data can fit.
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    if size <= limit and storage_size(path) > limit:
+        conn.execute("VACUUM")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     return deleted
 
 
@@ -381,7 +403,7 @@ def backup_json(conn):
     return json.dumps(payload, indent=2)
 
 
-def restore_json(conn, text):
+def restore_json(conn, text, *, commit=True):
     payload = json.loads(text)
     for k, v in (payload.get("kv") or {}).items():
         kv_set(conn, k, v)
@@ -423,7 +445,8 @@ def restore_json(conn, text):
                 )
         except sqlite3.Error:
             pass
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def now_ts():

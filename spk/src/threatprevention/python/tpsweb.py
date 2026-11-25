@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SYNO.TPS.* JSON API + static UI on TCP :19557 and a unix socket."""
 import base64
+import ipaddress
 import json
 import os
 import re
@@ -9,6 +10,7 @@ import socket
 import socketserver
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -44,7 +46,7 @@ from compat import (
     to_epoch,
 )
 from accel import accel_cli_sets, accel_status, apply_accel_yaml, write_accel_conf
-from compiler import compile_rules, import_rules, parse_header, parse_refs, reload_suricata
+from compiler import activate_rules, import_rules, parse_header, parse_refs
 from corehost import iface_ipv4, list_neighbors, nsm_device_list, systemdb_get, usb_list
 from feeds import add_feed, delete_feed, list_feeds, update_feed, write_feeds_json
 from rule_sources import source_urls
@@ -82,6 +84,7 @@ from store import (
     kv_get,
     kv_set,
     restore_json,
+    storage_size,
 )
 
 STOP = False
@@ -89,6 +92,7 @@ EVENT_TASKS = {}
 EVENT_TASK_SEQ = 0
 JOBS = {}
 JOB_SEQ = 0
+RULE_UPDATE_LOCK = threading.Lock()
 
 
 def _stop(signum, frame):
@@ -1234,27 +1238,39 @@ def signature_policy(conn, method, p):
         return ok(official_policy_list(items))
     if method == "get":
         return signature_policy(conn, "list", p)
+    try:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            return _write_signature_policy(conn, method, p)
+    except ValueError as exc:
+        return err(100, {"message": str(exc)})
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return err(500, {"message": "Suricata could not validate or reload the rule changes."})
+
+
+def _write_signature_policy(conn, method, p):
     if method in ("add", "set", "update"):
         if p.get("policy"):
             _apply_policy_batch(conn, p["policy"])
-            conn.commit()
-            compile_rules(conn)
-            reload_suricata()
+            activate_rules(conn, running=engine_status()[0] == "running")
             return ok(official_policy_write(False))
         need_force, applied = _policy_add_or_update(conn, method, p)
         if not applied:
             return ok(official_policy_write(True))
-        conn.commit()
-        compile_rules(conn)
-        reload_suricata()
+        if not _has_ip_filter(p) or (method == "update" and not (
+            _norm_ip(p.get("old_ip_src")) or _norm_ip(p.get("old_ip_dst"))
+        )):
+            activate_rules(conn, running=engine_status()[0] == "running")
         return ok(official_policy_write(need_force))
     if method == "delete":
+        global_change = False
         if p.get("classes") or p.get("signatures"):
             for cls in p.get("classes") or []:
                 name = cls.get("class_name") if isinstance(cls, dict) else str(cls)
                 row = conn.execute("SELECT sig_class_id FROM sig_class WHERE sig_class_name=?", (name,)).fetchone()
                 if row:
                     conn.execute("DELETE FROM policy_class WHERE sig_class_id=?", (row["sig_class_id"],))
+                    global_change = True
             for sig in p.get("signatures") or []:
                 sid = int(sig.get("sid") or sig.get("raw_sid") or 0) if isinstance(sig, dict) else int(sig or 0)
                 ip_src = (sig.get("ip_src") or "") if isinstance(sig, dict) else ""
@@ -1267,17 +1283,19 @@ def signature_policy(conn, method, p):
                 else:
                     conn.execute("DELETE FROM policy_signature WHERE raw_sid=?", (sid,))
                     conn.execute("DELETE FROM policy_filter WHERE raw_sid=?", (sid,))
+                    global_change = True
         else:
             typ = p.get("type") or "signature"
             if typ == "class" or typ == 1 or typ == "1":
                 conn.execute("DELETE FROM policy_class WHERE sig_class_id=?", (int(p.get("sig_class_id") or 0),))
+                global_change = True
             elif typ == "filter" or typ == 3 or typ == "3":
                 conn.execute("DELETE FROM policy_filter WHERE id=?", (int(p.get("id") or 0),))
             else:
                 conn.execute("DELETE FROM policy_signature WHERE raw_sid=?", (int(p.get("raw_sid") or p.get("sig_sid") or p.get("sid") or 0),))
-        conn.commit()
-        compile_rules(conn)
-        reload_suricata()
+                global_change = True
+        if global_change:
+            activate_rules(conn, running=engine_status()[0] == "running")
         return ok({})
     return err(102)
 
@@ -1291,7 +1309,7 @@ def _map_policy_action(action):
     a = (action or "alert").lower()
     if a in ("enabled", "enable", "alert"):
         return "alert"
-    if a in ("disabled", "disable", "do_nothing"):
+    if a in ("disabled", "disable", "do_nothing", "nothing"):
         return "disable"
     if a in ("drop", "pass"):
         return a
@@ -1345,6 +1363,12 @@ def _policy_add_or_update(conn, method, p):
     sid = int(p.get("sid") or p.get("raw_sid") or p.get("sig_sid") or 0)
     ip_src = _norm_ip(p.get("ip_src") or p.get("ip_src_str"))
     ip_dst = _norm_ip(p.get("ip_dst") or p.get("ip_dst_str"))
+    if ip_src or ip_dst:
+        if not sid or _map_policy_action(p.get("action")) not in ("disable", "pass"):
+            raise ValueError("Address-scoped exceptions require a signature and a Disable or Pass action.")
+        for scope in (ip_src, ip_dst):
+            if scope:
+                ipaddress.ip_network(scope, strict=False)
     force = _truth(p.get("force"))
     old_sid = int(p.get("old_sid") or 0) if method == "update" else 0
     old_ip_src = _norm_ip(p.get("old_ip_src")) if method == "update" else ""
@@ -1568,13 +1592,8 @@ def settings_update(conn, api, method, p):
                         return
                     kv_set(c, "engine_ui_status", "updating_signature")
                     c.commit()
-                    rc = subprocess.call(["/bin/sh", UPDATE_SCRIPT], timeout=600)
+                    rc = fetch_and_activate_rules(c)
                     if rc == 0:
-                        kv_set(c, "engine_ui_status", "build_signature_database")
-                        c.commit()
-                        import_rules(c)
-                        compile_rules(c)
-                        reload_suricata()
                         kv_set(c, "update_status", "up_to_date")
                         kv_set(c, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
                         JOBS[tid]["status"] = "up_to_date"
@@ -1587,9 +1606,10 @@ def settings_update(conn, api, method, p):
                     kv_set(c, "engine_ui_status", "")
                     c.commit()
                 except Exception:
-                    kv_set(c, "update_status", "connect_error")
+                    c.rollback()
+                    kv_set(c, "update_status", "error")
                     kv_set(c, "engine_ui_status", "")
-                    JOBS[tid]["status"] = "connect_error"
+                    JOBS[tid]["status"] = "error"
                     c.commit()
                 finally:
                     c.close()
@@ -1624,7 +1644,7 @@ def _storage_limit_mb(raw):
 
 def settings_storage(conn, method, p):
     db = os.path.join(PKGVAR, "tps.db")
-    size = os.path.getsize(db) if os.path.isfile(db) else 0
+    size = storage_size(db)
     limit = _storage_limit_mb(kv_get(conn, "storage_limit_mb", "500"))
     if method == "get":
         return ok(official_storage(size, limit, kv_get(conn, "clear_status", "idle"), usb_max=usb_max_label()))
@@ -1925,9 +1945,15 @@ def backup_api(conn, method, p):
         raw = (raw or "").strip()
         if not raw or raw[0] not in "{[":
             return err(100)
-        restore_json(conn, raw)
-        compile_rules(conn)
-        reload_suricata()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                restore_json(conn, raw, commit=False)
+                activate_rules(conn, running=engine_status()[0] == "running")
+        except (ValueError, AttributeError, KeyError, TypeError):
+            return err(100)
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            return err(500, {"message": "Suricata could not validate or reload the restored rules."})
         return ok({})
     return err(102)
 
@@ -2000,6 +2026,20 @@ def _schedule_due(conn, now):
     return True
 
 
+def fetch_and_activate_rules(conn):
+    rules_dir = os.path.join(PKGVAR, "rules")
+    os.makedirs(rules_dir, exist_ok=True)
+    with RULE_UPDATE_LOCK, tempfile.TemporaryDirectory(prefix=".update-", dir=rules_dir) as stage:
+        rc = subprocess.call(["/bin/sh", UPDATE_SCRIPT, stage], timeout=600)
+        if rc:
+            return rc
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            activate_rules(conn, running=engine_status()[0] == "running",
+                           catalog=os.path.join(stage, "suricata.rules"))
+        return 0
+
+
 def scheduler_loop():
     while not STOP:
         time.sleep(30)
@@ -2011,18 +2051,18 @@ def scheduler_loop():
             if _schedule_due(conn, time.time()):
                 kv_set(conn, "update_status", "updating")
                 conn.commit()
-                rc = subprocess.call(["/bin/sh", UPDATE_SCRIPT], timeout=600)
+                rc = fetch_and_activate_rules(conn)
                 if rc == 0:
-                    import_rules(conn)
-                    compile_rules(conn)
-                    reload_suricata()
                     kv_set(conn, "update_status", "up_to_date")
                     kv_set(conn, "last_updated", time.strftime("%Y-%m-%d %H:%M:%S"))
                 else:
                     kv_set(conn, "update_status", "connect_error")
                 conn.commit()
         except Exception:
-            pass
+            if conn is not None:
+                conn.rollback()
+                kv_set(conn, "update_status", "error")
+                conn.commit()
         finally:
             if conn is not None:
                 conn.close()

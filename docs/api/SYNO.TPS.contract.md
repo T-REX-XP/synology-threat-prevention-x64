@@ -72,7 +72,7 @@ Official `Event.Statistic.get` is three buckets (`days7` / `days30` / `all_logs`
 
 ## SYNO.TPS.Event.Map (v1 list)
 
-`{ "days7", "days30", "all_logs" }` each with `location[]` (`lat`, `lng`, `country`, `ip_src`, `signature`, `priority`, `count`) plus `begin` / `end`. Empty `location` until a GeoIP Country `.dat` exists and `ip_src` is public.
+`{ "days7", "days30", "all_logs" }` each with `begin`, `end`, and `location[]`. Each pin includes `lat`, `lng`, `country`, `ip_src`, `ip_dst`, `signature`, `priority`, `count`, and `mapped_endpoint` (`source`, `target`, or `site`). See [map location setup](../google-maps.md#where-event-pins-appear).
 
 ## SYNO.TPS.Event.ExportFolder (v1 get)
 

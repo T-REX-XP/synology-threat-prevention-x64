@@ -1,2 +1,8 @@
 #!/bin/sh
+PKGDEST="${SYNOPKG_PKGDEST:-/var/packages/ThreatPrevention/target}"
+for python in /usr/bin/python3 /usr/local/bin/python3 python3; do
+	if command -v "${python}" >/dev/null 2>&1; then
+		exec "${python}" "${PKGDEST}/lib/tps/compiler.py" --remove-legacy-filters
+	fi
+done
 exit 0

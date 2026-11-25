@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """Tail eve.json and insert alerts into SQLite."""
 import base64
+import ipaddress
 import json
 import os
 import signal
+import sqlite3
 import sys
 import time
 
+from engine_control import command_ok
 from paths import EVE_PATH, INGEST_PID, PKGVAR
+from host_info import alert_macs
 from store import connect, init_db, ip_to_int, kv_get, rotate_if_needed
 
 STOP = False
+RAW_LOG_LIMIT = 64 * 1024 * 1024
 
 
 def _handle_stop(signum, frame):
@@ -73,10 +78,31 @@ def class_id(conn, classtype):
     return cid, cid
 
 
+def _address_exception(conn, sid, src, dst):
+    rows = conn.execute(
+        "SELECT ip_src_str, ip_dst_str FROM policy_filter WHERE raw_sid=? "
+        "AND action IN ('pass', 'disable', 'disabled', 'nothing', 'do_nothing')", (sid,),
+    )
+    for row in rows:
+        scopes = [(address, scope) for address, scope in zip((src, dst), row) if scope]
+        try:
+            if scopes and all(ipaddress.ip_address(ip) in ipaddress.ip_network(scope, strict=False)
+                              for ip, scope in scopes):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def insert_alert(conn, obj):
     if obj.get("event_type") != "alert":
         return False
     alert = obj.get("alert") or {}
+    src = obj.get("src_ip") or ""
+    dst = obj.get("dest_ip") or ""
+    sig_sid = int(alert.get("signature_id") or 0)
+    if sig_sid and _address_exception(conn, sig_sid, src, dst):
+        return False
     fp = fingerprint(obj)
     if conn.execute("SELECT cid FROM event WHERE eve_fingerprint=?", (fp,)).fetchone():
         return False
@@ -84,9 +110,7 @@ def insert_alert(conn, obj):
     # eve uses "category" as description sometimes; prefer signature classtype if present
     sc_id, _ = class_id(conn, (alert.get("metadata") or {}).get("classtype", [classtype])[0] if isinstance((alert.get("metadata") or {}).get("classtype"), list) else classtype)
     prio = alert.get("severity") or 3
-    src = obj.get("src_ip") or ""
-    dst = obj.get("dest_ip") or ""
-    ether = obj.get("ether") or {}
+    mac_src, mac_dst = alert_macs(obj)
     ts = obj.get("timestamp") or ""
     try:
         epoch = int(time.mktime(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S")))
@@ -98,9 +122,9 @@ def insert_alert(conn, obj):
            impact_flag, action, ip_src, ip_dst, ip_src_str, ip_dst_str, port_src, port_dst, ip_proto, eve_fingerprint)
            VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
-            ether.get("src_mac") or obj.get("src_mac") or "",
-            ether.get("dest_mac") or obj.get("dest_mac") or "",
-            int(alert.get("signature_id") or 0),
+            mac_src,
+            mac_dst,
+            sig_sid,
             int(alert.get("rev") or 0),
             sc_id,
             alert.get("signature") or "",
@@ -165,7 +189,7 @@ def insert_alert(conn, obj):
     payload = payload_hex(obj)
     if payload:
         conn.execute("INSERT OR REPLACE INTO data(sid, cid, data_payload) VALUES (1,?,?)", (cid, payload[:8192]))
-    mac = ether.get("src_mac") or obj.get("src_mac") or ""
+    mac = mac_src
     if mac:
         name = src or mac
         detect = 1 if kv_get(conn, "default_detect", "1") == "1" else 0
@@ -177,36 +201,109 @@ def insert_alert(conn, obj):
     return True
 
 
-def follow(path):
-    offset_file = os.path.join(PKGVAR, "ingest.offset")
-    pos = 0
-    if os.path.isfile(offset_file):
-        try:
-            pos = int(open(offset_file).read().strip() or "0")
-        except ValueError:
-            pos = 0
+def persist_alert(conn, obj):
+    # Validating a policy or ruleset can hold the SQLite writer temporarily.
     while not STOP:
-        if not os.path.isfile(path):
-            time.sleep(1)
-            continue
-        size = os.path.getsize(path)
-        if pos > size:
-            pos = 0
-        with open(path, "r", encoding="utf-8", errors="replace") as fh:
-            fh.seek(pos)
-            while not STOP:
-                line = fh.readline()
-                if not line:
-                    pos = fh.tell()
-                    break
-                yield line
-                pos = fh.tell()
         try:
-            with open(offset_file, "w") as of:
-                of.write(str(pos))
+            inserted = insert_alert(conn, obj)
+            conn.commit()
+            return inserted
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            if "locked" not in str(exc).lower():
+                raise
+            time.sleep(0.5)
+    return False
+
+
+def rotate_raw_logs(eve_path, rotate_eve, limit=RAW_LOG_LIMIT):
+    logdir = os.path.dirname(eve_path)
+    paths = [os.path.join(logdir, name) for name in ("suricata.log", "fast.log")]
+    if rotate_eve:
+        paths.append(eve_path)
+    moved = []
+    for path in paths:
+        try:
+            if os.path.getsize(path) >= limit:
+                os.replace(path, path + ".1")
+                moved.append(path)
+        except OSError:
+            continue
+    if moved and not command_ok("reopen-log-files", timeout=5):
+        for path in moved:
+            try:
+                if not os.path.exists(path):
+                    os.replace(path + ".1", path)
+            except OSError:
+                pass
+
+
+def _file_info(path):
+    try:
+        stat = os.stat(path)
+    except FileNotFoundError:
+        return None, 0
+    return (stat.st_dev, stat.st_ino), stat.st_size
+
+
+def follow(path, maintenance):
+    offset_file = os.path.join(PKGVAR, "ingest.offset")
+    identity = None
+    pos = 0
+    try:
+        with open(offset_file, encoding="utf-8") as fh:
+            offset = json.load(fh)
+        if isinstance(offset, int):
+            pos = max(0, offset)
+        else:
+            identity, pos = tuple(offset["file"]), max(0, int(offset["offset"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    last_log_check = time.monotonic() - 30
+    while not STOP:
+        maintenance()
+        active, size = _file_info(path)
+        archive = path + ".1"
+        archived, archived_size = _file_info(archive)
+        draining = identity is not None and identity != active and identity == archived
+        read_path, new_identity, size = (archive, archived, archived_size) if draining else (path, active, size)
+        idle = False
+        if new_identity is not None:
+            if (identity is not None and identity != new_identity) or pos > size:
+                pos = 0
+            identity = new_identity
+            try:
+                with open(read_path, "rb") as fh:
+                    stat = os.fstat(fh.fileno())
+                    if (stat.st_dev, stat.st_ino) != identity:
+                        continue
+                    fh.seek(pos)
+                    for _ in range(1024):
+                        if STOP:
+                            break
+                        line = fh.readline()
+                        if not line.endswith(b"\n"):
+                            idle = True
+                            break
+                        yield line.decode("utf-8", "replace")
+                        pos = fh.tell()
+            except FileNotFoundError:
+                continue
+            if draining and idle and active is not None:
+                identity, pos = active, 0
+        try:
+            if identity is not None:
+                with open(offset_file + ".tmp", "w", encoding="utf-8") as of:
+                    json.dump({"file": identity, "offset": pos}, of)
+                os.replace(offset_file + ".tmp", offset_file)
         except OSError:
             pass
-        time.sleep(0.5)
+        now = time.monotonic()
+        if now - last_log_check >= 30:
+            rotate_raw_logs(path, active is not None and identity == active and not draining)
+            last_log_check = now
+        if idle or active is None:
+            time.sleep(0.5)
 
 
 def run():
@@ -216,9 +313,20 @@ def run():
     signal.signal(signal.SIGTERM, _handle_stop)
     signal.signal(signal.SIGINT, _handle_stop)
     conn = init_db()
-    last_rotate = 0
+    next_rotate = time.monotonic()
+
+    def maintenance():
+        nonlocal next_rotate
+        now = time.monotonic()
+        if now >= next_rotate:
+            next_rotate = now + 300
+            try:
+                rotate_if_needed(conn)
+            except (OSError, sqlite3.Error):
+                pass
+
     try:
-        for line in follow(EVE_PATH):
+        for line in follow(EVE_PATH, maintenance):
             line = line.strip()
             if not line:
                 continue
@@ -227,7 +335,7 @@ def run():
             except ValueError:
                 continue
             try:
-                if insert_alert(conn, obj):
+                if persist_alert(conn, obj):
                     try:
                         from notify import maybe_notify
                         alert = obj.get("alert") or {}
@@ -237,16 +345,13 @@ def run():
                             alert.get("signature") or "",
                             alert.get("severity") or 3,
                             obj.get("src_ip") or "",
+                            event=obj,
                         )
+                        conn.commit()
                     except Exception:
-                        pass
-                    conn.commit()
+                        conn.rollback()
             except Exception:
                 conn.rollback()
-            now = time.time()
-            if now - last_rotate > 300:
-                rotate_if_needed(conn)
-                last_rotate = now
     finally:
         conn.close()
         try:

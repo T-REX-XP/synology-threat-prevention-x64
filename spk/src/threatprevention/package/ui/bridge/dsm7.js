@@ -543,64 +543,113 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			});
 			me.wrapGmapsLoader();
 		},
-		patchGmapObserver: function () {
-			/* Official gmapWarningHidden does d.first() on MutationObserver records.
-			   Native MutationRecord lists have length but no Ext .first(). */
+		patchEventMap: function (defined) {
 			var tries = 0;
 			function attach() {
-				var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic && SYNO.SDS.TPS.Statistic.MapPanel;
-				if (!P || !P.prototype) {
-					if (tries++ < 40) { window.setTimeout(attach, 100); }
-					return;
-				}
-				if (P.prototype._tpsGmapObs) { return; }
-				P.prototype.gmapWarningHidden = function () {
-					var Ctor = window.MutationObserver || window.WebKitMutationObserver;
-					if (!Ctor || !this.mapContainer || !this.mapContainer.getEl) { return; }
-					var el = this.mapContainer.getEl();
-					if (!el || !el.dom) { return; }
-					var obs = new Ctor(function (records) {
-						if (!records || !records.length) { return; }
-						var c = records[0] && records[0].target;
-						if (c && c.children && c.children.length === 2) {
-							c.removeChild(c.children[1]);
-						}
-					});
-					obs.observe(el.dom, { childList: true });
-				};
-				P.prototype._tpsGmapObs = true;
-			}
-			attach();
-		},
-		patchOsmTiles: function () {
-			/* Official OSM ImageMapType loads tile.openstreetmap.org. DSM CSP img-src
-			   has no OSM host; proxy tiles through same-origin /webman/tps-api. */
-			var tries = 0;
-			function attach() {
-				var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic && SYNO.SDS.TPS.Statistic.MapPanel;
+				var P = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
+					SYNO.SDS.TPS.Statistic && SYNO.SDS.TPS.Statistic.MapPanel);
 				if (!P || !P.prototype || !P.prototype.initMap) {
 					if (tries++ < 40) { window.setTimeout(attach, 100); }
 					return;
 				}
-				if (P.prototype._tpsOsm) { return; }
-				var orig = P.prototype.initMap;
-				P.prototype.initMap = function () {
-					orig.apply(this, arguments);
-					if (!this.gmap || !window.google || !google.maps || !google.maps.ImageMapType) { return; }
-					this.gmap.mapTypes.set("OSM", new google.maps.ImageMapType({
-						getTileUrl: function (coord, zoom) {
-							var n = Math.pow(2, zoom), x = coord.x, y = coord.y;
-							if (y < 0 || y >= n) { return null; }
-							if (x < 0 || x >= n) { x = ((x % n) + n) % n; }
-							return "/webman/tps-api?api=SYNO.TPS.Settings.Map&method=tile&version=1&z=" +
-								zoom + "&x=" + x + "&y=" + y;
-						},
-						tileSize: new google.maps.Size(256, 256),
-						name: "OpenStreetMap",
-						maxZoom: 18
-					}));
+				var proto = P.prototype;
+				if (proto._tpsEventMap) { return; }
+				var init = proto.initMap;
+				proto.gmapWarningHidden = Ext.emptyFn;
+				proto.loadedWorkaround = Ext.emptyFn;
+				proto.initMap = function () {
+					if (this.gmap || this._tpsMapWaiting) { return; }
+					this._tpsMapWaiting = true;
+					var panel = this, args = arguments, deadline = Date.now() + 15000;
+					function whenReady() {
+						var el = panel.mapContainer && panel.mapContainer.getEl();
+						if (panel.isDestroyed || !el || !el.dom) { return; }
+						if (!window.google || !google.maps || typeof google.maps.Map !== "function") {
+							if (Date.now() < deadline) {
+								window.setTimeout(whenReady, 100);
+							} else {
+								panel._tpsMapWaiting = false;
+								el.dom.textContent = "Google Maps could not load. Check the connection and Maps API key.";
+							}
+							return;
+						}
+						panel._tpsMapWaiting = false;
+						el.dom.textContent = "";
+						init.apply(panel, args);
+						panel.gmap.mapTypes.set("OSM", new google.maps.ImageMapType({
+							getTileUrl: function (coord, zoom) {
+								var n = Math.pow(2, zoom), y = coord.y;
+								if (y < 0 || y >= n) { return null; }
+								var x = ((coord.x % n) + n) % n;
+								return "/webman/tps-api?api=SYNO.TPS.Settings.Map&method=tile&version=1&z=" +
+									zoom + "&x=" + x + "&y=" + y;
+							},
+							tileSize: new google.maps.Size(256, 256),
+							name: "OpenStreetMap",
+							maxZoom: 18
+						}));
+						panel.resizeContainer();
+					}
+					whenReady();
 				};
-				P.prototype._tpsOsm = true;
+				proto.fitBounds = function () {
+					if (!this.gmap || !this.markers.length) { return; }
+					var bounds = new google.maps.LatLngBounds();
+					Ext.each(this.markers, function (marker) { bounds.extend(marker.getPosition()); });
+					if (bounds.getNorthEast().equals(bounds.getSouthWest())) {
+						this.gmap.setCenter(bounds.getCenter());
+						this.gmap.setZoom(5);
+					} else {
+						this.gmap.fitBounds(bounds);
+					}
+				};
+				var remove = proto.removePoints;
+				proto.removePoints = function () {
+					remove.apply(this, arguments);
+					this.markers = [];
+				};
+				var priority = proto.getPriorityInfo;
+				proto.getPriorityInfo = function (value) { return priority.call(this, String(value)); };
+				proto.createStore = function () {
+					return new Ext.data.Store({autoLoad: false, reader: new Ext.data.JsonReader({
+						root: "location",
+						fields: ["lat", "lng", "country", "ip_src", "ip_dst", "mapped_endpoint",
+							"signature", "priority", "count", "encode"]
+					})});
+				};
+				var add = proto.addPoints;
+				proto.addPoints = function () {
+					var index = this.markers ? this.markers.length : 0;
+					add.apply(this, arguments);
+					if (!this.gmap) { return; }
+					var markers = this.markers;
+					this.store.each(function (record) {
+						var marker = markers[index++];
+						marker.tpsTarget = record.get("ip_dst");
+						marker.tpsMappedEndpoint = record.get("mapped_endpoint");
+					});
+				};
+				var popup = proto.getInfoWindowContent;
+				proto.getInfoWindowContent = function (marker) {
+					var encode = Ext.util.Format.htmlEncode;
+					var content = popup.call(this, {
+						ip_src: encode(marker.ip_src || ""),
+						country: encode(marker.country || ""),
+						signature: encode(this.helper.decodeMsg(marker.signature, marker.encode) || ""),
+						encode: false,
+						priority: marker.priority,
+						count: marker.count
+					});
+					if (marker.tpsTarget) {
+						content += "<div>Target: " + encode(marker.tpsTarget) + "</div>";
+					}
+					if (marker.tpsMappedEndpoint) {
+						var labels = {source: "Source", target: "Target", site: "Configured local site"};
+						content += "<div>Map location: " + labels[marker.tpsMappedEndpoint] + "</div>";
+					}
+					return content;
+				};
+				proto._tpsEventMap = true;
 			}
 			attach();
 		},
@@ -790,11 +839,12 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				L.prototype.GMAP_API_URL = add(L.prototype.GMAP_API_URL);
 			}
 		},
-		wrapGmapsLoader: function () {
+		wrapGmapsLoader: function (defined) {
 			var me = this;
 			var tries = 0;
 			function attach() {
-				var L = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.GoogleMapLoader;
+				var L = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
+					SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.GoogleMapLoader);
 				var proto = L && L.prototype;
 				if (!proto || !proto.loadScript) {
 					if (tries++ < 40) { window.setTimeout(attach, 100); }
@@ -815,6 +865,12 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 								self.GMAP_API_URL = L.GMAP_API_URL;
 							}
 						}
+						// preLoad and MapPanel construction can both run before Maps is ready.
+						if (!args[0] && !(window.google && google.maps)) {
+							var now = Date.now();
+							if (now - (me._gmapsRequestedAt || 0) < 15000) { return; }
+							me._gmapsRequestedAt = now;
+						}
 						return orig.apply(self, args);
 					}
 					if (me._gmapsKey !== undefined) { return go(); }
@@ -827,9 +883,9 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			}
 			attach();
 		},
-		patchMapSeverity: function () {
-			var Cls = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic &&
-				SYNO.SDS.TPS.Statistic.MapPanel;
+		patchMapSeverity: function (defined) {
+			var Cls = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic &&
+				SYNO.SDS.TPS.Statistic.MapPanel);
 			if (!Cls || !Cls.prototype || Cls.prototype._tpsSev) { return; }
 			Cls.prototype.onSeverityAfterrender = function () {
 				var self = this;

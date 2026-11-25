@@ -6,12 +6,15 @@ an async task_id / list_status handshake. This module maps the SQLite +
 Suricata 8 store onto those official envelopes so vanilla Suricata can drive
 the Synology app.
 """
+import ipaddress
 import json
 import os
 import time
 
-from paths import IFACE_FILE, PKGVAR, SENSOR_CONF
+from paths import IFACE_FILE, MAP_SITE, PKGVAR, SENSOR_CONF
+from geoip import available as geoip_available
 from geoip import BOTNET_CLASSES, lookup as geoip_lookup
+from host_info import is_lan
 
 
 POLICY_TYPE_CLASS = 1
@@ -627,24 +630,52 @@ def official_trends(conn, days=7):
     }
 
 
-def _map_locations(conn, since):
+def _map_site():
+    try:
+        with open(MAP_SITE, encoding="utf-8") as fh:
+            site = json.load(fh)
+        lat, lng = float(site["lat"]), float(site["lng"])
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            return {"lat": lat, "lng": lng, "country": "Local site"}
+    except (OSError, KeyError, ValueError, TypeError, OverflowError):
+        pass
+    return None
+
+
+def _map_endpoint(row, site):
+    for endpoint in ("source", "target"):
+        ip = row["ip_src_str"] if endpoint == "source" else row["ip_dst_str"]
+        geo = geoip_lookup(ip)
+        if geo and geo["lat"] is not None and geo["lng"] is not None:
+            return geo, endpoint
+    if site:
+        for ip in (row["ip_src_str"], row["ip_dst_str"]):
+            try:
+                if is_lan(ipaddress.ip_address(ip)):
+                    return site, "site"
+            except ValueError:
+                continue
+    return None, ""
+
+
+def _map_locations(conn, since, site):
     args = []
     where = "1=1"
     if since:
         where += " AND e.ts_epoch>=?"
         args.append(since)
     rows = conn.execute(
-        """SELECT e.ip_src_str, e.sig_name, e.impact_flag, c.sig_priority, COUNT(*) n
+        """SELECT e.ip_src_str, e.ip_dst_str, e.sig_name, e.impact_flag, c.sig_priority, COUNT(*) n
            FROM event e LEFT JOIN sig_class c ON c.sig_class_id=e.sig_class_id
            WHERE """ + where + """
-           GROUP BY e.ip_src_str, e.sig_name, e.impact_flag
-           ORDER BY n DESC LIMIT 200""",
+           GROUP BY e.ip_src_str, e.ip_dst_str, e.sig_name, e.impact_flag, c.sig_priority
+           ORDER BY n DESC, e.ip_src_str, e.ip_dst_str, e.sig_name, e.impact_flag, c.sig_priority""",
         args,
     )
     out = []
     for r in rows:
-        geo = geoip_lookup(r["ip_src_str"])
-        if not geo or geo.get("lat") is None or geo.get("lng") is None:
+        geo, endpoint = _map_endpoint(r, site)
+        if not geo:
             continue
         sev = severity_name(r["impact_flag"], r["sig_priority"] or 3)
         prio = 1 if sev == "high" else (2 if sev == "medium" else 3)
@@ -653,26 +684,32 @@ def _map_locations(conn, since):
             "lng": geo["lng"],
             "country": geo["country"],
             "ip_src": r["ip_src_str"],
+            "ip_dst": r["ip_dst_str"],
+            "mapped_endpoint": endpoint,
             "signature": r["sig_name"] or "",
             "priority": prio,
             "count": r["n"],
             "encode": False,
         })
+        if len(out) == 200:
+            break
     return out
 
 
 def official_map(conn, date_range=None):
-    """Event.Map.list: days7 / days30 / all_logs with location[] (GeoIP when a .dat exists)."""
+    """Event.Map.list: geolocate a public endpoint or use the configured site."""
     now = int(time.time())
     wanted = date_range
     if isinstance(wanted, str):
         wanted = [wanted]
     if not wanted:
         wanted = ["7days", "30days", "all"]
+    site = _map_site()
+    can_map = conn is not None and (site is not None or geoip_available())
 
     def bucket(since):
         begin = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since or 0)) if since else "1970-01-01 00:00:00"
-        locs = _map_locations(conn, since) if conn is not None else []
+        locs = _map_locations(conn, since, site) if can_map else []
         return {
             "begin": begin,
             "end": now_str(),

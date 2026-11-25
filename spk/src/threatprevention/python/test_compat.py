@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 """Local envelope checks (no NAS required)."""
+import json
 import os
+import subprocess
 import sys
 import tempfile
+import time
+from pathlib import Path
+from types import SimpleNamespace
+from urllib.parse import parse_qs
+from unittest import TestCase
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -31,14 +39,16 @@ from compat import (  # noqa: E402
     official_weekday,
     parse_weekday,
 )
-from compiler import parse_header, parse_refs  # noqa: E402
-from geoip import is_public_ipv4, lookup as geoip_lookup  # noqa: E402
-from ingest import payload_hex  # noqa: E402
+from compiler import activate_rules, import_rules, parse_header, parse_refs, remove_legacy_filters  # noqa: E402
+from engine_control import command_ok  # noqa: E402
+from geoip import COUNTRY_BEGIN, COUNTRY_CODES, is_public_ipv4, lookup as geoip_lookup  # noqa: E402
+from host_info import lookup_host  # noqa: E402
+from ingest import follow, insert_alert, payload_hex, rotate_raw_logs  # noqa: E402
 from feeds import add_feed, feed_url_ok, list_feeds, seed_catalog_feeds  # noqa: E402
 from rule_sources import catalog_entries, source_urls  # noqa: E402
 from notify import list_filters, maybe_notify, read_telegram_conf, upsert_filters, write_telegram_conf  # noqa: E402
 from corehost import _parse_isc_leases, _parse_syno_info, usb_list, systemdb_get  # noqa: E402
-from store import init_db, kv_set  # noqa: E402
+from store import init_db, kv_set, rotate_if_needed, storage_size  # noqa: E402
 from api_routes import BY_API, EXACT, UPDATE_PREFIX  # noqa: E402
 from tpsweb import (  # noqa: E402
     SENSOR_CONF,
@@ -59,6 +69,220 @@ import tpsweb as tpsweb_mod  # noqa: E402
 def check(cond, msg):
     if not cond:
         raise SystemExit("FAIL: " + msg)
+
+
+def check_event_map():
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = Path(tmp) / "GeoIP.dat"
+        # A two-leaf trie for public test addresses with different first bits.
+        left = (COUNTRY_BEGIN + COUNTRY_CODES.index("US")).to_bytes(3, "little")
+        right = (COUNTRY_BEGIN + COUNTRY_CODES.index("DE")).to_bytes(3, "little")
+        site = Path(tmp) / "map-site.json"
+        with patch("geoip.geoip_files", side_effect=lambda: [str(fixture)] if fixture.exists() else []), \
+                patch("geoip.time.monotonic", return_value=100) as clock, patch("compat.MAP_SITE", str(site)):
+            now = int(time.time())
+            with init_db(":memory:") as map_conn:
+                outbound = ("192.168.1.130", "8.8.8.8", "STUN outbound", now, 2)
+                inbound = ("142.250.1.1", "192.168.1.130", "Inbound", now - 8 * 86400, 1)
+                lan = ("192.168.1.130", "192.168.1.1", "LAN only", now, 3)
+                insert = ("INSERT INTO event(ip_src_str, ip_dst_str, sig_name, ts_epoch, impact_flag, timestamp) "
+                          "VALUES (?,?,?,?,?,'2026-01-01 00:00:00')")
+                map_conn.executemany(insert, [outbound, inbound, lan, outbound])
+                map_conn.executemany(insert, [
+                    ("192.168.1.7", "192.168.1.8", "unmappable %d" % i, now, 3)
+                    for i in range(200) for _ in range(3)
+                ])
+                response = handle("SYNO.TPS.Event.Map", "list", {}, map_conn)
+                check(response["data"]["days7"]["location"] == [], "map without GeoIP or site")
+                fixture.write_bytes(left + right + bytes(1024))
+                clock.return_value += 5
+                response = handle("SYNO.TPS.Event.Map", "list", {"date_range": ["days7"]}, map_conn)
+                locations = response["data"]["days7"]["location"]
+                check(len(locations) == 1 and locations[0]["mapped_endpoint"] == "target",
+                      "outbound pin survives unmappable groups above the marker limit")
+                pin = locations[0]
+                check((pin["ip_src"], pin["ip_dst"], pin["country"], pin["count"], pin["priority"]) ==
+                      ("192.168.1.130", "8.8.8.8", "US", 2, 2), "outbound pin contract")
+                check(any(row["country"] == "DE" and row["mapped_endpoint"] == "source"
+                          for row in response["data"]["days30"]["location"]), "older inbound pin")
+                map_conn.execute("DELETE FROM event WHERE sig_name LIKE 'unmappable %'")
+                site.write_text('{"lat": 0, "lng": 2.5}', encoding="utf-8")
+                locations = official_map(map_conn)["days7"]["location"]
+                check(any(row["mapped_endpoint"] == "site" and row["lat"] == 0 and row["lng"] == 2.5
+                          for row in locations), "LAN event at explicitly configured site")
+                site.write_text('{"lat": 120, "lng": 2.5}', encoding="utf-8")
+                check(len(official_map(map_conn)["days7"]["location"]) == 1, "invalid site ignored")
+
+
+def check_telegram_alert():
+    event = {
+        "event_type": "alert", "timestamp": "2026-11-25T19:24:00+0000",
+        "src_ip": "192.168.1.130", "src_port": 52500,
+        "dest_ip": "2606:4700::1111", "dest_port": 3478,
+        "proto": "UDP", "app_proto": "stun",
+        "ether": {"src_mac": "5a:11:22:33:44:55", "dest_mac": "00:11:22:33:44:55"},
+        "alert": {"signature": "STUN <binding> & reply", "category": "Test", "severity": 2,
+                  "signature_id": 1234, "rev": 5, "action": "allowed"},
+    }
+    with init_db(":memory:") as alert_conn:
+        check(insert_alert(alert_conn, event), "ingest Telegram test event")
+        check(alert_conn.execute("SELECT mac_src FROM event").fetchone()[0] == event["ether"]["src_mac"],
+              "ingest stores EVE Ethernet details")
+        kv_set(alert_conn, "enable_telegram", "1")
+        with patch("notify.read_telegram_conf", return_value={"token": "123:test", "chat": "1"}), \
+                patch("host_info._local_records", return_value=({}, {})), \
+                patch("host_info._run", side_effect=["", " WORKGROUP <00> - <GROUP>\n DESKTOP <00> - <ACTIVE>"]) as resolver, \
+                patch("notify.urlopen") as send:
+            send.return_value.__enter__.return_value.read.return_value = b'{"ok": true}'
+            check(maybe_notify(alert_conn, "Test", event["alert"]["signature"], 2, event["src_ip"], event=event),
+                  "Telegram alert delivered through fake transport")
+            request = send.call_args[0][0]
+            fields = parse_qs(request.data.decode())
+            message = fields["text"][0]
+            check(fields["parse_mode"] == ["HTML"] and "STUN &lt;binding&gt; &amp; reply" in message,
+                  "Telegram HTML mode and escaped signature")
+            check(all(value in message for value in (
+                "192.168.1.130:52500", "[2606:4700::1111]:3478", "NetBIOS <code>DESKTOP</code>",
+                "Captured link MAC <code>5a:11:22:33:44:55</code>", "Priority 2 (Medium)",
+                "1234 rev 5", "UDP", "allowed", event["timestamp"],
+            )), "Telegram endpoints and alert context")
+            check(event["ether"]["dest_mac"] not in message and resolver.call_count == 2,
+                  "public endpoint does not trigger local discovery")
+            check(not maybe_notify(alert_conn, "Test", "another", 2, event["src_ip"], event=event),
+                  "Telegram alert interval preserved")
+    with patch("host_info._local_records", return_value=(
+        {"192.168.1.140": "nas-client"}, {"192.168.1.140": {"mac": "5a:11:22:33:44:99"}},
+    )), patch("host_info._run") as resolver:
+        check(lookup_host("192.168.1.140") == {"hostname": "nas-client", "mac": "5a:11:22:33:44:99"},
+              "local host inventory provides hostname and MAC")
+        resolver.assert_not_called()
+
+
+check_event_map()
+check_telegram_alert()
+
+
+def check_retention():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = str(Path(tmp) / "events.db")
+        with init_db(db) as conn:
+            kv_set(conn, "storage_limit_mb", "1")
+            for i in range(350):
+                cid = conn.execute("INSERT INTO event(timestamp, ts_epoch) VALUES ('test',?)", (i,)).lastrowid
+                conn.execute("INSERT INTO data(sid,cid,data_payload) VALUES (1,?,?)", (cid, "a" * 4000))
+            conn.commit()
+            removed = rotate_if_needed(conn, db)
+            remaining = [row[0] for row in conn.execute("SELECT cid FROM event ORDER BY cid")]
+            check(0 < removed < 350 and remaining == list(range(removed + 1, 351)),
+                  "retention removes oldest events and preserves the newest")
+            check(conn.execute("SELECT COUNT(*) FROM data").fetchone()[0] == len(remaining),
+                  "retention deletes matching payloads")
+            check(storage_size(db) <= 1024 * 1024, "main database and WAL fit after retention")
+        with init_db(str(Path(tmp) / "wal.db")) as conn:
+            db = str(Path(tmp) / "wal.db")
+            kv_set(conn, "storage_limit_mb", "1")
+            conn.execute("INSERT INTO event(timestamp, ts_epoch) VALUES ('test',1)")
+            conn.commit()
+            conn.execute("PRAGMA wal_autocheckpoint=0")
+            for i in range(300):
+                kv_set(conn, "fixture", str(i))
+                conn.commit()
+            check(storage_size(db) > 1024 * 1024, "WAL fixture exceeds quota")
+            check(rotate_if_needed(conn, db) == 0, "checkpoint alone avoids pruning for WAL-only growth")
+            check(storage_size(db) < 1024 * 1024, "WAL is reclaimed")
+
+
+def check_raw_rotation():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        eve = root / "eve.json"
+        eve.write_bytes(b'{"id":1}\n{"id":2}\n')
+        old = eve.stat()
+        (root / "ingest.offset").write_text(
+            json.dumps({"file": [old.st_dev, old.st_ino], "offset": len(b'{"id":1}\n')}), encoding="utf-8"
+        )
+
+        def reopen(_command, **_kwargs):
+            eve.write_bytes(b'{"id":3}\n{"id":')
+            return True
+
+        def finish_line(_delay):
+            with eve.open("ab") as fh:
+                fh.write(b'4}\n')
+
+        with patch("ingest.command_ok", side_effect=reopen):
+            rotate_raw_logs(str(eve), True, limit=1)
+        check((root / "eve.json.1").stat().st_ino == old.st_ino, "raw EVE is renamed for rotation")
+        with patch("ingest.PKGVAR", tmp), patch("ingest.rotate_raw_logs"), patch("ingest.time.sleep") as sleep:
+            def wait(delay):
+                check(sleep.call_count <= 2, "rotated tail reaches the complete line")
+                if sleep.call_count == 2:
+                    finish_line(delay)
+
+            sleep.side_effect = wait
+            tail = follow(str(eve), lambda: None)
+            check([json.loads(next(tail))["id"] for _ in range(3)] == [2, 3, 4],
+                  "tail resumes the archive before the new file and waits for a complete line")
+            tail.close()
+        with patch("ingest.command_ok", return_value=False):
+            rotate_raw_logs(str(eve), True, limit=1)
+        check(eve.exists() and eve.read_bytes().startswith(b'{"id":3}'), "failed reopen restores active path")
+
+
+def check_rule_activation():
+    rule = ('alert tcp any any -> any 443 (msg:"Fixture"; '
+            'flow:to_server; classtype:not-suspicious; sid:%d; rev:1;)\n')
+    with tempfile.TemporaryDirectory() as tmp, init_db(":memory:") as conn:
+        root = Path(tmp)
+        active = root / "suricata.rules"
+        catalog = root / "catalog.rules"
+        downloaded = root / "download.rules"
+        active.write_text(rule % 12345, encoding="utf-8")
+        catalog.write_text(rule % 12345, encoding="utf-8")
+        downloaded.write_text(rule % 12346, encoding="utf-8")
+        with patch("compiler.RULES_OUT", str(active)), patch("compiler.rule_sources", return_value=[str(catalog)]), \
+                patch("compiler.accel_cli_sets", return_value=[]), \
+                patch("compiler.subprocess.run") as validate, patch("compiler.command_ok") as engine:
+            import_rules(conn)
+            validate.side_effect = subprocess.CalledProcessError(1, "suricata")
+            with TestCase().assertRaises(subprocess.CalledProcessError):
+                activate_rules(conn, running=True, catalog=str(downloaded))
+            check(active.read_text() == rule % 12345 and not engine.called, "invalid rules never replace the live file")
+            validate.side_effect = None
+            engine.side_effect = [False, True]
+            with TestCase().assertRaises(RuntimeError):
+                activate_rules(conn, running=True, catalog=str(downloaded))
+            check(active.read_text() == catalog.read_text() == rule % 12345 and engine.call_count == 2,
+                  "failed reload restores both files and requests the old rules")
+            check(conn.execute("SELECT sig_sid FROM signature").fetchone()[0] == 12345, "failed reload rolls back catalog")
+            engine.side_effect = None
+            engine.return_value = True
+            activate_rules(conn, running=True, catalog=str(downloaded))
+            check(active.read_text() == catalog.read_text() == rule % 12346, "valid candidate is activated")
+            check([row[0] for row in conn.execute("SELECT sig_sid FROM signature")] == [12346],
+                  "signatures deleted upstream leave the active catalog")
+            legacy = 'pass ip any any -> any any (msg:"policy filter sid 12346"; sid:4000001; rev:1; classtype:not-suspicious;)\n'
+            active.write_text(rule % 12346 + legacy, encoding="utf-8")
+            remove_legacy_filters()
+            check(active.read_text() == rule % 12346, "upgrade removes only old synthetic exception rules")
+
+        params = {"sid": 12346, "ip_src": "192.168.1.0/24", "ip_dst": "2606:4700::1111"}
+        check(not handle("SYNO.TPS.Signature.Policy", "add", dict(params, action="drop"), conn)["success"],
+              "scoped enforcement is unavailable on a passive sensor")
+        check(handle("SYNO.TPS.Signature.Policy", "add", dict(params, action="disable"), conn)["success"],
+              "scoped exception is saved without changing the engine rules")
+        alert = {"event_type": "alert", "src_ip": "192.168.1.2", "dest_ip": "2606:4700::1111",
+                 "alert": {"signature_id": 12346}}
+        check(not insert_alert(conn, alert), "scoped exception requires both endpoints")
+        check(insert_alert(conn, dict(alert, dest_ip="2606:4700::1001")), "same signature outside scope is retained")
+        check(insert_alert(conn, dict(alert, alert={"signature_id": 12345})), "other signatures remain visible")
+    with patch("engine_control.subprocess.run", return_value=SimpleNamespace(stdout=b'{"return":"NOK"}')):
+        check(not command_ok("reload-rules"), "socket refusal can have a successful client exit")
+
+
+check_retention()
+check_raw_rotation()
+check_rule_activation()
 
 
 sensor = official_sensor(

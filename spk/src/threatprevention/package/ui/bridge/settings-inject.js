@@ -858,6 +858,13 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (name === "SYNO.SDS.TPS.Overview.StatusPanel") {
 					me.patchOverviewPathlinks(cls);
 				}
+				if (name === "SYNO.SDS.TPS.Utils.GoogleMapLoader") {
+					me.wrapGmapsLoader(cls);
+				}
+				if (name === "SYNO.SDS.TPS.Statistic.MapPanel") {
+					me.patchMapSeverity(cls);
+					me.patchEventMap(cls);
+				}
 				if (name === "SYNO.SDS.TPS.Settings.GeneralPanel") {
 					me.patchGeneralSettings(cls);
 				}

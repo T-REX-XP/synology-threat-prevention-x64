@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Parse ET rules, apply policy_*, write suricata.rules."""
+import argparse
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 
-from paths import CLASSIFICATION, PKGDEST, PKGVAR, RULES_OUT, SIGNATURE_CONF, SURICATA_SOCKET, SURICATASC
-from store import connect, init_db, parse_signature_conf
+from accel import accel_cli_sets
+from engine_control import command_ok
+from paths import PKGDEST, PKGVAR, RULES_OUT, SURICATA_BIN, YAML_PATH
+from store import init_db
 
 ACTION_RE = re.compile(r"^(alert|drop|pass|reject|rejectsrc|rejectdst)\s+", re.I)
 SID_RE = re.compile(r"\bsid\s*:\s*(\d+)\s*;", re.I)
@@ -18,6 +23,9 @@ HEADER_RE = re.compile(
     re.I,
 )
 REF_RE = re.compile(r"\breference\s*:\s*([^,;]+)\s*,\s*([^;]+)\s*;", re.I)
+LEGACY_FILTER = re.compile(
+    r'^(alert|drop|pass) ip .* \(msg:"policy filter sid \d+"; sid:\d+; rev:1; classtype:not-suspicious;\)$'
+)
 
 
 def parse_refs(raw):
@@ -78,15 +86,19 @@ def parse_rule_line(line):
     }
 
 
-def import_rules(conn=None):
+def import_rules(conn=None, *, catalog=None, commit=True):
     own = conn is None
     conn = conn or init_db()
     class_ids = {r["sig_class_name"]: r["sig_class_id"] for r in conn.execute("SELECT sig_class_id, sig_class_name FROM sig_class")}
     seen = 0
-    for path in rule_sources():
+    if catalog is not None:
+        conn.execute("DELETE FROM signature")
+    for path in ([catalog] if catalog is not None else rule_sources()):
         try:
             text = open(path, encoding="utf-8", errors="replace").read()
         except OSError:
+            if catalog is not None:
+                raise
             continue
         for line in unfold(text).splitlines():
             rec = parse_rule_line(line)
@@ -116,8 +128,11 @@ def import_rules(conn=None):
                 ),
             )
             seen += 1
+    if catalog is not None and not seen:
+        raise ValueError("Downloaded rule catalog contains no usable signatures")
     refresh_class_counts(conn)
-    conn.commit()
+    if commit or own:
+        conn.commit()
     if own:
         conn.close()
     return seen
@@ -157,12 +172,13 @@ def apply_action(raw, action):
     return ACTION_RE.sub(new_act + " ", body, count=1)
 
 
-def compile_rules(conn=None):
+def compile_rules(conn=None, path=None):
     own = conn is None
     conn = conn or init_db()
     if conn.execute("SELECT COUNT(*) FROM signature").fetchone()[0] == 0:
-        import_rules(conn)
-    os.makedirs(os.path.dirname(RULES_OUT), exist_ok=True)
+        import_rules(conn, commit=own)
+    path = path or RULES_OUT
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     lines = []
     for rec in conn.execute("SELECT sig_sid, sig_class_id, sig_raw_rule, sig_action FROM signature ORDER BY sig_sid"):
         action = sid_action(conn, rec["sig_sid"])
@@ -174,44 +190,90 @@ def compile_rules(conn=None):
         if not raw:
             continue
         lines.append(apply_action(raw, action))
-    # filter policies: extra pass/drop lines by IP (best-effort suppress via threshold-like pass)
-    for flt in conn.execute("SELECT * FROM policy_filter"):
-        sid = flt["raw_sid"]
-        src = flt["ip_src_str"] or "any"
-        dst = flt["ip_dst_str"] or "any"
-        act = "pass" if flt["action"] in ("pass", "disable") else flt["action"]
-        lines.append(
-            '%s ip %s any -> %s any (msg:"policy filter sid %s"; sid:%s; rev:1; classtype:not-suspicious;)'
-            % (act if act in ("alert", "drop", "pass") else "pass", src, dst, sid, 4000000 + int(flt["id"] or 0))
-        )
-    tmp = RULES_OUT + ".tmp"
+    # Address-scoped exceptions are applied by ingest to the original SID.
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
-    os.replace(tmp, RULES_OUT)
+    os.replace(tmp, path)
     if own:
         conn.close()
     return len(lines)
 
 
-def reload_suricata():
-    if os.path.isfile(SURICATASC) and os.path.exists(SURICATA_SOCKET):
+def activate_rules(conn, *, running, catalog=None):
+    """Validate the pending DB changes and publish the rules as one operation."""
+    rules_dir = os.path.dirname(RULES_OUT)
+    os.makedirs(rules_dir, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".activate-", dir=rules_dir) as tmp:
+        candidate = os.path.join(tmp, "candidate.rules")
+        live_catalog = os.path.join(rules_dir, "catalog.rules")
+        published = []
         try:
+            if catalog is not None:
+                import_rules(conn, catalog=catalog, commit=False)
+            compile_rules(conn, candidate)
             subprocess.run(
-                [SURICATASC, "-c", SURICATA_SOCKET, "reload-rules"],
-                timeout=60,
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                [SURICATA_BIN, "-T", "--init-errors-fatal", "-c", YAML_PATH,
+                 "-S", candidate, "-l", tmp, "--set", "unix-command.enabled=no", *accel_cli_sets()],
+                check=True, timeout=120, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            return True
-        except (OSError, subprocess.SubprocessError):
-            return False
-    return False
+            files = [(candidate, RULES_OUT)]
+            if catalog is not None:
+                staged_catalog = shutil.copyfile(catalog, os.path.join(tmp, "catalog.rules"))
+                files.append((staged_catalog, live_catalog))
+                marker = os.path.join(tmp, ".from-suricata-update")
+                with open(marker, "w", encoding="utf-8"):
+                    pass
+                files.append((marker, os.path.join(rules_dir, ".from-suricata-update")))
+            for staged, destination in files:
+                previous = os.path.join(tmp, os.path.basename(destination) + ".previous")
+                if os.path.isfile(destination):
+                    shutil.copy2(destination, previous)
+                else:
+                    previous = None
+                os.replace(staged, destination)
+                published.append((destination, previous))
+            if running and not command_ok("reload-rules", timeout=120):
+                raise RuntimeError("Suricata rejected the rules reload")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            for destination, previous in reversed(published):
+                if previous:
+                    os.replace(previous, destination)
+                else:
+                    os.unlink(destination)
+            if running and published:
+                command_ok("reload-rules", timeout=120)
+            raise
+
+
+def remove_legacy_filters():
+    """Strip only the generic IP rules generated by earlier package releases."""
+    if not os.path.isfile(RULES_OUT):
+        return
+    with open(RULES_OUT, encoding="utf-8") as fh:
+        lines = fh.readlines()
+    kept = [line for line in lines if not LEGACY_FILTER.fullmatch(line.rstrip())]
+    if len(kept) != len(lines):
+        with open(RULES_OUT + ".migration", "w", encoding="utf-8") as fh:
+            fh.writelines(kept)
+        shutil.copymode(RULES_OUT, RULES_OUT + ".migration")
+        os.replace(RULES_OUT + ".migration", RULES_OUT)
 
 
 if __name__ == "__main__":
-    conn = init_db()
-    print("imported", import_rules(conn))
-    print("compiled", compile_rules(conn), "rules ->", RULES_OUT)
-    reload_suricata()
-    conn.close()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--catalog")
+    parser.add_argument("--remove-legacy-filters", action="store_true")
+    args = parser.parse_args()
+    if args.remove_legacy_filters:
+        remove_legacy_filters()
+    else:
+        from tpsweb import engine_status
+
+        conn = init_db()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            activate_rules(conn, running=engine_status()[0] == "running", catalog=args.catalog)
+        conn.close()

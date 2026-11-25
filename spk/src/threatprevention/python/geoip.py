@@ -4,9 +4,10 @@ Looks for a legacy MaxMind GeoIP.dat (DSM often ships one) or a file the
 admin dropped under the package. No demo MMDB is packed. Private addresses
 do not get a pin.
 """
+import ipaddress
 import os
-import socket
-import struct
+import time
+from functools import lru_cache
 
 from paths import PKGDEST, PKGETC
 
@@ -82,10 +83,6 @@ BOTNET_CLASSES = frozenset((
     "successful-admin", "successful-user",
 ))
 
-_DAT = None
-_CACHE = {}
-
-
 def geoip_files():
     names = ("GeoIP.dat", "GeoLiteCountry.dat", "GeoIPCountry.dat")
     roots = (
@@ -99,105 +96,71 @@ def geoip_files():
     for root in roots:
         for name in names:
             path = os.path.join(root, name)
-            if os.path.isfile(path) and os.path.getsize(path) > 1000:
+            if os.path.isfile(path):
                 out.append(path)
     return out
 
 
 def is_public_ipv4(text):
     try:
-        packed = socket.inet_aton(text)
-    except (OSError, TypeError, ValueError):
+        address = ipaddress.IPv4Address(text)
+    except ValueError:
         return False
-    n = struct.unpack("!I", packed)[0]
-    if n == 0 or n == 0xFFFFFFFF:
-        return False
-    if (n & 0xFF000000) == 0x00000000:
-        return False
-    if (n & 0xFF000000) == 0x7F000000:
-        return False
-    if (n & 0xFF000000) == 0x0A000000:
-        return False
-    if (n & 0xFFF00000) == 0xAC100000:
-        return False
-    if (n & 0xFFFF0000) == 0xC0A80000:
-        return False
-    if (n & 0xFFFF0000) == 0xA9FE0000:
-        return False
-    if (n & 0xFF000000) == 0xE0000000:
-        return False
-    return True
+    return address.is_global and not (address.is_multicast or address.is_reserved)
 
 
-def ipv4_num(text):
-    return struct.unpack("!I", socket.inet_aton(text))[0]
-
-
-class _CountryDat(object):
-    def __init__(self, path):
-        self.path = path
-        self.fh = open(path, "rb")
+class _CountryDat:
+    def __init__(self, data):
+        self.data = data
 
     def country(self, ipnum):
         offset = 0
-        try:
-            for depth in range(31, -1, -1):
-                self.fh.seek(6 * offset)
-                buf = self.fh.read(6)
-                if len(buf) < 6:
-                    return ""
-                left = buf[0] | (buf[1] << 8) | (buf[2] << 16)
-                right = buf[3] | (buf[4] << 8) | (buf[5] << 16)
-                nxt = right if ipnum & (1 << depth) else left
-                if nxt >= COUNTRY_BEGIN:
-                    idx = nxt - COUNTRY_BEGIN
-                    if 0 <= idx < len(COUNTRY_CODES):
-                        return COUNTRY_CODES[idx]
-                    return ""
-                offset = nxt
-        except OSError:
-            return ""
+        for depth in range(31, -1, -1):
+            start = 6 * offset + (3 if ipnum & (1 << depth) else 0)
+            if start + 3 > len(self.data):
+                return ""
+            offset = int.from_bytes(self.data[start:start + 3], "little")
+            if offset >= COUNTRY_BEGIN:
+                index = offset - COUNTRY_BEGIN
+                return COUNTRY_CODES[index] if index < len(COUNTRY_CODES) else ""
         return ""
 
 
-def _dat():
-    global _DAT
-    if _DAT is not None:
-        return _DAT
-    files = geoip_files()
-    _DAT = _CountryDat(files[0]) if files else False
-    return _DAT
+@lru_cache(maxsize=1)
+def _read_dat(path, _mtime, _size):
+    with open(path, "rb") as fh:
+        return _CountryDat(fh.read())
+
+
+@lru_cache(maxsize=1)
+def _dat_at(_period):
+    for path in geoip_files():
+        try:
+            stat = os.stat(path)
+            if stat.st_size > 1000:
+                return _read_dat(path, stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            continue
+    return None
 
 
 def lookup(ip):
     """Return {country, lat, lng} or None."""
     ip = (ip or "").strip()
-    if ip in _CACHE:
-        return _CACHE[ip]
     if not is_public_ipv4(ip):
-        _CACHE[ip] = None
         return None
-    db = _dat()
-    if not db:
-        _CACHE[ip] = None
-        return None
-    try:
-        code = db.country(ipv4_num(ip))
-    except Exception:
-        code = ""
-    if not code or code in ("A1", "A2", "O1", "AP", "EU"):
-        # Anonymous / satellite / continent — skip pin, keep country if useful.
-        if code in ("AP", "EU"):
-            rec = {"country": code, "lat": None, "lng": None}
-            _CACHE[ip] = rec
-            return rec
-        _CACHE[ip] = None
+    db = _dat_at(int(time.monotonic()) // 5)
+    return _lookup(db, ip) if db else None
+
+
+@lru_cache(maxsize=8192)
+def _lookup(db, ip):
+    code = db.country(int(ipaddress.IPv4Address(ip)))
+    if not code or code in ("A1", "A2", "O1"):
         return None
     lat, lng = CENTROIDS.get(code, (None, None))
-    rec = {"country": code, "lat": lat, "lng": lng}
-    _CACHE[ip] = rec
-    return rec
+    return {"country": code, "lat": lat, "lng": lng}
 
 
 def available():
-    return bool(geoip_files())
+    return _dat_at(int(time.monotonic()) // 5) is not None

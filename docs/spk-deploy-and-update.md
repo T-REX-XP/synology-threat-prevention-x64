@@ -110,6 +110,12 @@ sudo synopkg restart ThreatPrevention
 
 Feed URLs live in `target/etc/rule-sources.json`. Override with `/var/packages/ThreatPrevention/etc/rule-sources.json`; `{code}` is replaced with the ET Pro license. CLI fallback (same script as Update Now): `sudo /var/packages/ThreatPrevention/scripts/update-rules.sh`. Success creates `var/rules/.from-suricata-update`.
 
+Rule updates stage the download, validate the compiled rules with the installed Suricata, and reload the active engine if it is running. A validation or reload failure keeps the previous rules and catalog. Update Now and scheduled updates record a failed status when activation fails.
+
+Address-scoped Disable and Pass entries filter events and notifications by the selected signature ID and every specified endpoint. Suricata continues to inspect the mirrored traffic and write the original alerts to raw EVE. Scoped Alert and Drop entries are unsupported by the passive sensor.
+
+The Log Storage quota covers SQLite and its write-ahead log. Retention checkpoints the log before considering event deletion and removes the oldest records first. Raw Suricata logs have a separate 64 MiB rotation threshold per file, with one retained generation. Ingest drains any pending EVE archive before rotating it again.
+
 ### Router traffic copy (LAN↔WAN IDS)
 
 The NAS is not the gateway. LAN listen only sees NAS traffic. To inspect client LAN↔WAN flows, the gateway copies FORWARD frames onto `tps0` — OpenWrt via GRE tap, MikroTik via TZSP (UDP 37008). Full steps: [router-traffic-copy.md](router-traffic-copy.md).
