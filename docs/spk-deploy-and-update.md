@@ -216,4 +216,10 @@ sudo synopkg uninstall ThreatPrevention
 | Engine fails after enabling Hyperscan | Binary has no `libhs` | `accel.conf` falls back to `ac`/`bmh`. Confirm `--build-info` Hyperscan yes. [hw-acceleration.md](hw-acceleration.md). |
 | Telegram Apply empties `telegram.conf` | Password field sent `""` | Leave the token blank to keep the stored value; second Apply must not truncate `TOKEN=`. |
 
+### Repack checks for translations and launcher icons
+
+The original SRM `1.3.3-0926` and `1.3.4-0927` packages and the inspected DSM repacks all contain the same 21 translation catalogs byte for byte. The stock helper shows raw keys such as `status_title_well` if the DSM lookup fails to resolve them. The bridge in `8.0.8-0069` and later uses the packaged English string in that case and preserves resolved translations. The archive comparison cannot establish why a specific DSM session failed to resolve a key. If raw labels recur, check the response and version of `synoips.js` loaded by the browser. [DSM translation loading](https://help.synology.com/developer-guide/integrate_dsm/i18n.html)
+
+Older repacks retained the SRM icon template `images/IDS_IPS_{0}.png`. DSM can substitute 16 or 32, and neither image was present in NAS builds because generation depended on macOS's `sips`. From `8.0.8-0070`, both launcher and window point to the bundled `images/IDS_IPS_64.png`. The `8.0.8-0075` SPK contains a readable 64 × 64 PNG at that path. If the icon is blank again, check the icon request path and HTTP status in the browser. [DSM icon sizing](https://help.synology.com/developer-guide/integrate_dsm/config.html)
+
 Do not set `LD_LIBRARY_PATH` to `target/lib` in a root shell: that Ubuntu `libc.so.6` will break DSM tools in the same environment. The ELF interpreter is already patched to `target/lib/ld-linux-x86-64.so.2`. File caps need RUNPATH `/var/lib/tps`, not `$ORIGIN`.
