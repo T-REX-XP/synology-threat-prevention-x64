@@ -12,8 +12,8 @@ import os
 import time
 
 from paths import IFACE_FILE, MAP_SITE, PKGVAR, SENSOR_CONF
-from geoip import available as geoip_available
 from geoip import BOTNET_CLASSES, lookup as geoip_lookup
+from geoip import map_available, map_lookup
 from host_info import is_lan
 
 
@@ -645,7 +645,7 @@ def _map_site():
 def _map_endpoint(row, site):
     for endpoint in ("source", "target"):
         ip = row["ip_src_str"] if endpoint == "source" else row["ip_dst_str"]
-        geo = geoip_lookup(ip)
+        geo = map_lookup(ip)
         if geo and geo["lat"] is not None and geo["lng"] is not None:
             return geo, endpoint
     if site:
@@ -705,7 +705,7 @@ def official_map(conn, date_range=None):
     if not wanted:
         wanted = ["7days", "30days", "all"]
     site = _map_site()
-    can_map = conn is not None and (site is not None or geoip_available())
+    can_map = conn is not None and (site is not None or map_available())
 
     def bucket(since):
         begin = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since or 0)) if since else "1970-01-01 00:00:00"

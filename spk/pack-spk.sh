@@ -110,6 +110,8 @@ fi
 
 info "Stage original portable rules and policy"
 mkdir -p "${STAGING}/package/etc/rules" "${STAGING}/package/etc/suricata" "${STAGING}/package/etc/sensor"
+mkdir -p "${STAGING}/package/etc/geoip"
+cp -a "${SRC}/package/etc/geoip/." "${STAGING}/package/etc/geoip/"
 cp -a "${ORIG_RULES}/emerging.rules.tar.gz" "${STAGING}/package/etc/rules/"
 cp -a "${ORIG_RULES}/signature.conf" "${STAGING}/package/etc/rules/"
 cp -a "${ORIG_RULES}/classification.config" "${STAGING}/package/etc/rules/"

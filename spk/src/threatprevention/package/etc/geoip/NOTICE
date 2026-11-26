@@ -1,0 +1,9 @@
+IP Geolocation by DB-IP (https://db-ip.com).
+DB-IP Country Lite, November 2026, by Eris Networks S.A.S.
+Licensed under Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+Source: https://download.db-ip.com/free/dbip-country-lite-2026-11.csv.gz
+SHA-256: e5c8459d638a272ece7f4d7cfa49dce18d91b4f403f6940ba9249bf0db3781fd
+The SPK stores the address ranges and country codes in a compact binary format.
+Unknown-country ranges are omitted.

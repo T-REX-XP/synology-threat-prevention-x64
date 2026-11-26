@@ -1,17 +1,18 @@
-"""Optional IPv4 GeoIP for Event.Map / country pies.
-
-Looks for a legacy MaxMind GeoIP.dat (DSM often ships one) or a file the
-admin dropped under the package. No demo MMDB is packed. Private addresses
-do not get a pin.
-"""
+"""Local country lookups for the event map and legacy GeoIP statistics."""
+import gzip
 import ipaddress
 import os
+import struct
 import time
 from functools import lru_cache
 
 from paths import PKGDEST, PKGETC
 
 COUNTRY_BEGIN = 16776960
+MAP_COUNTRY_DB = os.path.join(PKGDEST, "etc", "geoip", "dbip-country-ranges.gz")
+_HEADER = struct.Struct(">8sII")
+_RANGE4 = struct.Struct(">4s4s2s")
+_RANGE6 = struct.Struct(">16s16s2s")
 
 # Standard GeoIP Country edition ids (index 0 unused).
 COUNTRY_CODES = (
@@ -76,6 +77,45 @@ CENTROIDS = {
     "TZ": (-6.0, 35.0), "UA": (49.0, 32.0), "UG": (1.0, 32.0), "US": (38.0, -97.0),
     "UY": (-33.0, -56.0), "UZ": (41.0, 64.0), "VE": (8.0, -66.0), "VN": (16.0, 106.0),
     "YE": (15.5, 47.5), "ZA": (-29.0, 24.0), "ZM": (-15.0, 30.0), "ZW": (-20.0, 30.0),
+    # Additional country label points from Natural Earth 1:50m (v5.1.2).
+    "AG": (17.35, -61.79), "AI": (18.24, -63.03), "AQ": (-79.84, 35.89),
+    "AS": (-14.33, -170.75), "AW": (12.52, -69.97), "AX": (60.16, 19.87),
+    "BB": (13.16, -59.57), "BF": (12.67, -1.36), "BI": (-3.33, 29.92),
+    "BJ": (10.32, 2.35), "BL": (17.9, -62.83), "BM": (32.3, -64.76),
+    "BN": (4.45, 114.55), "BS": (26.4, -77.15), "BT": (27.54, 90.04),
+    "BW": (-22.1, 24.18), "BZ": (17.2, -88.71), "CD": (-1.86, 23.46),
+    "CF": (6.99, 20.91), "CG": (0.14, 15.9), "CI": (7.49, -5.57),
+    "CK": (-21.22, -159.79), "CM": (4.59, 12.47), "CV": (15.07, -23.64),
+    "CW": (12.15, -68.92), "DJ": (11.98, 42.5), "DM": (15.46, -61.34),
+    "EH": (23.97, -12.63), "ER": (15.79, 38.29), "FJ": (-17.83, 177.98),
+    "FK": (-51.61, -58.74), "FM": (6.89, 158.23), "FO": (62.19, -7.06),
+    "GA": (-0.44, 11.84), "GD": (12.11, -61.68), "GG": (49.46, -2.56),
+    "GL": (74.32, -39.34), "GM": (13.64, -15.0), "GN": (10.62, -10.02),
+    "GQ": (2.33, 8.99), "GS": (-55.68, -31.06), "GU": (13.35, 144.7),
+    "GW": (12.16, -14.52), "GY": (5.12, -58.94), "HM": (-53.1, 73.51),
+    "HT": (19.26, -72.22), "IM": (54.22, -4.53), "IO": (-6.19, 71.35),
+    "JE": (49.22, -2.09), "JM": (18.14, -77.32), "KI": (1.82, -157.38),
+    "KM": (-11.73, 43.32), "KN": (17.34, -62.76), "KP": (39.89, 126.44),
+    "KY": (19.32, -81.24), "LC": (13.89, -60.98), "LI": (47.11, 9.56),
+    "LR": (6.45, -9.46), "LS": (-29.48, 28.25), "MC": (43.74, 7.4),
+    "MF": (18.08, -63.05), "MG": (-18.63, 46.7), "MH": (7.08, 171.19),
+    "ML": (18.69, -2.04), "MP": (15.19, 145.73), "MR": (19.59, -9.74),
+    "MS": (16.74, -62.19), "MT": (35.89, 14.43), "MU": (-20.3, 57.57),
+    "MV": (4.17, 73.51), "MW": (-13.39, 33.61), "MZ": (-13.94, 37.84),
+    "NA": (-20.58, 17.11), "NC": (-21.06, 165.08), "NE": (17.45, 9.5),
+    "NF": (-29.03, 167.95), "NI": (12.67, -85.07), "NR": (-0.52, 166.93),
+    "NU": (-19.05, -169.86), "PF": (-17.63, -149.46), "PG": (-5.7, 143.91),
+    "PM": (47.04, -56.33), "PN": (-24.36, -128.32), "PS": (32.05, 35.29),
+    "PW": (7.52, 134.58), "RW": (-1.9, 30.1), "SB": (-8.03, 159.17),
+    "SC": (-4.68, 55.48), "SD": (16.33, 29.26), "SH": (-15.95, -5.71),
+    "SL": (8.62, -11.76), "SM": (43.93, 12.44), "SO": (3.57, 45.19),
+    "SR": (4.14, -55.91), "SS": (7.23, 30.39), "ST": (0.97, 7.02),
+    "SX": (18.04, -63.07), "SZ": (-26.53, 31.47), "TC": (21.82, -71.75),
+    "TD": (15.14, 18.65), "TF": (-49.3, 69.12), "TG": (8.81, 1.06),
+    "TL": (-8.8, 125.85), "TO": (-21.21, -175.16), "TV": (-8.51, 179.21),
+    "VA": (41.9, 12.45), "VC": (13.09, -61.34), "VG": (18.43, -64.64),
+    "VI": (17.75, -64.78), "VU": (-15.37, 166.91), "WF": (-14.29, -178.14),
+    "WS": (-13.64, -172.44), "XK": (42.59, 20.86),
 }
 
 BOTNET_CLASSES = frozenset((
@@ -162,5 +202,68 @@ def _lookup(db, ip):
     return {"country": code, "lat": lat, "lng": lng}
 
 
-def available():
-    return _dat_at(int(time.monotonic()) // 5) is not None
+class _CountryRanges:
+    def __init__(self, data):
+        self.data = data
+        if len(data) < _HEADER.size:
+            raise ValueError("Missing country ranges header")
+        magic, self.count4, self.count6 = _HEADER.unpack_from(data)
+        self.start6 = _HEADER.size + self.count4 * _RANGE4.size
+        if magic != b"TPSGEO1\0" or len(data) != self.start6 + self.count6 * _RANGE6.size:
+            raise ValueError("Invalid country ranges")
+
+    def country(self, address):
+        if address.version == 4:
+            table, start, upper = _RANGE4, _HEADER.size, self.count4
+        else:
+            table, start, upper = _RANGE6, self.start6, self.count6
+        target = address.packed
+        lower = 0
+        while lower < upper:
+            middle = (lower + upper) // 2
+            first, last, code = table.unpack_from(self.data, start + middle * table.size)
+            if target < first:
+                upper = middle
+            elif target > last:
+                lower = middle + 1
+            else:
+                return code.decode("ascii")
+        return ""
+
+
+@lru_cache(maxsize=1)
+def _read_ranges(path):
+    try:
+        with gzip.open(path, "rb") as fh:
+            return _CountryRanges(fh.read())
+    except (OSError, EOFError, ValueError):
+        return None
+
+
+@lru_cache(maxsize=8192)
+def _ranges_location(db, address):
+    code = db.country(address)
+    point = CENTROIDS.get(code)
+    return {"country": code, "lat": point[0], "lng": point[1]} if point else None
+
+
+def map_lookup(ip):
+    """Use an installed IPv4 database first, then the bundled IPv4/IPv6 ranges."""
+    try:
+        address = ipaddress.ip_address((ip or "").strip())
+    except ValueError:
+        return None
+    if address.version == 6 and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if not address.is_global or address.is_multicast or address.is_reserved:
+        return None
+    if address.version == 4:
+        legacy = lookup(str(address))
+        if legacy and legacy["lat"] is not None:
+            return legacy
+    db = _read_ranges(MAP_COUNTRY_DB)
+    return _ranges_location(db, address) if db else None
+
+
+def map_available():
+    return _dat_at(int(time.monotonic()) // 5) is not None or _read_ranges(MAP_COUNTRY_DB) is not None

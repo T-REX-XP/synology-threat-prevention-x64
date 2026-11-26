@@ -71,6 +71,29 @@ def check(cond, msg):
         raise SystemExit("FAIL: " + msg)
 
 
+def check_bundled_event_map():
+    dataset = Path(HERE).parent / "package" / "etc" / "geoip" / "dbip-country-ranges.gz"
+    now = int(time.time())
+    with patch("geoip.MAP_COUNTRY_DB", str(dataset)), patch("geoip.geoip_files", return_value=[]), \
+            init_db(":memory:") as conn:
+        conn.executemany(
+            """INSERT INTO event(ip_src_str, ip_dst_str, sig_name, ts_epoch, impact_flag, timestamp)
+               VALUES (?, ?, ?, ?, 1, '2026-01-01 00:00:00')""",
+            [
+                ("45.159.97.61", "192.168.1.130", "Inbound IPv4", now),
+                ("192.168.1.130", "2001:4860:4860::8888", "Outbound IPv6", now),
+                ("192.168.1.130", "fd00::42", "Private", now),
+            ],
+        )
+        result = handle("SYNO.TPS.Event.Map", "list", {"date_range": ["days7"]}, conn)
+    pins = {row["signature"]: row for row in result["data"]["days7"]["location"]}
+    check(set(pins) == {"Inbound IPv4", "Outbound IPv6"}, "bundled map pins public addresses only")
+    check((pins["Inbound IPv4"]["country"], pins["Inbound IPv4"]["mapped_endpoint"]) == ("ES", "source"),
+          "bundled IPv4 lookup locates source")
+    check(pins["Outbound IPv6"]["mapped_endpoint"] == "target" and pins["Outbound IPv6"]["lat"] is not None,
+          "bundled IPv6 lookup locates target")
+
+
 def check_event_map():
     with tempfile.TemporaryDirectory() as tmp:
         fixture = Path(tmp) / "GeoIP.dat"
@@ -159,6 +182,7 @@ def check_telegram_alert():
 
 
 check_event_map()
+check_bundled_event_map()
 check_telegram_alert()
 
 

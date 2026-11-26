@@ -596,7 +596,10 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				var map = this.tpsMap = L.map(node, {
 					maxZoom: 7, minZoom: 0, zoomSnap: 0.25, attributionControl: false
 				});
-				L.control.attribution({prefix: false}).addAttribution("Made with Natural Earth").addTo(map);
+				L.control.attribution({prefix: false})
+					.addAttribution("Made with Natural Earth")
+					.addAttribution('<a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a>')
+					.addTo(map);
 				L.geoJSON(me.mapLand, {
 					interactive: false,
 					style: {color: "#879e98", weight: 1, fillColor: "#e4e9d9", fillOpacity: 1}
@@ -680,7 +683,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				});
 				this.tpsMapStatus.hidden = groups.length > 0;
 				this.tpsMapStatus.textContent = groups.length ? "" :
-					"No mapped events match this view. Public IP locations require GeoIP. LAN locations require a configured site.";
+					"No events with a known location match this view. LAN events require configured site coordinates.";
 				this.tpsMapBounds = L.latLngBounds(groups.map(function (group) { return group.coords; }));
 			};
 			proto.fitBounds = function () {
