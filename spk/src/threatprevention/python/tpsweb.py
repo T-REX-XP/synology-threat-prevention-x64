@@ -13,9 +13,12 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import closing
+from contextlib import closing, suppress
+from email.utils import parsedate_to_datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
 from compat import (
     coerce_params,
@@ -936,46 +939,95 @@ def read_gmaps_key():
     return raw.splitlines()[0].strip()
 
 
-def fetch_osm_tile(z, x, y):
-    """Same-origin OSM tile for DSM CSP (img-src 'self'). Cache under var/osm-cache."""
+def _tile_metadata(headers, previous):
+    cache_control = headers.get("Cache-Control", previous.get("cache_control", ""))
+    directives = dict(
+        (name.strip().lower(), value.strip().strip('"'))
+        for name, _, value in (part.partition("=") for part in cache_control.split(","))
+    )
+    now = time.time()
+    try:
+        lifetime = int(directives["max-age"])
+    except (KeyError, ValueError):
+        try:
+            lifetime = parsedate_to_datetime(headers["Expires"]).timestamp() - now
+        except (KeyError, ValueError, TypeError, OverflowError):
+            lifetime = 7 * 86400
+    try:
+        age = max(0, int(headers.get("Age", 0)))
+    except ValueError:
+        age = 0
+    expires = now if "no-cache" in directives else now + max(0, lifetime - age)
+    return {
+        "cache_control": cache_control,
+        "expires": expires,
+        "etag": headers.get("ETag", previous.get("etag")),
+        "modified": headers.get("Last-Modified", previous.get("modified")),
+    }, "no-store" not in directives
+
+
+def fetch_osm_tile(z, x, y, referer=""):
+    """Fetch only a visible tile through DSM's same-origin endpoint."""
     try:
         z, x, y = int(z), int(x), int(y)
+        origin = urlparse(referer or "")
     except (TypeError, ValueError):
         return None
-    if z < 0 or z > 18:
+    if not 0 <= z <= 18 or not 0 <= y < 1 << z:
         return None
-    n = 1 << z
-    if y < 0 or y >= n:
+    if origin.scheme not in ("http", "https") or not origin.hostname or origin.username is not None:
         return None
-    x = x % n
-    cache = os.path.join(PKGVAR, "osm-cache", str(z), str(x), "%s.png" % y)
-    if os.path.isfile(cache) and os.path.getsize(cache) > 64:
-        try:
-            return open(cache, "rb").read()
-        except OSError:
-            pass
+    x %= 1 << z
+    cache = os.path.join(PKGVAR, "osm-cache", str(z), str(x), "%s.tile" % y)
+    old, data = {}, None
+    try:
+        with open(cache, "rb") as fh:
+            old = json.loads(fh.readline())
+            data = fh.read()
+        if old["expires"] > time.time():
+            return data
+    except (OSError, ValueError, KeyError):
+        old, data = {}, None
+
     url = "https://tile.openstreetmap.org/%s/%s/%s.png" % (z, x, y)
+    request = Request(url, headers={
+        "User-Agent": "ThreatPrevention-DSM (+https://github.com/T-REX-XP/synology-threat-prevention-x64)",
+        "Referer": "%s://%s/" % (origin.scheme, origin.netloc),
+    })
+    if old.get("etag"):
+        request.add_header("If-None-Match", old["etag"])
+    if old.get("modified"):
+        request.add_header("If-Modified-Since", old["modified"])
     try:
-        from urllib.request import Request, urlopen
-        req = Request(url)
-        req.add_header("User-Agent", "ThreatPrevention-PoC/8.0.6 (Synology DSM tile proxy)")
-        with urlopen(req, timeout=12) as resp:
-            data = resp.read()
-            ctype = (resp.headers.get("Content-Type") or "").lower()
-    except Exception:
+        with urlopen(request, timeout=6) as response:
+            data = response.read(1024 * 1024 + 1)
+            headers = response.headers
+    except HTTPError as error:
+        if error.code != 304 or data is None:
+            return None
+        headers = error.headers
+    except OSError:
         return None
-    if not data or len(data) < 64:
+    if len(data) > 1024 * 1024 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
         return None
-    if ctype and "png" not in ctype and "octet-stream" not in ctype:
-        return None
+
+    metadata, cacheable = _tile_metadata(headers, old)
+    tmp = None
     try:
-        os.makedirs(os.path.dirname(cache), exist_ok=True)
-        tmp = cache + ".tmp"
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, cache)
+        if cacheable:
+            os.makedirs(os.path.dirname(cache), exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=os.path.dirname(cache), delete=False) as fh:
+                tmp = fh.name
+                fh.write(json.dumps(metadata).encode("ascii") + b"\n" + data)
+            os.replace(tmp, cache)
+        elif old:
+            os.unlink(cache)
     except OSError:
         pass
+    finally:
+        if tmp:
+            with suppress(OSError):
+                os.unlink(tmp)
     return data
 
 
@@ -2212,7 +2264,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and osm:
             if not authorized(self):
                 return self._json(err(403), 403)
-            return self._png(fetch_osm_tile(osm.group(1), osm.group(2), osm.group(3)))
+            return self._png(fetch_osm_tile(osm.group(1), osm.group(2), osm.group(3), self.headers.get("Referer")))
         qs = parse_qs(parsed.query)
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else b""
@@ -2248,7 +2300,9 @@ class Handler(BaseHTTPRequestHandler):
             if not api:
                 return self._json(err(100))
             if api == "SYNO.TPS.Settings.Map" and method == "tile":
-                return self._png(fetch_osm_tile(params.get("z"), params.get("x"), params.get("y")))
+                return self._png(fetch_osm_tile(
+                    params.get("z"), params.get("x"), params.get("y"), self.headers.get("Referer"),
+                ))
             conn = init_db()
             try:
                 result = handle(api, method, params, conn)
@@ -2292,7 +2346,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self._cors()
         self.send_header("Content-Type", "image/png")
-        self.send_header("Cache-Control", "public, max-age=86400")
+        self.send_header("Cache-Control", "private, max-age=0")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)

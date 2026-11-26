@@ -92,6 +92,7 @@ PY
 info "Stage tps python (ingest / compiler / tpsweb)"
 mkdir -p "${STAGING}/package/lib/tps"
 cp -a "${SRC}/python/." "${STAGING}/package/lib/tps/"
+cp -a "${SRC}/vendor/maxminddb" "${SRC}/vendor/MaxMindDB.LICENSE" "${STAGING}/package/lib/tps/"
 rm -f "${STAGING}/package/lib/tps/test_"*.py "${STAGING}/package/lib/tps/"*.pyc
 
 info "Stage PyYAML for suricata-update (DSM python3 has none)"

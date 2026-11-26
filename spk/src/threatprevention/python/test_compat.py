@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Local envelope checks (no NAS required)."""
+import io
 import json
 import os
 import subprocess
@@ -11,9 +12,11 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs
 from unittest import TestCase
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "vendor"))
 os.environ.setdefault("TPS_PKGVAR", tempfile.mkdtemp(prefix="tps-test-"))
 os.environ.setdefault("TPS_PKGETC", os.environ["TPS_PKGVAR"])
 os.environ.setdefault("TPS_PKGDEST", os.environ["TPS_PKGVAR"])
@@ -75,6 +78,7 @@ def check_bundled_event_map():
     dataset = Path(HERE).parent / "package" / "etc" / "geoip" / "dbip-country-ranges.gz"
     now = int(time.time())
     with patch("geoip.MAP_COUNTRY_DB", str(dataset)), patch("geoip.geoip_files", return_value=[]), \
+            patch("geoip.city_paths", return_value=[]), \
             init_db(":memory:") as conn:
         conn.executemany(
             """INSERT INTO event(ip_src_str, ip_dst_str, sig_name, ts_epoch, impact_flag, timestamp)
@@ -102,6 +106,7 @@ def check_event_map():
         right = (COUNTRY_BEGIN + COUNTRY_CODES.index("DE")).to_bytes(3, "little")
         site = Path(tmp) / "map-site.json"
         with patch("geoip.geoip_files", side_effect=lambda: [str(fixture)] if fixture.exists() else []), \
+                patch("geoip.city_paths", return_value=[]), \
                 patch("geoip.time.monotonic", return_value=100) as clock, patch("compat.MAP_SITE", str(site)):
             now = int(time.time())
             with init_db(":memory:") as map_conn:
@@ -999,4 +1004,25 @@ exp = tpsweb_mod.handle("SYNO.TPS.Event.ExportFolder", "get", {}, conn)
 check(exp["success"] and exp["data"]["export_folder"] == "/ThreatPrevention", "ExportFolder API share path")
 check(fetch_osm_tile("nope", 0, 0) is None, "osm tile rejects junk")
 check(fetch_osm_tile(2, 0, 99) is None, "osm tile rejects out-of-range y")
+with tempfile.TemporaryDirectory() as cache, patch("tpsweb.PKGVAR", cache), \
+        patch("tpsweb.time.time", return_value=100) as clock, patch("tpsweb.urlopen") as upstream:
+    tile = b"\x89PNG\r\n\x1a\n" + b"fixture"
+    response = io.BytesIO(tile)
+    response.headers = {"Cache-Control": "max-age=60", "ETag": '"test"'}
+    upstream.return_value = response
+    referer = "https://nas.example:5001/webman/index.cgi?session=private"
+    check(fetch_osm_tile(2, 1, 2) is None and not upstream.called, "osm tile requires a browser origin")
+    check(fetch_osm_tile(2, 1, 2, referer) == tile, "osm tile returns upstream PNG")
+    request = upstream.call_args.args[0]
+    check(request.full_url == "https://tile.openstreetmap.org/2/1/2.png" and
+          request.get_header("Referer") == "https://nas.example:5001/",
+          "osm tiles send only the DSM origin and tile coordinates")
+    clock.return_value = 159
+    check(fetch_osm_tile(2, 1, 2, referer) == tile and upstream.call_count == 1,
+          "osm tiles honor fresh upstream cache lifetime")
+    clock.return_value = 161
+    upstream.side_effect = HTTPError(request.full_url, 304, "Not Modified", {}, None)
+    check(fetch_osm_tile(2, 1, 2, referer) == tile and
+          upstream.call_args.args[0].get_header("If-none-match") == '"test"',
+          "osm tiles revalidate expired cache with ETag")
 print("ok")

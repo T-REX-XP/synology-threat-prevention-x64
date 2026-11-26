@@ -6,6 +6,9 @@ import struct
 import time
 from functools import lru_cache
 
+import maxminddb
+from maxminddb.errors import InvalidDatabaseError
+
 from paths import PKGDEST, PKGETC
 
 COUNTRY_BEGIN = 16776960
@@ -247,8 +250,61 @@ def _ranges_location(db, address):
     return {"country": code, "lat": point[0], "lng": point[1]} if point else None
 
 
+def city_paths():
+    return (
+        os.path.join(PKGETC, "geoip", "GeoLite2-City.mmdb"),
+        "/var/db/geoip-database/GeoLite2-City.mmdb",
+    )
+
+
+@lru_cache(maxsize=2)
+def _read_city(path, _mtime, _size):
+    try:
+        db = maxminddb.open_database(path, maxminddb.MODE_MMAP)
+    except (OSError, InvalidDatabaseError, ValueError):
+        return None
+    if db.metadata().database_type in ("GeoLite2-City", "GeoIP2-City"):
+        return db
+    db.close()
+    return None
+
+
+@lru_cache(maxsize=1)
+def _city_at(_period):
+    for path in city_paths():
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        key = (path, stat.st_mtime_ns, stat.st_size)
+        if _read_city(*key) is not None:
+            return key
+    return None
+
+
+@lru_cache(maxsize=8192)
+def _city_location(key, address):
+    db = _read_city(*key)
+    try:
+        record = (db.get(address) or {}) if db else {}
+    except (InvalidDatabaseError, ValueError):
+        return None
+    country = (record.get("country") or {}).get("iso_code")
+    location = record.get("location") or {}
+    lat, lng = location.get("latitude"), location.get("longitude")
+    if not country or not isinstance(lat, (float, int)) or not isinstance(lng, (float, int)):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    result = {"country": country, "lat": lat, "lng": lng, "geo_provider": "maxmind"}
+    radius = location.get("accuracy_radius")
+    if isinstance(radius, int) and radius > 0:
+        result["accuracy_radius_km"] = radius
+    return result
+
+
 def map_lookup(ip):
-    """Use an installed IPv4 database first, then the bundled IPv4/IPv6 ranges."""
+    """Prefer city coordinates, then fall back to legacy and bundled country data."""
     try:
         address = ipaddress.ip_address((ip or "").strip())
     except ValueError:
@@ -257,6 +313,11 @@ def map_lookup(ip):
         address = address.ipv4_mapped
     if not address.is_global or address.is_multicast or address.is_reserved:
         return None
+    city = _city_at(int(time.monotonic()) // 5)
+    if city:
+        result = _city_location(city, address)
+        if result:
+            return result
     if address.version == 4:
         legacy = lookup(str(address))
         if legacy and legacy["lat"] is not None:
@@ -266,4 +327,5 @@ def map_lookup(ip):
 
 
 def map_available():
-    return _dat_at(int(time.monotonic()) // 5) is not None or _read_ranges(MAP_COUNTRY_DB) is not None
+    period = int(time.monotonic()) // 5
+    return bool(_city_at(period) or _dat_at(period) or _read_ranges(MAP_COUNTRY_DB))

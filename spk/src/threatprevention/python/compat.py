@@ -679,7 +679,7 @@ def _map_locations(conn, since, site):
             continue
         sev = severity_name(r["impact_flag"], r["sig_priority"] or 3)
         prio = 1 if sev == "high" else (2 if sev == "medium" else 3)
-        out.append({
+        pin = {
             "lat": geo["lat"],
             "lng": geo["lng"],
             "country": geo["country"],
@@ -690,7 +690,11 @@ def _map_locations(conn, since, site):
             "priority": prio,
             "count": r["n"],
             "encode": False,
-        })
+        }
+        for field in ("geo_provider", "accuracy_radius_km"):
+            if field in geo:
+                pin[field] = geo[field]
+        out.append(pin)
         if len(out) == 200:
             break
     return out

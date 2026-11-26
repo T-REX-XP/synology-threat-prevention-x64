@@ -594,16 +594,28 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				}
 				var node = this.mapContainer.getEl().dom;
 				var map = this.tpsMap = L.map(node, {
-					maxZoom: 7, minZoom: 0, zoomSnap: 0.25, attributionControl: false
+					maxZoom: 18, minZoom: 0, zoomSnap: 0.25, attributionControl: false
 				});
-				L.control.attribution({prefix: false})
+				this.resizeContainer();
+				map.fitWorld({animate: false});
+				this.tpsMapAttribution = L.control.attribution({prefix: false})
 					.addAttribution("Made with Natural Earth")
 					.addAttribution('<a href="https://db-ip.com" target="_blank" rel="noopener noreferrer">IP Geolocation by DB-IP</a>')
 					.addTo(map);
-				L.geoJSON(me.mapLand, {
+				var land = L.geoJSON(me.mapLand, {
 					interactive: false,
 					style: {color: "#879e98", weight: 1, fillColor: "#e4e9d9", fillOpacity: 1}
 				}).addTo(map);
+				var osm = L.tileLayer("/webman/tps-api/osm/{z}/{x}/{y}.png", {
+					attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+					maxZoom: 18,
+					referrerPolicy: "origin"
+				});
+				L.control.layers({"Offline": land, "OpenStreetMap": osm}, null, {collapsed: false}).addTo(map);
+				// When the provider is unavailable, keep the event layer and restore the offline basemap.
+				osm.on("tileerror", function () {
+					if (map.hasLayer(osm)) { map.removeLayer(osm); land.addTo(map); }
+				});
 				this.tpsPoints = L.layerGroup().addTo(map);
 				this.tpsMapStatus = L.DomUtil.create("div", "tps-map-status", node);
 				this.tpsMapStatus.setAttribute("role", "status");
@@ -613,8 +625,6 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					map.remove();
 					this.tpsMap = null;
 				}, this);
-				this.resizeContainer();
-				map.fitWorld({animate: false});
 				this.getTopToolbar().getComponent(this.DEFAULT_TIME).setValue(true);
 			};
 			proto.resizeContainer = function () {
@@ -637,7 +647,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				return new Ext.data.Store({autoLoad: false, reader: new Ext.data.JsonReader({
 					root: "location",
 					fields: ["lat", "lng", "country", "ip_src", "ip_dst", "mapped_endpoint",
-						"signature", "priority", "count", "encode"]
+						"signature", "priority", "count", "encode", "geo_provider", "accuracy_radius_km"]
 				})});
 			};
 			proto.addPoints = function () {
@@ -645,7 +655,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (this.filterFn) { this.store.filterBy(this.filterFn, this); }
 				else { this.store.clearFilter(); }
 
-				var panel = this, byLocation = {}, groups = [];
+				var panel = this, byLocation = {}, groups = [], hasMaxMind = false;
 				this.store.each(function (record) {
 					var lat = record.get("lat"), lng = record.get("lng");
 					if (typeof lat !== "number" || typeof lng !== "number" ||
@@ -660,12 +670,14 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					var count = Number(record.get("count")) || 0;
 					group.priority = Math.min(group.priority, priority);
 					group.count += count;
+					hasMaxMind = hasMaxMind || record.get("geo_provider") === "maxmind";
 					group.records.push({
 						ip_src: record.get("ip_src"),
 						tpsTarget: record.get("ip_dst"),
 						tpsMappedEndpoint: record.get("mapped_endpoint"),
 						country: record.get("country"),
 						signature: record.get("signature"),
+						accuracyRadius: record.get("accuracy_radius_km"),
 						encode: record.get("encode"),
 						count: count,
 						priority: priority
@@ -681,6 +693,12 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 						}).join("<hr>");
 					}, {maxHeight: 240});
 				});
+				var maxMindCredit = '<a href="https://www.maxmind.com">GeoLite2 by MaxMind</a>';
+				if (hasMaxMind !== !!this.tpsHasMaxMind) {
+					if (hasMaxMind) { this.tpsMapAttribution.addAttribution(maxMindCredit); }
+					else { this.tpsMapAttribution.removeAttribution(maxMindCredit); }
+					this.tpsHasMaxMind = hasMaxMind;
+				}
 				this.tpsMapStatus.hidden = groups.length > 0;
 				this.tpsMapStatus.textContent = groups.length ? "" :
 					"No events with a known location match this view. LAN events require configured site coordinates.";
@@ -708,6 +726,9 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (marker.tpsMappedEndpoint) {
 					var labels = {source: "Source", target: "Target", site: "Configured local site"};
 					content += "<div>Map location: " + labels[marker.tpsMappedEndpoint] + "</div>";
+				}
+				if (marker.accuracyRadius > 0) {
+					content += "<div>Estimated accuracy radius: " + Number(marker.accuracyRadius) + " km</div>";
 				}
 				return content;
 			};
