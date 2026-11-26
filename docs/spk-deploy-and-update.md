@@ -11,8 +11,8 @@ SPK scripts that matter: `postinst`, `start-stop-status`, `update-rules.sh`, `in
 | What | Where | Example |
 | --- | --- | --- |
 | Suricata engine | [`VERSION`](../VERSION) `SURICATA_VERSION` | `8.0.8` |
-| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0071` |
-| Override | env `TPS_PKG_VERSION` | `8.0.8-0072` |
+| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0072` |
+| Override | env `TPS_PKG_VERSION` | `8.0.8-0073` |
 
 `VERSION` does not store a package number. Artifact name: `artifact/ThreatPrevention-x86_64-<PKG_VERSION>.spk`.
 

@@ -1791,6 +1791,8 @@ def notification(conn, method, p):
                 data[k] = data[k] == "1"
             elif k.startswith("min_"):
                 data[k] = int(data[k] or 5)
+        telegram = read_telegram_conf() if kv_get(conn, "enable_telegram", "0") == "1" else {}
+        data["telegram_configured"] = bool(telegram.get("token") and telegram.get("chat"))
         return ok(data)
     if method == "set":
         for k in keys:

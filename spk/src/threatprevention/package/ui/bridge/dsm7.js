@@ -510,6 +510,27 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					if (origAfter) { origAfter.apply(this, arguments); }
 					me.bindStatusPathlinks(this);
 				};
+				var origSettingCb = P.prototype.settingCallback;
+				if (origSettingCb) {
+					P.prototype.settingCallback = function (ok, data) {
+						if (me.componentGone(this)) { return; }
+						var previous = this.settingStatus.enableNotification;
+						var ret = origSettingCb.apply(this, arguments);
+						if (ok) {
+							Ext.each(data.result, function (result) {
+								if (result.api === "SYNO.TPS.Notification" && result.data &&
+										result.data.telegram_configured === true) {
+									this.settingStatus.enableNotification = true;
+								}
+							}, this);
+							if (previous !== this.settingStatus.enableNotification &&
+									this.engine_status === "engine_start") {
+								this.updateDisplayStatus();
+							}
+						}
+						return ret;
+					};
+				}
 				var origShowStart = P.prototype.showStart;
 				if (origShowStart) {
 					P.prototype.showStart = function () {

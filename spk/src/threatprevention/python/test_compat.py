@@ -726,6 +726,23 @@ check(botp["success"] and read_telegram_conf()["token"] == "888:BOT", "bot_token
 keep = handle("SYNO.TPS.Settings.Telegram", "set", {"bot_token": "********", "enable_telegram": True}, conn)
 check(keep["success"] and read_telegram_conf()["token"] == "888:BOT", "keep-mask does not wipe token")
 
+notification_get = {"api": "SYNO.TPS.Notification", "method": "get", "version": 1}
+kv_set(conn, "enable_notification", "0")
+out = handle("SYNO.TPS.Compound", "request", {"compound": [notification_get]}, conn)
+overview_notification = out["data"]["result"][0]["data"]
+check(overview_notification["telegram_configured"] and not overview_notification["enable_notification"],
+      "overview recognizes Telegram with DSM notifications off")
+check(not ({"token", "bot_token", "chat", "chat_id"} & overview_notification.keys()),
+      "overview notification status omits Telegram credentials")
+for missing in ({"token": "", "chat": "-42"}, {"token": "888:BOT", "chat": ""}):
+    with patch("tpsweb.read_telegram_conf", return_value=missing):
+        data = handle("SYNO.TPS.Notification", "get", {}, conn)["data"]
+        check(not data["telegram_configured"], "overview requires both Telegram credentials")
+kv_set(conn, "enable_telegram", "0")
+data = handle("SYNO.TPS.Notification", "get", {}, conn)["data"]
+check(not data["telegram_configured"], "overview ignores saved credentials when Telegram is disabled")
+kv_set(conn, "enable_telegram", "1")
+
 leases = _parse_isc_leases(
     'lease 192.168.1.50 {\n  hardware ethernet AA:BB:CC:DD:EE:FF;\n'
     '  client-hostname "phone";\n  binding state active;\n}\n'
