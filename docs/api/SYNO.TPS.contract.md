@@ -139,7 +139,9 @@ Community fieldset (not official SRM). Default policy `hyperscan=1`.
 
 ## SYNO.TPS.Statistic.Device (v1 list; v2 get)
 
-Busy/concerned devices from event counts. `limit`, `offset`, `order`.
+`list` returns source devices grouped by captured MAC, with the source IP as a fallback. `order: "high"` counts high-severity events for the requested `days` (default 7).
+
+`get` accepts the listed `name`, `days`, `severity` (default `high`), `offset`, and `limit`. It returns a `task_id` for `SYNO.TPS.Event.list_status`. Legacy requests with only `ip` return an IP count.
 
 ## SYNO.TPS.Statistic.Trends (v1 get)
 

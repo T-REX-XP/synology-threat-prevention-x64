@@ -607,6 +607,39 @@ check(nfilt["success"] and isinstance(nfilt["data"].get("notification_filters"),
       "Notification.Filter list root")
 sdev = handle("SYNO.TPS.Statistic.Device", "list", {}, conn)
 check(sdev["success"] and isinstance(sdev["data"].get("devices"), list), "Statistic.Device Store devices")
+with init_db(":memory:") as device_conn:
+    now = int(time.time())
+    mac = "00:11:22:33:44:aa"
+    ip = "192.168.1.130"
+    peer = "192.168.1.131"
+    device_conn.executemany(
+        """INSERT INTO event(mac_src, ip_src_str, ip_dst_str, sig_name, ts_epoch, impact_flag, timestamp)
+           VALUES (?, ?, ?, ?, ?, ?, '2026-01-01 00:00:00')""",
+        [
+            (mac.upper(), ip, peer, "newest", now, 1),
+            (mac, peer, ip, "second", now - 30, 1),
+            ("", ip, peer, "IP fallback", now - 40, 1),
+            (mac, ip, peer, "medium", now - 10, 2),
+            (mac, ip, peer, "outside date range", now - 8 * 86400, 1),
+        ],
+    )
+    kv_set(device_conn, "event_offset", "37")
+    rows = handle("SYNO.TPS.Statistic.Device", "list", {"days": 7, "order": "high"}, device_conn)
+    check([(row["name"], row["count"]) for row in rows["data"]["devices"]] == [(mac, 2), (ip, 1)],
+          "device Overview counts match high-severity MAC and IP groups")
+    for name, offset, count, signature in ((mac, 0, 2, "newest"), (mac, 1, 2, "second"), (ip, 0, 1, "IP fallback")):
+        task = handle("SYNO.TPS.Statistic.Device", "get", {
+            "name": name, "days": 7, "severity": "high", "offset": offset, "limit": 1,
+        }, device_conn)
+        status = handle("SYNO.TPS.Event", "list_status", {"task_id": task["data"]["task_id"]}, device_conn)["data"]
+        page = status["data"]
+        check(status["finish"] and page["total"] == count and page["offset"] == offset,
+              "device details resolves to a paged event task")
+        check([event["sig_name"] for event in page["events"]] == [signature],
+              "device details isolates the source, severity and date range")
+    check(kv_get(device_conn, "event_offset") == "37", "device paging preserves the Events page offset")
+    legacy = handle("SYNO.TPS.Statistic.Device", "get", {"ip": ip}, device_conn)
+    check(legacy["data"] == {"ip": ip, "count": 4}, "legacy device IP count")
 trend = handle("SYNO.TPS.Statistic.Trends", "get", {}, conn)
 check(trend["success"] and isinstance(trend["data"].get("trends"), list), "Trends.get trends")
 est = handle("SYNO.TPS.Event.Statistic", "get", {}, conn)

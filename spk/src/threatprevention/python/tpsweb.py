@@ -94,6 +94,8 @@ from store import (
 STOP = False
 EVENT_TASKS = {}
 EVENT_TASK_SEQ = 0
+EVENT_TASK_LOCK = threading.Lock()
+SOURCE_DEVICE_SQL = "lower(COALESCE(NULLIF(mac_src, ''), ip_src_str))"
 JOBS = {}
 JOB_SEQ = 0
 RULE_UPDATE_LOCK = threading.Lock()
@@ -977,7 +979,7 @@ def fetch_osm_tile(z, x, y):
     return data
 
 
-def event_list(conn, p):
+def event_list(conn, p, *, source_device=None):
     offset = int(p.get("offset", 0) or 0)
     limit = min(int(p.get("limit", 50) or 50), 200)
     where = ["1=1"]
@@ -1000,6 +1002,9 @@ def event_list(conn, p):
     if p.get("ip_dst"):
         where.append("(ip_dst_str=? OR ip_dst=?)")
         args.extend([p["ip_dst"], ip_to_int(p["ip_dst"])])
+    if source_device is not None:
+        where.append(SOURCE_DEVICE_SQL + "=?")
+        args.append(source_device)
     begin = to_epoch(p.get("begin"))
     finish = to_epoch(p.get("finish") or p.get("end"))
     if begin is not None:
@@ -1021,15 +1026,17 @@ def event_list(conn, p):
         args + [limit, offset],
     )
     events = [official_event(r, conn, detail=False) for r in rows]
-    kv_set(conn, "event_offset", str(offset))
-    conn.commit()
+    if source_device is None:
+        kv_set(conn, "event_offset", str(offset))
+        conn.commit()
     payload = {"events": events, "offset": offset, "total": total, "now": now_str()}
     global EVENT_TASK_SEQ
-    EVENT_TASK_SEQ += 1
-    tid = str(EVENT_TASK_SEQ)
-    EVENT_TASKS[tid] = payload
-    while len(EVENT_TASKS) > 32:
-        EVENT_TASKS.pop(next(iter(EVENT_TASKS)))
+    with EVENT_TASK_LOCK:
+        EVENT_TASK_SEQ += 1
+        tid = str(EVENT_TASK_SEQ)
+        EVENT_TASKS[tid] = payload
+        if len(EVENT_TASKS) > 32:
+            EVENT_TASKS.pop(next(iter(EVENT_TASKS)))
     # Official JS only reads task_id here, then polls list_status.
     return ok({"task_id": tid})
 
@@ -1733,19 +1740,30 @@ def devices(conn, method, p):
 
 def stat_device(conn, method, p):
     if method == "list":
-        rows = [
-            {"ip": r["ip_src_str"], "count": r["n"], "mac": r["mac_src"], "device_name": r["mac_src"] or r["ip_src_str"]}
-            for r in conn.execute(
-                """SELECT ip_src_str, mac_src, COUNT(*) n FROM event
-                   WHERE ts_epoch>=? GROUP BY ip_src_str ORDER BY n DESC LIMIT ?"""
-                ,
-                (int(time.time()) - 7 * 86400, int(p.get("limit") or 20)),
-            )
-        ]
+        since = int(time.time()) - max(1, int(p.get("days") or 7)) * 86400
+        high_only = " AND impact_flag=1" if p.get("order") == "high" else ""
+        rows = conn.execute(
+            f"""SELECT {SOURCE_DEVICE_SQL} AS device_name, MIN(ip_src_str) AS ip,
+                       MIN(lower(mac_src)) AS mac, COUNT(*) AS count
+                FROM event WHERE ts_epoch>=? AND {SOURCE_DEVICE_SQL}<>''{high_only}
+                GROUP BY device_name ORDER BY count DESC, device_name LIMIT ?""",
+            (since, int(p.get("limit") or 20)),
+        )
         return ok({"devices": [
-            dict(r, name=r["device_name"], loading=r.get("count") or 0) for r in rows
+            dict(r, name=r["device_name"], loading=r["count"]) for r in rows
         ]})
     if method == "get":
+        if "name" in p:
+            name = _param_str(p, "name")
+            if not name:
+                return err(100)
+            since = int(time.time()) - max(1, int(p.get("days") or 7)) * 86400
+            return event_list(conn, {
+                "begin": since,
+                "severity": p.get("severity") or "high",
+                "offset": p.get("offset", 0),
+                "limit": p.get("limit", 100),
+            }, source_device=name.lower())
         ip = p.get("ip") or ""
         n = conn.execute("SELECT COUNT(*) n FROM event WHERE ip_src_str=?", (ip,)).fetchone()["n"]
         return ok({"ip": ip, "count": n})

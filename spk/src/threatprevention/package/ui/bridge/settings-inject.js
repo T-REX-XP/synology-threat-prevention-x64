@@ -858,6 +858,9 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				if (name === "SYNO.SDS.TPS.Overview.StatusPanel") {
 					me.patchOverviewPathlinks(cls);
 				}
+				if (name === "SYNO.SDS.TPS.Overview.ConcernedDevicePanel") {
+					me.patchDeviceCellClick(cls);
+				}
 				if (name === "SYNO.SDS.TPS.Utils.GoogleMapLoader") {
 					me.disableGoogleMapLoader(cls);
 				}

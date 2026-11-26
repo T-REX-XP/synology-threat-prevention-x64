@@ -856,31 +856,20 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			}
 			attach();
 		},
-		patchDeviceCellClick: function () {
-			/* Official onCellClick does Ext.DomQuery.select(...).first().
-			   DSM 7 DomQuery returns a native array / NodeList, not Ext Collection. */
-			var tries = 0;
-			function attach() {
-				var P = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Overview &&
-					SYNO.SDS.TPS.Overview.ConcernedDevicePanel;
-				if (!P || !P.prototype) {
-					if (tries++ < 40) { window.setTimeout(attach, 100); }
-					return;
-				}
-				if (P.prototype._tpsCellClick) { return; }
-				P.prototype.onCellClick = function (grid, row, col, ev) {
-					var cell = grid.getView().getCell(row, col);
-					var links = (Ext.DomQuery && Ext.DomQuery.select) ? Ext.DomQuery.select("a", cell) : [];
-					var node = links && (links[0] || (links.item && links.item(0)));
-					if (!node) { return; }
-					var wrap = Ext.fly(node);
-					if (!wrap || !ev.within(wrap)) { return; }
-					var rec = grid.getStore().getAt(row);
-					if (rec && rec.data) { this.onShowDetail(rec.data.name); }
-				};
-				P.prototype._tpsCellClick = true;
-			}
-			attach();
+		patchDeviceCellClick: function (defined) {
+			var P = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
+				SYNO.SDS.TPS.Overview && SYNO.SDS.TPS.Overview.ConcernedDevicePanel);
+			var proto = P && P.prototype;
+			if (!proto || proto._tpsCellClick) { return; }
+			proto.onCellClick = function (grid, row, col, ev) {
+				var cell = grid.getView().getCell(row, col);
+				var link = cell && cell.querySelector("a.pathlink");
+				var target = ev.getTarget ? ev.getTarget() : ev.target;
+				if (!link || !target || (link !== target && !link.contains(target))) { return; }
+				var rec = grid.getStore().getAt(row);
+				if (rec && rec.data && rec.data.name) { this.onShowDetail(rec.data.name); }
+			};
+			proto._tpsCellClick = true;
 		},
 		disableGoogleMapLoader: function (defined) {
 			var L = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
