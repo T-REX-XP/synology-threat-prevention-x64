@@ -605,17 +605,18 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				var land = L.geoJSON(me.mapLand, {
 					interactive: false,
 					style: {color: "#879e98", weight: 1, fillColor: "#e4e9d9", fillOpacity: 1}
-				}).addTo(map);
+				});
 				var osm = L.tileLayer("/webman/tps-api/osm/{z}/{x}/{y}.png", {
 					attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 					maxZoom: 18,
 					referrerPolicy: "origin"
 				});
-				L.control.layers({"Offline": land, "OpenStreetMap": osm}, null, {collapsed: false}).addTo(map);
+				L.control.layers({"OpenStreetMap": osm, "Offline": land}, null, {collapsed: false}).addTo(map);
 				// When the provider is unavailable, keep the event layer and restore the offline basemap.
 				osm.on("tileerror", function () {
 					if (map.hasLayer(osm)) { map.removeLayer(osm); land.addTo(map); }
 				});
+				osm.addTo(map);
 				this.tpsPoints = L.layerGroup().addTo(map);
 				this.tpsMapStatus = L.DomUtil.create("div", "tps-map-status", node);
 				this.tpsMapStatus.setAttribute("role", "status");
