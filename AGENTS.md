@@ -18,7 +18,7 @@ Community Suricata 8 + `tpsweb` compatibility backend for the official ExtJS Thr
 | Path | Role |
 | --- | --- |
 | `VERSION` | `SURICATA_VERSION` only (engine tarball names) |
-| `spk/pkg-version.sh` | SPK INFO version = git branch, or tag if detached |
+| `spk/pkg-version.sh` | Validate numeric DSM version from SPK INFO or `TPS_PKG_VERSION` |
 | `install.sh` | NAS: latest installer + latest engine, pack, synopkg, setcap |
 | `build.sh` | Dev pack; `--from-release` skips Docker compile |
 | `spk/src/threatprevention/python/` | `tpsweb.py` + `api_routes.py` + `compat.py` |

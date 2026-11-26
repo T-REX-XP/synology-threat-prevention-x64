@@ -11,12 +11,12 @@ SPK scripts that matter: `postinst`, `start-stop-status`, `update-rules.sh`, `in
 | What | Where | Example |
 | --- | --- | --- |
 | Suricata engine | [`VERSION`](../VERSION) `SURICATA_VERSION` | `8.0.8` |
-| SPK / `INFO` / `synoips.js?v=` | git **branch**, or **tag** if HEAD is detached ([`spk/pkg-version.sh`](../spk/pkg-version.sh)) | `main`, `v0.2.0` |
-| Override | env `TPS_PKG_VERSION` | |
+| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0068` |
+| Override | env `TPS_PKG_VERSION` | `8.0.8-0069` |
 
 `VERSION` does not store a package number. Artifact name: `artifact/ThreatPrevention-x86_64-<PKG_VERSION>.spk`.
 
-Package Center upgrade requires the new `INFO` version to be **greater** than the installed one. Branch names (`main`) do not increase. Pin `TPS_PKG_VERSION` (or install from a newer tag) when you need a strictly increasing upgrade.
+Package Center requires a numeric version such as `8.0.8-0068`. The version must increase across upgrades. Bump the build number in `INFO` for a new package build or use a higher numeric `TPS_PKG_VERSION` for a local build.
 
 ## Paths
 

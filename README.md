@@ -176,7 +176,7 @@ python3 spk/src/threatprevention/python/test_compat.py
 
 If Synology mirrors are blocked, drop the official SPK at `build/cache/ThreatPrevention-cypress-1.3.3-0926.spk` and re-run.
 
-CI (`.github/workflows/release.yml`) on tag `v*` (for example `v0.1.0`) publishes engine tarballs only — **not** a packed SPK and **not** official ExtJS. Asset names use [`VERSION`](VERSION) `SURICATA_VERSION`; the GitHub tag is `v${PKG_VERSION}`:
+CI (`.github/workflows/release.yml`) publishes engine tarballs on GitHub tags such as `v0.3.1`. Asset names use [`VERSION`](VERSION) `SURICATA_VERSION`. The installer packs the SPK with the numeric DSM package version from [`INFO`](spk/src/threatprevention/INFO).
 
 ```
 artifact/suricata-<SURICATA_VERSION>-linux-amd64.tar.gz
@@ -190,7 +190,7 @@ artifact/suricata-<SURICATA_VERSION>-linux-arm64.tar.gz
 ## Repository
 
 ```
-VERSION                      SURICATA_VERSION (engine). PKG_VERSION comes from git.
+VERSION                      SURICATA_VERSION (engine)
 install.sh                   NAS: fetch engine, pack SPK, synopkg + setcap
 build.sh                     Developer: compile Suricata, then pack
 spk/src/threatprevention/    Community package (python, bridge, scripts, yaml)

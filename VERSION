@@ -1,5 +1,5 @@
 # Two independent versions:
 #   SURICATA_VERSION  upstream engine (tarball, GitHub asset names)
-#   PKG_VERSION       SPK / INFO version: git branch, or tag when detached
-#                     (override with TPS_PKG_VERSION). Not stored here.
+#   PKG_VERSION       DSM package version in spk/src/threatprevention/INFO
+#                     (override with TPS_PKG_VERSION).
 SURICATA_VERSION=8.0.8

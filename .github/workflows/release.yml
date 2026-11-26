@@ -4,7 +4,7 @@ name: Release engine
 # Packed SPK / official ExtJS are not attached. NAS: ./install.sh
 #
 # GitHub tag (v0.2.0) is the release label. Engine number is SURICATA_VERSION
-# in VERSION. SPK INFO version is the git branch or tag (not VERSION).
+# in VERSION. DSM package version is set in spk/src/threatprevention/INFO.
 
 on:
   push:
@@ -126,7 +126,7 @@ jobs:
             | x86_64 | `suricata-${{ env.SURICATA_VERSION }}-linux-amd64.tar.gz` |
             | aarch64 | `suricata-${{ env.SURICATA_VERSION }}-linux-arm64.tar.gz` |
 
-            Package: `${{ github.ref_name }}`. Built **natively** on GitHub-hosted Ubuntu (no Docker).
+            Release tag: `${{ github.ref_name }}`. Built **natively** on GitHub-hosted Ubuntu (no Docker).
 
             This release does **not** include a packed SPK or official Synology UI.
 

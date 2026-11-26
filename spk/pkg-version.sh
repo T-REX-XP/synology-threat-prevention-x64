@@ -1,28 +1,23 @@
-# Sets PKG_VERSION from TPS_PKG_VERSION, GitHub ref, git tag, or git branch.
-# SCRIPT_DIR or ROOT must be the repo root. Safe without .git (GitHub tarball).
+# Sets the numeric DSM package version from INFO or TPS_PKG_VERSION.
+# SCRIPT_DIR or ROOT must be the repo root.
 # shellcheck shell=bash
 
-_tps_sanitize_pkg_ver() {
-    echo "$1" | tr '/' '-' | tr -cd 'A-Za-z0-9._-'
+_tps_valid_pkg_ver() {
+    local part
+    local -a parts
+    [[ "$1" =~ ^([0-9]{1,10}\.){1,2}[0-9]{1,10}-[0-9]{1,10}$ ]] || return 1
+    IFS='.-' read -r -a parts <<< "$1"
+    for part in "${parts[@]}"; do
+        (( 10#$part <= 2147483647 )) || return 1
+    done
 }
 
-_tps_git_root="${SCRIPT_DIR:-${ROOT:-.}}"
-
-if [ -n "${TPS_PKG_VERSION:-}" ]; then
-    PKG_VERSION="$(_tps_sanitize_pkg_ver "$TPS_PKG_VERSION")"
-elif [ -n "${GITHUB_REF_NAME:-}" ]; then
-    PKG_VERSION="$(_tps_sanitize_pkg_ver "$GITHUB_REF_NAME")"
-else
-    PKG_VERSION=""
-    if git -C "${_tps_git_root}" rev-parse --git-dir >/dev/null 2>&1; then
-        PKG_VERSION="$(git -C "${_tps_git_root}" branch --show-current 2>/dev/null || true)"
-        if [ -z "$PKG_VERSION" ] || [ "$PKG_VERSION" = "HEAD" ]; then
-            PKG_VERSION="$(git -C "${_tps_git_root}" describe --tags --exact-match 2>/dev/null || true)"
-        fi
-        if [ -z "$PKG_VERSION" ]; then
-            PKG_VERSION="$(git -C "${_tps_git_root}" describe --always --tags 2>/dev/null || true)"
-        fi
-    fi
-    PKG_VERSION="$(_tps_sanitize_pkg_ver "${PKG_VERSION:-${TPS_BRANCH:-main}}")"
+PKG_VERSION="${TPS_PKG_VERSION:-}"
+if [ -z "$PKG_VERSION" ]; then
+    _tps_info="${SCRIPT_DIR:-${ROOT:-.}}/spk/src/threatprevention/INFO"
+    PKG_VERSION="$(sed -n 's/^version="\([^"]*\)"$/\1/p' "$_tps_info")"
 fi
-[ -n "$PKG_VERSION" ] || PKG_VERSION="main"
+if ! _tps_valid_pkg_ver "$PKG_VERSION"; then
+    printf 'ERROR: DSM package version "%s" is invalid. Use a numeric version such as 8.0.8-0068.\n' "$PKG_VERSION" >&2
+    return 1
+fi

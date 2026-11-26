@@ -17,3 +17,5 @@ jobs:
           echo "SURICATA_VERSION=${SURICATA_VERSION} ref=${GITHUB_REF_NAME}"
       - name: Backend envelope tests
         run: python3 spk/src/threatprevention/python/test_compat.py
+      - name: DSM package version tests
+        run: bash spk/test-pkg-version.sh

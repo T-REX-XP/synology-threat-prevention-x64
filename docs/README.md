@@ -4,7 +4,7 @@ Operator and internals for this DSM 7 Threat Prevention PoC. Start with the [roo
 
 Build from a clean clone: **`./build.sh`** (Docker) or **`./build.sh --from-release`** (unpack GitHub engine). On a NAS, **`./install.sh`** fetches a prebuilt engine from `/releases/latest/download/` and does not compile. Official Synology UI is downloaded into `build/official/` at pack time and is not in git.
 
-SPK / `INFO` version is the git **branch**, or **tag** when HEAD is detached (`spk/pkg-version.sh`). [`VERSION`](../VERSION) holds `SURICATA_VERSION` only.
+The SPK uses the numeric DSM version from [`INFO`](../spk/src/threatprevention/INFO). [`VERSION`](../VERSION) holds the independent Suricata engine version.
 
 ## Operator
 
