@@ -556,124 +556,138 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			}
 			this.whenClass(tryPatch, !!Panel);
 		},
-		patchGmapsKey: function () {
-			var me = this;
-			me._gmapsKey = undefined;
-			me.call("SYNO.TPS.Settings.Map", "get", 1, {}, function (ok, data) {
-				me._gmapsKey = (ok && data && data.key) ? String(data.key).replace(/\s+/g, "") : "";
-				me.applyGmapsKey();
-			});
-			me.wrapGmapsLoader();
-		},
 		patchEventMap: function (defined) {
-			var tries = 0;
-			function attach() {
-				var P = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
-					SYNO.SDS.TPS.Statistic && SYNO.SDS.TPS.Statistic.MapPanel);
-				if (!P || !P.prototype || !P.prototype.initMap) {
-					if (tries++ < 40) { window.setTimeout(attach, 100); }
-					return;
+			var me = this;
+			var P = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
+				SYNO.SDS.TPS.Statistic && SYNO.SDS.TPS.Statistic.MapPanel);
+			var proto = P && P.prototype;
+			if (!proto || !proto.initMap || proto._tpsEventMap) { return; }
+			var L = me.mapLibrary;
+			proto.initMap = function () {
+				if (this.tpsMap) { return; }
+				if (!document.getElementById("tps-map-css")) {
+					var style = document.createElement("style");
+					style.id = "tps-map-css";
+					style.textContent = me.mapStyles;
+					document.head.appendChild(style);
 				}
-				var proto = P.prototype;
-				if (proto._tpsEventMap) { return; }
-				var init = proto.initMap;
-				proto.gmapWarningHidden = Ext.emptyFn;
-				proto.loadedWorkaround = Ext.emptyFn;
-				proto.initMap = function () {
-					if (this.gmap || this._tpsMapWaiting) { return; }
-					this._tpsMapWaiting = true;
-					var panel = this, args = arguments, deadline = Date.now() + 15000;
-					function whenReady() {
-						var el = panel.mapContainer && panel.mapContainer.getEl();
-						if (panel.isDestroyed || !el || !el.dom) { return; }
-						if (!window.google || !google.maps || typeof google.maps.Map !== "function") {
-							if (Date.now() < deadline) {
-								window.setTimeout(whenReady, 100);
-							} else {
-								panel._tpsMapWaiting = false;
-								el.dom.textContent = "Google Maps could not load. Check the connection and Maps API key.";
-							}
-							return;
-						}
-						panel._tpsMapWaiting = false;
-						el.dom.textContent = "";
-						init.apply(panel, args);
-						panel.gmap.mapTypes.set("OSM", new google.maps.ImageMapType({
-							getTileUrl: function (coord, zoom) {
-								var n = Math.pow(2, zoom), y = coord.y;
-								if (y < 0 || y >= n) { return null; }
-								var x = ((coord.x % n) + n) % n;
-								return "/webman/tps-api?api=SYNO.TPS.Settings.Map&method=tile&version=1&z=" +
-									zoom + "&x=" + x + "&y=" + y;
-							},
-							tileSize: new google.maps.Size(256, 256),
-							name: "OpenStreetMap",
-							maxZoom: 18
-						}));
-						panel.resizeContainer();
+				var node = this.mapContainer.getEl().dom;
+				var map = this.tpsMap = L.map(node, {
+					maxZoom: 7, minZoom: 0, zoomSnap: 0.25, attributionControl: false
+				});
+				L.control.attribution({prefix: false}).addAttribution("Made with Natural Earth").addTo(map);
+				L.geoJSON(me.mapLand, {
+					interactive: false,
+					style: {color: "#879e98", weight: 1, fillColor: "#e4e9d9", fillOpacity: 1}
+				}).addTo(map);
+				this.tpsPoints = L.layerGroup().addTo(map);
+				this.tpsMapStatus = L.DomUtil.create("div", "tps-map-status", node);
+				this.tpsMapStatus.setAttribute("role", "status");
+				this.tpsMapStatus.hidden = true;
+				this.on("activate", this.resizeContainer, this);
+				this.on("beforedestroy", function () {
+					map.remove();
+					this.tpsMap = null;
+				}, this);
+				this.resizeContainer();
+				map.fitWorld({animate: false});
+				this.getTopToolbar().getComponent(this.DEFAULT_TIME).setValue(true);
+			};
+			proto.resizeContainer = function () {
+				if (!this.tpsMap) { return; }
+				var size = this.getBodySize();
+				if (size.width > 0 && size.height > 0) {
+					this.mapContainer.setSize(size.width, size.height);
+					this.tpsMap.invalidateSize({pan: false});
+				}
+			};
+			proto.removePoints = function () {
+				if (this.tpsMap) {
+					this.tpsMap.closePopup();
+					this.tpsPoints.clearLayers();
+				}
+			};
+			var priority = proto.getPriorityInfo;
+			proto.getPriorityInfo = function (value) { return priority.call(this, String(value)); };
+			proto.createStore = function () {
+				return new Ext.data.Store({autoLoad: false, reader: new Ext.data.JsonReader({
+					root: "location",
+					fields: ["lat", "lng", "country", "ip_src", "ip_dst", "mapped_endpoint",
+						"signature", "priority", "count", "encode"]
+				})});
+			};
+			proto.addPoints = function () {
+				if (!this.tpsMap || !this.store) { return; }
+				if (this.filterFn) { this.store.filterBy(this.filterFn, this); }
+				else { this.store.clearFilter(); }
+
+				var panel = this, byLocation = {}, groups = [];
+				this.store.each(function (record) {
+					var lat = record.get("lat"), lng = record.get("lng");
+					if (typeof lat !== "number" || typeof lng !== "number" ||
+						!(lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180)) { return; }
+					var key = lat + "," + lng;
+					var group = byLocation[key];
+					if (!group) {
+						group = byLocation[key] = {coords: [lat, lng], priority: 4, count: 0, records: []};
+						groups.push(group);
 					}
-					whenReady();
-				};
-				proto.fitBounds = function () {
-					if (!this.gmap || !this.markers.length) { return; }
-					var bounds = new google.maps.LatLngBounds();
-					Ext.each(this.markers, function (marker) { bounds.extend(marker.getPosition()); });
-					if (bounds.getNorthEast().equals(bounds.getSouthWest())) {
-						this.gmap.setCenter(bounds.getCenter());
-						this.gmap.setZoom(5);
-					} else {
-						this.gmap.fitBounds(bounds);
-					}
-				};
-				var remove = proto.removePoints;
-				proto.removePoints = function () {
-					remove.apply(this, arguments);
-					this.markers = [];
-				};
-				var priority = proto.getPriorityInfo;
-				proto.getPriorityInfo = function (value) { return priority.call(this, String(value)); };
-				proto.createStore = function () {
-					return new Ext.data.Store({autoLoad: false, reader: new Ext.data.JsonReader({
-						root: "location",
-						fields: ["lat", "lng", "country", "ip_src", "ip_dst", "mapped_endpoint",
-							"signature", "priority", "count", "encode"]
-					})});
-				};
-				var add = proto.addPoints;
-				proto.addPoints = function () {
-					var index = this.markers ? this.markers.length : 0;
-					add.apply(this, arguments);
-					if (!this.gmap) { return; }
-					var markers = this.markers;
-					this.store.each(function (record) {
-						var marker = markers[index++];
-						marker.tpsTarget = record.get("ip_dst");
-						marker.tpsMappedEndpoint = record.get("mapped_endpoint");
+					var priority = Number(record.get("priority"));
+					var count = Number(record.get("count")) || 0;
+					group.priority = Math.min(group.priority, priority);
+					group.count += count;
+					group.records.push({
+						ip_src: record.get("ip_src"),
+						tpsTarget: record.get("ip_dst"),
+						tpsMappedEndpoint: record.get("mapped_endpoint"),
+						country: record.get("country"),
+						signature: record.get("signature"),
+						encode: record.get("encode"),
+						count: count,
+						priority: priority
 					});
-				};
-				var popup = proto.getInfoWindowContent;
-				proto.getInfoWindowContent = function (marker) {
-					var encode = Ext.util.Format.htmlEncode;
-					var content = popup.call(this, {
-						ip_src: encode(marker.ip_src || ""),
-						country: encode(marker.country || ""),
-						signature: encode(this.helper.decodeMsg(marker.signature, marker.encode) || ""),
-						encode: false,
-						priority: marker.priority,
-						count: marker.count
-					});
-					if (marker.tpsTarget) {
-						content += "<div>Target: " + encode(marker.tpsTarget) + "</div>";
-					}
-					if (marker.tpsMappedEndpoint) {
-						var labels = {source: "Source", target: "Target", site: "Configured local site"};
-						content += "<div>Map location: " + labels[marker.tpsMappedEndpoint] + "</div>";
-					}
-					return content;
-				};
-				proto._tpsEventMap = true;
-			}
-			attach();
+				});
+				Ext.each(groups, function (group) {
+					L.circleMarker(group.coords, {
+						radius: Math.min(group.count, 20) + 5, weight: 1, color: "#fff",
+						fillColor: panel.getPriorityInfo(group.priority).color, fillOpacity: 0.7
+					}).addTo(panel.tpsPoints).bindPopup(function () {
+						return group.records.map(function (record) {
+							return panel.getInfoWindowContent(record);
+						}).join("<hr>");
+					}, {maxHeight: 240});
+				});
+				this.tpsMapStatus.hidden = groups.length > 0;
+				this.tpsMapStatus.textContent = groups.length ? "" :
+					"No mapped events match this view. Public IP locations require GeoIP. LAN locations require a configured site.";
+				this.tpsMapBounds = L.latLngBounds(groups.map(function (group) { return group.coords; }));
+			};
+			proto.fitBounds = function () {
+				if (this.tpsMap && this.tpsMapBounds && this.tpsMapBounds.isValid()) {
+					this.tpsMap.fitBounds(this.tpsMapBounds, {padding: [24, 24], maxZoom: 5});
+				}
+			};
+			var popup = proto.getInfoWindowContent;
+			proto.getInfoWindowContent = function (marker) {
+				var encode = Ext.util.Format.htmlEncode;
+				var content = popup.call(this, {
+					ip_src: encode(marker.ip_src || ""),
+					country: encode(marker.country || ""),
+					signature: encode(this.helper.decodeMsg(marker.signature, marker.encode) || ""),
+					encode: false,
+					priority: marker.priority,
+					count: marker.count
+				});
+				if (marker.tpsTarget) {
+					content += "<div>Target: " + encode(marker.tpsTarget) + "</div>";
+				}
+				if (marker.tpsMappedEndpoint) {
+					var labels = {source: "Source", target: "Target", site: "Configured local site"};
+					content += "<div>Map location: " + labels[marker.tpsMappedEndpoint] + "</div>";
+				}
+				return content;
+			};
+			proto._tpsEventMap = true;
 		},
 		patchLogStorage: function () {
 			/* Official db_size combo is the only syno_combobox whose store is a raw
@@ -847,63 +861,14 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			}
 			attach();
 		},
-		applyGmapsKey: function () {
-			var key = this._gmapsKey;
-			if (!key) { return; }
-			var L = window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.GoogleMapLoader;
-			if (!L) { return; }
-			var add = function (url) {
-				if (!url || String(url).indexOf("key=") !== -1) { return url; }
-				return url + (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(key);
-			};
-			if (L.GMAP_API_URL) { L.GMAP_API_URL = add(L.GMAP_API_URL); }
-			if (L.prototype && L.prototype.GMAP_API_URL) {
-				L.prototype.GMAP_API_URL = add(L.prototype.GMAP_API_URL);
-			}
-		},
-		wrapGmapsLoader: function (defined) {
-			var me = this;
-			var tries = 0;
-			function attach() {
-				var L = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
-					SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.GoogleMapLoader);
-				var proto = L && L.prototype;
-				if (!proto || !proto.loadScript) {
-					if (tries++ < 40) { window.setTimeout(attach, 100); }
-					return;
-				}
-				if (proto.loadScript._tpsGmaps) { return; }
-				var orig = proto.loadScript;
-				proto.loadScript = function () {
-					var self = this;
-					var args = arguments;
-					function go() {
-						me.applyGmapsKey();
-						if (me._gmapsKey) {
-							var url = self.GMAP_API_URL || (L && L.GMAP_API_URL) || "";
-							if (url && url.indexOf("key=") === -1) {
-								self.GMAP_API_URL = url + (url.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(me._gmapsKey);
-							} else if (L && L.GMAP_API_URL) {
-								self.GMAP_API_URL = L.GMAP_API_URL;
-							}
-						}
-						// preLoad and MapPanel construction can both run before Maps is ready.
-						if (!args[0] && !(window.google && google.maps)) {
-							var now = Date.now();
-							if (now - (me._gmapsRequestedAt || 0) < 15000) { return; }
-							me._gmapsRequestedAt = now;
-						}
-						return orig.apply(self, args);
-					}
-					if (me._gmapsKey !== undefined) { return go(); }
-					me.call("SYNO.TPS.Settings.Map", "get", 1, {}, function (ok, data) {
-						me._gmapsKey = (ok && data && data.key) ? String(data.key).replace(/\s+/g, "") : "";
-						go();
-					});
+		disableGoogleMapLoader: function (defined) {
+			var L = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS &&
+				SYNO.SDS.TPS.Utils && SYNO.SDS.TPS.Utils.GoogleMapLoader);
+			if (L && L.prototype) {
+				L.prototype.loadScript = function (callback, scope) {
+					if (callback) { callback.call(scope); }
 				};
-				proto.loadScript._tpsGmaps = true;
 			}
-			attach();
 		},
 		patchMapSeverity: function (defined) {
 			var Cls = defined || (window.SYNO && SYNO.SDS && SYNO.SDS.TPS && SYNO.SDS.TPS.Statistic &&
@@ -924,6 +889,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 				});
 			};
 			Cls.prototype.resetSeverityIcons = function () {
+				this.filterFn = null;
 				var name, el;
 				for (name in this.icons) {
 					if (!this.icons.hasOwnProperty(name)) { continue; }

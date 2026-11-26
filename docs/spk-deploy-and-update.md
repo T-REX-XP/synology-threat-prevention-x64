@@ -11,8 +11,8 @@ SPK scripts that matter: `postinst`, `start-stop-status`, `update-rules.sh`, `in
 | What | Where | Example |
 | --- | --- | --- |
 | Suricata engine | [`VERSION`](../VERSION) `SURICATA_VERSION` | `8.0.8` |
-| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0070` |
-| Override | env `TPS_PKG_VERSION` | `8.0.8-0071` |
+| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0071` |
+| Override | env `TPS_PKG_VERSION` | `8.0.8-0072` |
 
 `VERSION` does not store a package number. Artifact name: `artifact/ThreatPrevention-x86_64-<PKG_VERSION>.spk`.
 
@@ -209,7 +209,7 @@ sudo synopkg uninstall ThreatPrevention
 | Stale pidfile abort | Previous crash left `var/suricata.pid` | Current start script removes it if the pid is dead. |
 | `Cannot read properties of undefined (reading 'LineChart')` | DSM 7 has no SRM `SYNO.SDS.Chart.*`; stale `synoips.js?v=1.3.3-0926` | Hard-refresh or log out. JSLoad should fetch `tps-chart.js` and `synoips.js?v=<PKG_VERSION>`. |
 | `POST …/ThreatPrevention/api` or `/webman/tps-api` 404 | nginx snippet missing or not reloaded | `sudo nginx -s reload`. Confirm: `curl -sS -d 'api=SYNO.TPS.Sensor&method=get&version=1' http://127.0.0.1:19557/api`. |
-| `NoApiKeys` / `mapsjs/gen_204` `ERR_BLOCKED_BY_CLIENT` | Official Maps loader has no key; ad blocker | Ignore, or own key + GeoIP: [google-maps.md](google-maps.md). |
+| Google Maps error in Statistics | Older SPKs use the router's Google Maps loader | Upgrade to SPK `8.0.8-0071` or newer and reload DSM. See [event map setup](google-maps.md). |
 | `tps0` missing after enabling router copy | Tap is created only at package start; no `CAP_NET_ADMIN` | `setcap` then `synopkg restart`. [router-traffic-copy.md](router-traffic-copy.md). |
 | Labels such as `status_title_well` appear | DSM did not resolve the app's translation key | Upgrade to SPK `8.0.8-0069` or newer and reload the DSM desktop. The app uses bundled English for missing translations. |
 | `tps0` UP but only NAS traffic in Events | DSM Firewall blocking GRE/TZSP, OpenWrt WAN not L3, or MikroTik fasttrack | Allow proto 47 or UDP 37008 from the router LAN IP; set WAN ifname; disable fasttrack. |

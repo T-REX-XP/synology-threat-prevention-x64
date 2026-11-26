@@ -820,7 +820,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 			me.patchDisplayHtml();
 			me.patchPercentLabels();
 			me.patchMapSeverity();
-			me.patchGmapsKey();
+			me.disableGoogleMapLoader();
 			me.patchEventMap();
 			me.patchDeviceCellClick();
 			me.patchLogStorage();

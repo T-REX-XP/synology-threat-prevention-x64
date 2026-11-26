@@ -164,6 +164,21 @@ if not catalog:
     sys.exit("Official English strings could not be read")
 print("SYNO.SDS.TPS.Bridge.englishStrings = " + json.dumps(catalog, separators=(",", ":")) + ";")
 PY
+  MAP_ASSETS="${BRIDGE}/../map"
+  # Isolate Leaflet from any map library already loaded in the DSM desktop.
+  printf '%s\n' 'SYNO.SDS.TPS.Bridge.mapLibrary = (function () {' 'var exports = {}, module = {exports: exports};'
+  cat "${MAP_ASSETS}/leaflet.js"
+  printf '\n%s\n' 'return module.exports.noConflict();' '}());'
+  python3 - "${MAP_ASSETS}" <<'PY'
+import json, sys
+from pathlib import Path
+
+assets = Path(sys.argv[1])
+styles = (assets / "leaflet.css").read_text(encoding="utf-8")
+styles += (assets / "event-map.css").read_text(encoding="utf-8")
+print("SYNO.SDS.TPS.Bridge.mapStyles = " + json.dumps(styles) + ";")
+print("SYNO.SDS.TPS.Bridge.mapLand = " + (assets / "land.json").read_text(encoding="utf-8").strip() + ";")
+PY
   cat "${BRIDGE}/dsm7.js"
   printf '\n'
   cat "${BRIDGE}/settings-inject.js"
@@ -171,6 +186,7 @@ PY
   cat "${STAGING}/package/ui/synoips.js"
 } > "${STAGING}/package/ui/synoips.js.new"
 mv "${STAGING}/package/ui/synoips.js.new" "${STAGING}/package/ui/synoips.js"
+cp -a "${MAP_ASSETS}/Leaflet-LICENSE" "${STAGING}/package/ui/Leaflet-LICENSE"
 cp -a "${SRC}/package/ui/tps-chart.js" "${STAGING}/package/ui/tps-chart.js"
 rm -rf "${STAGING}/package/ui/bridge"
 rm -f "${STAGING}/package/ui/tps-bridge.js" \

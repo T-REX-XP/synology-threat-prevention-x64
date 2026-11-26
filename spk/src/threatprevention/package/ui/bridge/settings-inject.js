@@ -859,7 +859,7 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 					me.patchOverviewPathlinks(cls);
 				}
 				if (name === "SYNO.SDS.TPS.Utils.GoogleMapLoader") {
-					me.wrapGmapsLoader(cls);
+					me.disableGoogleMapLoader(cls);
 				}
 				if (name === "SYNO.SDS.TPS.Statistic.MapPanel") {
 					me.patchMapSeverity(cls);
