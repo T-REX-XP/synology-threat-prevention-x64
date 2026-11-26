@@ -180,6 +180,8 @@ rm -f "${STAGING}/package/ui/tps-bridge.js" \
   "${STAGING}/package/ui/app.css"
 python3 - "${STAGING}/package/ui/config" "${PKG_VER}" <<'PY'
 import json, sys
+from pathlib import Path
+
 path, ver = sys.argv[1], sys.argv[2]
 cfg = json.load(open(path, encoding="utf-8"))
 cfg.pop("tps-bridge.js", None)
@@ -194,6 +196,13 @@ cfg["tps-chart.js"] = {
     "SYNO.SDS.Chart.CreateAxis": {"type": "lib", "depend": []},
 }
 app = cfg["synoips.js"]["SYNO.SDS.TPS.Application"]
+# A fixed DSM icon path works at every desktop scale, including sizes missing
+# from the SRM icon set. The NAS installer has no macOS image tools.
+icon = "images/IDS_IPS_64.png"
+if not (Path(path).parent / icon).is_file():
+    sys.exit("Missing DSM launcher icon: " + icon)
+app["icon"] = icon
+cfg["synoips.js"]["SYNO.SDS.TPS.MainWindow"]["icon"] = icon
 app["depend"] = [d for d in (app.get("depend") or []) if d != "SYNO.SDS.TPS.Bridge"]
 for extra in ("SYNO.SDS.Chart.LineChart", "SYNO.SDS.Chart.PieChart"):
     if extra not in app["depend"]:
@@ -288,15 +297,6 @@ print("index keywords:", keys)
 PY
 mkdir -p "${STAGING}/package/indexdb/helpindexdb" "${STAGING}/package/indexdb/appindexdb"
 touch "${STAGING}/package/indexdb/helpindexdb/.keep" "${STAGING}/package/indexdb/appindexdb/.keep"
-if command -v sips >/dev/null 2>&1 && [ -f "${STAGING}/package/ui/images/IDS_IPS_256.png" ]; then
-  for sz in 16 32; do
-    if [ ! -f "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" ]; then
-      sips -z "${sz}" "${sz}" "${STAGING}/package/ui/images/IDS_IPS_256.png" \
-        --out "${STAGING}/package/ui/images/IDS_IPS_${sz}.png" >/dev/null
-    fi
-  done
-fi
-
 info "Stage SYNO.TPS.lib (Info listing only; aarch64 .so are not packed)"
 mkdir -p "${STAGING}/package/webapi"
 cp -a "${OFFICIAL}/package/webapi/SYNO.TPS.lib" "${STAGING}/package/webapi/SYNO.TPS.lib"

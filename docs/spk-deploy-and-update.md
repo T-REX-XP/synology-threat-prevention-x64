@@ -11,8 +11,8 @@ SPK scripts that matter: `postinst`, `start-stop-status`, `update-rules.sh`, `in
 | What | Where | Example |
 | --- | --- | --- |
 | Suricata engine | [`VERSION`](../VERSION) `SURICATA_VERSION` | `8.0.8` |
-| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0069` |
-| Override | env `TPS_PKG_VERSION` | `8.0.8-0070` |
+| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0070` |
+| Override | env `TPS_PKG_VERSION` | `8.0.8-0071` |
 
 `VERSION` does not store a package number. Artifact name: `artifact/ThreatPrevention-x86_64-<PKG_VERSION>.spk`.
 
@@ -203,7 +203,8 @@ sudo synopkg uninstall ThreatPrevention
 | Installed, Start in Package Center fails / flaps | Missing `liblz4` (setcap + `$ORIGIN` RUNPATH ignored); AF_PACKET denied; root-owned `etc/interface` (`0600`) | Confirm `/var/lib/tps` → `target/lib` and `getcap`. Then `setcap` + `synopkg start`. If `interface` is `root:root`: `sudo chown ThreatPrevention:ThreatPrevention /var/packages/ThreatPrevention/etc/interface && sudo chmod 644 …`. |
 | `Operation not permitted` on `ovs_eth0` | Package user, no file caps | Post-deploy `setcap` (see above). |
 | `error 319 invalid package privilege content` | SPK declared `run-as: root` or `tool.capabilities` | Unsigned packages cannot; keep `conf/privilege` as `run-as: package`. |
-| No Start Menu icon | DSM desktop cache | Package Center **Open**, or log out/in. One tile: `SYNO.SDS.TPS.Application`. |
+| Threat Prevention label with a blank icon | Older SPKs can request icon sizes omitted by the router package | Upgrade to SPK `8.0.8-0070` or newer and reload the DSM desktop. |
+| Threat Prevention launcher missing entirely | DSM desktop cache | Package Center **Open**, or log out/in. One tile: `SYNO.SDS.TPS.Application`. |
 | `fanout not supported` | `cluster_flow` on this kernel | Harmless if `Engine started` with `W: 1`. Current yaml omits fanout. |
 | Stale pidfile abort | Previous crash left `var/suricata.pid` | Current start script removes it if the pid is dead. |
 | `Cannot read properties of undefined (reading 'LineChart')` | DSM 7 has no SRM `SYNO.SDS.Chart.*`; stale `synoips.js?v=1.3.3-0926` | Hard-refresh or log out. JSLoad should fetch `tps-chart.js` and `synoips.js?v=<PKG_VERSION>`. |
