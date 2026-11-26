@@ -8,6 +8,28 @@ if (window.Ext && Ext.namespace) {
 SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 (function (B) {
 	var extra = {
+		patchLocalization: function () {
+			var catalog = this.englishStrings;
+			this.watchAssign("SYNO.SDS.TPS.Utils", "Helper", function () {
+				var helper = SYNO.SDS.TPS.Utils.Helper;
+				if (!helper || typeof helper.T !== "function") { return false; }
+				if (helper.T._tpsLocalization) { return true; }
+				var original = helper.T;
+				helper.T = function (section, key) {
+					var translated;
+					try { translated = original.apply(this, arguments); }
+					catch (e) { translated = ""; }
+					if (translated && translated !== key && translated !== section + ":" + key) {
+						return translated;
+					}
+					var strings = catalog[section];
+					var fallback = strings && strings[key];
+					return typeof fallback === "string" ? fallback : (translated || key);
+				};
+				helper.T._tpsLocalization = true;
+				return true;
+			});
+		},
 		injectModuleListCss: function () {
 			/* Sprite frames: 0 gray, -24px blue, -48px white, -72px silver.
 			   SRM selected chrome is dark so official CSS uses the white frame.
@@ -919,4 +941,5 @@ SYNO.SDS.TPS.Bridge = SYNO.SDS.TPS.Bridge || {};
 	for (k in extra) {
 		if (Object.prototype.hasOwnProperty.call(extra, k)) { B[k] = extra[k]; }
 	}
+	if (B.englishStrings) { B.patchLocalization(); }
 }(SYNO.SDS.TPS.Bridge));

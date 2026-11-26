@@ -142,6 +142,28 @@ BRIDGE="${SRC}/package/ui/bridge"
   printf '%s\n' "/* tps-bridge inlined — do not add ui/bridge/*.js to ui/config */"
   cat "${BRIDGE}/transport.js"
   printf '\n'
+  # Keep the locale files for DSM and provide English during a missed lookup.
+  python3 - "${STAGING}/package/ui/texts/enu/strings" <<'PY'
+import json, re, sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8-sig")
+entry = re.compile(
+    r'^[ \t]*\[([^\]\n]+)\][ \t]*$|'
+    r'^[ \t]*([\w.-]+)[ \t]*=[ \t]*"((?:\\.|[^"\\])*)"[ \t]*$',
+    re.MULTILINE,
+)
+section = ""
+catalog = {}
+for match in entry.finditer(source):
+    if match[1]:
+        section = match[1]
+    elif section and not section.startswith("*"):
+        catalog.setdefault(section, {})[match[2]] = re.sub(r'\\(["\\])', r'\1', match[3])
+if not catalog:
+    sys.exit("Official English strings could not be read")
+print("SYNO.SDS.TPS.Bridge.englishStrings = " + json.dumps(catalog, separators=(",", ":")) + ";")
+PY
   cat "${BRIDGE}/dsm7.js"
   printf '\n'
   cat "${BRIDGE}/settings-inject.js"

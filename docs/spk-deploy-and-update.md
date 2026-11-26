@@ -11,8 +11,8 @@ SPK scripts that matter: `postinst`, `start-stop-status`, `update-rules.sh`, `in
 | What | Where | Example |
 | --- | --- | --- |
 | Suricata engine | [`VERSION`](../VERSION) `SURICATA_VERSION` | `8.0.8` |
-| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0068` |
-| Override | env `TPS_PKG_VERSION` | `8.0.8-0069` |
+| SPK / `INFO` / `synoips.js?v=` | [`INFO`](../spk/src/threatprevention/INFO) | `8.0.8-0069` |
+| Override | env `TPS_PKG_VERSION` | `8.0.8-0070` |
 
 `VERSION` does not store a package number. Artifact name: `artifact/ThreatPrevention-x86_64-<PKG_VERSION>.spk`.
 
@@ -210,6 +210,7 @@ sudo synopkg uninstall ThreatPrevention
 | `POST …/ThreatPrevention/api` or `/webman/tps-api` 404 | nginx snippet missing or not reloaded | `sudo nginx -s reload`. Confirm: `curl -sS -d 'api=SYNO.TPS.Sensor&method=get&version=1' http://127.0.0.1:19557/api`. |
 | `NoApiKeys` / `mapsjs/gen_204` `ERR_BLOCKED_BY_CLIENT` | Official Maps loader has no key; ad blocker | Ignore, or own key + GeoIP: [google-maps.md](google-maps.md). |
 | `tps0` missing after enabling router copy | Tap is created only at package start; no `CAP_NET_ADMIN` | `setcap` then `synopkg restart`. [router-traffic-copy.md](router-traffic-copy.md). |
+| Labels such as `status_title_well` appear | DSM did not resolve the app's translation key | Upgrade to SPK `8.0.8-0069` or newer and reload the DSM desktop. The app uses bundled English for missing translations. |
 | `tps0` UP but only NAS traffic in Events | DSM Firewall blocking GRE/TZSP, OpenWrt WAN not L3, or MikroTik fasttrack | Allow proto 47 or UDP 37008 from the router LAN IP; set WAN ifname; disable fasttrack. |
 | Engine fails after enabling Hyperscan | Binary has no `libhs` | `accel.conf` falls back to `ac`/`bmh`. Confirm `--build-info` Hyperscan yes. [hw-acceleration.md](hw-acceleration.md). |
 | Telegram Apply empties `telegram.conf` | Password field sent `""` | Leave the token blank to keep the stored value; second Apply must not truncate `TOKEN=`. |
